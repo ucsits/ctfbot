@@ -1,6 +1,6 @@
 const { Command } = require('@sapphire/framework');
 const { PermissionFlagsBits, EmbedBuilder, ChannelType } = require('discord.js');
-const { getIdHints } = require('../utils');
+const { getIdHints, parseLocalDateToUTC } = require('../utils');
 
 class CreateCTFCommand extends Command {
 	constructor(context, options) {
@@ -25,13 +25,13 @@ class CreateCTFCommand extends Command {
 				.addStringOption(option =>
 					option
 						.setName('ctf_date')
-						.setDescription('CTF start date and time (YYYY-MM-DD HH:MM in your timezone)')
+						.setDescription('CTF start date and time (DD-MM-YYYY HH:MM in your timezone)')
 						.setRequired(true)
 				)
 				.addStringOption(option =>
 					option
 						.setName('timezone')
-						.setDescription('Your timezone (e.g., Asia/Bangkok, America/New_York)')
+						.setDescription('Your timezone (e.g., Asia/Jakarta, Europe/London)')
 						.setRequired(true)
 				)
 				.addStringOption(option =>
@@ -70,45 +70,12 @@ class CreateCTFCommand extends Command {
 		const banner = interaction.options.getAttachment('event_banner');
 
 		try {
-			// Parse date
-			const dateMatch = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})$/);
-			if (!dateMatch) {
-				return interaction.editReply('❌ Invalid date format. Please use: YYYY-MM-DD HH:MM (e.g., 2025-12-31 20:00)');
-			}
-
-			const [, year, month, day, hour, minute] = dateMatch;
-			
-			// Create date string with timezone
-			const dateString = `${year}-${month}-${day}T${hour}:${minute}:00`;
-			
-			// Parse date in specified timezone
+			// Parse date and convert to UTC
 			let eventDate;
 			try {
-				// Use Intl API to parse date in specified timezone
-				const formatter = new Intl.DateTimeFormat('en-US', {
-					timeZone: timezone,
-					year: 'numeric',
-					month: '2-digit',
-					day: '2-digit',
-					hour: '2-digit',
-					minute: '2-digit',
-					second: '2-digit',
-					hour12: false
-				});
-				
-				// Create a date object and convert to UTC
-				eventDate = new Date(`${dateString} ${timezone}`);
-				
-				// If the date is invalid, try parsing differently
-				if (isNaN(eventDate.getTime())) {
-					// Manual calculation using timezone offset
-					const baseDate = new Date(`${year}-${month}-${day}T${hour}:${minute}:00Z`);
-					const targetDate = new Date(baseDate.toLocaleString('en-US', { timeZone: timezone }));
-					const offset = baseDate.getTime() - targetDate.getTime();
-					eventDate = new Date(baseDate.getTime() - offset);
-				}
+				eventDate = parseLocalDateToUTC(dateStr, timezone);
 			} catch (error) {
-				return interaction.editReply('❌ Invalid timezone. Please use a valid timezone (e.g., Asia/Bangkok, America/New_York, Europe/London)');
+				return interaction.editReply(`❌ ${error.message}`);
 			}
 
 			if (eventDate < new Date()) {
