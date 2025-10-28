@@ -10,6 +10,7 @@
   "author": "UCS ITS",
   "license": "MIT",
   "dependencies": {
-    "@sapphire/framework": "^5.3.7"
+    "@sapphire/framework": "^5.3.7",
+    "discord.js": "14.x"
   }
 }
