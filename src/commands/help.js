@@ -1,4 +1,5 @@
 const { Command } = require('@sapphire/framework');
+const { getIdHints } = require('../utils');
 
 class HelpCommand extends Command {
 	constructor(context, options) {
@@ -27,7 +28,7 @@ class HelpCommand extends Command {
 				.setName(this.name)
 				.setDescription(this.description),
 			{
-				idHints: ['1432584481671217223']
+				idHints: getIdHints(this.name)
 			}
 		);
 	}

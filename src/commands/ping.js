@@ -1,4 +1,5 @@
 const { Command } = require('@sapphire/framework');
+const { getIdHints } = require('../utils');
 
 class PingCommand extends Command {
 	constructor(context, options) {
@@ -22,7 +23,7 @@ class PingCommand extends Command {
 			builder
 				.setName(this.name)
 				.setDescription(this.description),
-			{ idHints: ['1432584484813013002'] }
+			{ idHints: getIdHints(this.name) }
 		);
 	}
 
