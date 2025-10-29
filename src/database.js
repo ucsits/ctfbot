@@ -34,6 +34,7 @@ function initDatabase() {
 			description TEXT,
 			banner_url TEXT,
 			api_token TEXT,
+			archived INTEGER DEFAULT 0,
 			created_at TEXT DEFAULT CURRENT_TIMESTAMP,
 			created_by TEXT NOT NULL
 		)
@@ -141,6 +142,28 @@ const ctfOperations = {
 	deleteCTF: (id) => {
 		const stmt = db.prepare('DELETE FROM ctfs WHERE id = ?');
 		return stmt.run(id);
+	},
+
+	/**
+	 * Archive a CTF
+	 * 
+	 * @param {string} channelId - Discord channel ID
+	 * @returns {Object} Update operation result
+	 */
+	archiveCTF: (channelId) => {
+		const stmt = db.prepare('UPDATE ctfs SET archived = 1 WHERE channel_id = ?');
+		return stmt.run(channelId);
+	},
+
+	/**
+	 * Unarchive a CTF
+	 * 
+	 * @param {string} channelId - Discord channel ID
+	 * @returns {Object} Update operation result
+	 */
+	unarchiveCTF: (channelId) => {
+		const stmt = db.prepare('UPDATE ctfs SET archived = 0 WHERE channel_id = ?');
+		return stmt.run(channelId);
 	}
 };
 
