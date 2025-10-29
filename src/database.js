@@ -1,3 +1,9 @@
+/**
+ * Database operations for CTFBot
+ * Uses SQLite with better-sqlite3 for persistent storage
+ * @module database
+ */
+
 const Database = require('better-sqlite3');
 const path = require('path');
 
@@ -7,7 +13,12 @@ const db = new Database(path.join(__dirname, '..', 'ctfbot.db'));
 // Enable foreign keys
 db.pragma('foreign_keys = ON');
 
-// Initialize database schema
+/**
+ * Initialize database schema
+ * Creates tables if they don't exist
+ * 
+ * @returns {void}
+ */
 function initDatabase() {
 	// Create CTFs table
 	db.exec(`
@@ -44,10 +55,25 @@ function initDatabase() {
 	console.log('Database initialized successfully');
 }
 
-// CTF Operations
+/**
+ * CTF database operations
+ * @namespace ctfOperations
+ */
 const ctfOperations = {
 	/**
 	 * Create a new CTF entry
+	 * 
+	 * @param {Object} data - CTF data
+	 * @param {string} data.guild_id - Discord guild ID
+	 * @param {string} data.channel_id - Discord channel ID
+	 * @param {string} data.event_id - Discord event ID
+	 * @param {string} data.ctf_name - Name of the CTF
+	 * @param {string} data.ctf_base_url - Base URL of the CTF
+	 * @param {string} data.ctf_date - ISO string of CTF date
+	 * @param {string} [data.description] - CTF description
+	 * @param {string} [data.banner_url] - Banner image URL
+	 * @param {string} data.created_by - User ID of creator
+	 * @returns {number} The ID of the created CTF
 	 */
 	createCTF: (data) => {
 		const stmt = db.prepare(`
@@ -60,6 +86,9 @@ const ctfOperations = {
 
 	/**
 	 * Get CTF by channel ID
+	 * 
+	 * @param {string} channelId - Discord channel ID
+	 * @returns {Object|undefined} CTF data or undefined if not found
 	 */
 	getCTFByChannelId: (channelId) => {
 		const stmt = db.prepare('SELECT * FROM ctfs WHERE channel_id = ?');
@@ -68,6 +97,9 @@ const ctfOperations = {
 
 	/**
 	 * Get CTF by ID
+	 * 
+	 * @param {number} id - CTF ID
+	 * @returns {Object|undefined} CTF data or undefined if not found
 	 */
 	getCTFById: (id) => {
 		const stmt = db.prepare('SELECT * FROM ctfs WHERE id = ?');
@@ -76,6 +108,9 @@ const ctfOperations = {
 
 	/**
 	 * Get all CTFs for a guild
+	 * 
+	 * @param {string} guildId - Discord guild ID
+	 * @returns {Object[]} Array of CTF data
 	 */
 	getCTFsByGuild: (guildId) => {
 		const stmt = db.prepare('SELECT * FROM ctfs WHERE guild_id = ? ORDER BY ctf_date DESC');
@@ -84,6 +119,9 @@ const ctfOperations = {
 
 	/**
 	 * Delete a CTF
+	 * 
+	 * @param {number} id - CTF ID
+	 * @returns {Object} Delete operation result
 	 */
 	deleteCTF: (id) => {
 		const stmt = db.prepare('DELETE FROM ctfs WHERE id = ?');
@@ -91,10 +129,21 @@ const ctfOperations = {
 	}
 };
 
-// Registration Operations
+/**
+ * CTF registration database operations
+ * @namespace registrationOperations
+ */
 const registrationOperations = {
 	/**
-	 * Register a user for a CTF
+	 * Register a user for a CTF (UPSERT operation)
+	 * 
+	 * @param {Object} data - Registration data
+	 * @param {number} data.ctf_id - CTF ID
+	 * @param {string} data.user_id - Discord user ID
+	 * @param {string} data.username - Username on CTF platform
+	 * @param {string} [data.ctfd_user_id] - CTFd user ID
+	 * @param {string} [data.ctfd_team_name] - CTFd team name
+	 * @returns {Object} Insert/update operation result
 	 */
 	registerUser: (data) => {
 		const stmt = db.prepare(`
@@ -110,6 +159,9 @@ const registrationOperations = {
 
 	/**
 	 * Get all registrations for a CTF
+	 * 
+	 * @param {number} ctfId - CTF ID
+	 * @returns {Object[]} Array of registration data
 	 */
 	getRegistrationsByCTF: (ctfId) => {
 		const stmt = db.prepare('SELECT * FROM ctf_registrations WHERE ctf_id = ? ORDER BY registered_at ASC');
@@ -118,6 +170,10 @@ const registrationOperations = {
 
 	/**
 	 * Get user registration for a specific CTF
+	 * 
+	 * @param {number} ctfId - CTF ID
+	 * @param {string} userId - Discord user ID
+	 * @returns {Object|undefined} Registration data or undefined if not found
 	 */
 	getUserRegistration: (ctfId, userId) => {
 		const stmt = db.prepare('SELECT * FROM ctf_registrations WHERE ctf_id = ? AND user_id = ?');
@@ -126,6 +182,10 @@ const registrationOperations = {
 
 	/**
 	 * Delete a registration
+	 * 
+	 * @param {number} ctfId - CTF ID
+	 * @param {string} userId - Discord user ID
+	 * @returns {Object} Delete operation result
 	 */
 	deleteRegistration: (ctfId, userId) => {
 		const stmt = db.prepare('DELETE FROM ctf_registrations WHERE ctf_id = ? AND user_id = ?');
