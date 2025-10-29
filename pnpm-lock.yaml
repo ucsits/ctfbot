@@ -8,9 +8,6 @@ importers:
 
   .:
     dependencies:
-      '@ctfdio/ctfd-js':
-        specifier: ^0.0.19
-        version: 0.0.19
       '@sapphire/framework':
         specifier: ^5.3.7
         version: 5.3.7
@@ -25,9 +22,6 @@ importers:
         version: 17.2.3
 
 packages:
-
-  '@ctfdio/ctfd-js@0.0.19':
-    resolution: {integrity: sha512-59aLKJEV9aIuqqkPVazm/zTDHL7GSbJ4gmAUGnstrEkU8MYlmIRIHQEX+PWwnd/48JnUlT7M1Z5pafXvFYc2fw==}
 
   '@discordjs/builders@1.13.0':
     resolution: {integrity: sha512-COK0uU6ZaJI+LA67H/rp8IbEkYwlZf3mAoBI5wtPh5G5cbEQGNhVpzINg2f/6+q/YipnNIKy6fJDg6kMUKUw4Q==}
@@ -135,14 +129,8 @@ packages:
   buffer@5.7.1:
     resolution: {integrity: sha512-EHcyIPBQ4BSGlvjB16k5KgAJ27CIsHY/2JBmCRReo48y9rQ3MaUzWX3KVlBa4U7MyX02HdVj0K7C3WaB3ju7FQ==}
 
-  cash-dom@8.1.5:
-    resolution: {integrity: sha512-/BS05CfzyHR5xT2ksKj1sDLPaOv5rSmIwoGxNgdKwUtnIuiJ5neMxVEmZxvfyJiSjGbOMD0Lwe+9v+fszDqHew==}
-
   chownr@1.1.4:
     resolution: {integrity: sha512-jJ0bqzaylmJtVnNgzTeSOs8DPavpbYgEr/b0YL8/2GO3xJEhInFmhKMUnEJQjZumK7KXGFhUy89PrsJWlakBVg==}
-
-  dayjs@1.11.18:
-    resolution: {integrity: sha512-zFBQ7WFRvVRhKcWoUh+ZA1g2HVgUbsZm9sbddh8EC5iv93sui8DVVz1Npvz+r6meo9VKfa8NyLWBsQK1VvIKPA==}
 
   decompress-response@6.0.0:
     resolution: {integrity: sha512-aW35yZM6Bb/4oJlZncMH2LCoZtJXTRxES17vE3hoRiowU2kWHaJKFkSBDnDR+cm9J+9QhXmREyIfv0pji9ejCQ==}
@@ -185,9 +173,6 @@ packages:
 
   github-from-package@0.0.0:
     resolution: {integrity: sha512-SyHy3T1v2NUXn29OsWdxmK6RwHD+vkj3v8en8AOBZ1wBQ/hCAQ5bAQTD02kW4W9tUp/3Qh6J8r9EvntiyCmOOw==}
-
-  howler@2.2.4:
-    resolution: {integrity: sha512-iARIBPgcQrwtEr+tALF+rapJ8qSc+Set2GJQl7xT1MQzWaVkFebdJhR3alVlSiUf5U7nAANKuj3aWpwerocD5w==}
 
   ieee754@1.2.1:
     resolution: {integrity: sha512-dcyqhDvX1C46lXZcVqCpK+FtMRQVdIMN6/Df5js2zouUsqG7I6sFxitIC+7KYK29KdXOLHdu9zL4sFnoVQnqaA==}
@@ -290,9 +275,6 @@ packages:
   util-deprecate@1.0.2:
     resolution: {integrity: sha512-EPD5q1uXyFxJpCrLnCc1nHnq3gOa6DZBocAIiI2TaSCA7VCJ1UJDMagCzIkXNsUYfD1daK//LTEQ8xiIbrHtcw==}
 
-  whatwg-fetch@3.6.20:
-    resolution: {integrity: sha512-EqhiFU6daOA8kpjOWTL0olhVOF3i7OrFzSYiGsEMB8GcXS+RrzauAERX65xMeNWVqxA6HXH2m69Z9LaKKdisfg==}
-
   wrappy@1.0.2:
     resolution: {integrity: sha512-l4Sp/DRseor9wL6EvV2+TuQn63dMkPjZ/sp9XkghTEbV9KlPS1xUsZ3u7/IQO4wxtcFB4bgpQPRcR3QCvezPcQ==}
 
@@ -309,13 +291,6 @@ packages:
         optional: true
 
 snapshots:
-
-  '@ctfdio/ctfd-js@0.0.19':
-    dependencies:
-      cash-dom: 8.1.5
-      dayjs: 1.11.18
-      howler: 2.2.4
-      whatwg-fetch: 3.6.20
 
   '@discordjs/builders@1.13.0':
     dependencies:
@@ -450,11 +425,7 @@ snapshots:
       base64-js: 1.5.1
       ieee754: 1.2.1
 
-  cash-dom@8.1.5: {}
-
   chownr@1.1.4: {}
-
-  dayjs@1.11.18: {}
 
   decompress-response@6.0.0:
     dependencies:
@@ -500,8 +471,6 @@ snapshots:
   fs-constants@1.0.0: {}
 
   github-from-package@0.0.0: {}
-
-  howler@2.2.4: {}
 
   ieee754@1.2.1: {}
 
@@ -610,8 +579,6 @@ snapshots:
   undici@6.21.3: {}
 
   util-deprecate@1.0.2: {}
-
-  whatwg-fetch@3.6.20: {}
 
   wrappy@1.0.2: {}
 

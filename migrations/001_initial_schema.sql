@@ -42,6 +42,3 @@ CREATE TABLE IF NOT EXISTS migrations (
 	name TEXT NOT NULL UNIQUE,
 	applied_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
-
--- Record this migration
-INSERT OR IGNORE INTO migrations (name) VALUES ('001_initial_schema');

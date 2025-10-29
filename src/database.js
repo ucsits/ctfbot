@@ -6,6 +6,7 @@
 
 const Database = require('better-sqlite3');
 const path = require('path');
+const { runMigrations } = require('./lib/migrations');
 
 // Initialize database
 const db = new Database(path.join(__dirname, '..', 'ctfbot.db'));
@@ -32,6 +33,7 @@ function initDatabase() {
 			ctf_date TEXT NOT NULL,
 			description TEXT,
 			banner_url TEXT,
+			api_token TEXT,
 			created_at TEXT DEFAULT CURRENT_TIMESTAMP,
 			created_by TEXT NOT NULL
 		)
@@ -53,6 +55,18 @@ function initDatabase() {
 	`);
 
 	console.log('Database initialized successfully');
+
+	// Run migrations to apply any schema updates
+	const migrationsDir = path.join(__dirname, '..', 'migrations');
+	const result = runMigrations(db, migrationsDir);
+	
+	if (result.error) {
+		console.error('❌ Migration error:', result.error);
+	} else if (result.applied.length > 0) {
+		console.log(`✅ Applied ${result.applied.length} migration(s): ${result.applied.join(', ')}`);
+	} else {
+		console.log('✅ All migrations up to date');
+	}
 }
 
 /**

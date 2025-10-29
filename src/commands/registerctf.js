@@ -78,6 +78,10 @@ class RegisterCTFCommand extends Command {
 					ctfdData = await this.fetchCTFdUserData(effectiveCtfdUrl, username, ctf);
 				} catch (error) {
 					this.container.logger.warn(`Failed to fetch CTFd data: ${error.message}`);
+					// Return error to user if CTFd verification fails
+					return interaction.editReply({
+						content: `❌ Failed to verify user on CTFd platform.\n**Error:** ${error.message}\n\nPlease check your username and try again.`
+					});
 				}
 			}
 
@@ -126,7 +130,7 @@ class RegisterCTFCommand extends Command {
 			await channel.send({ embeds: [announceEmbed] });
 
 			// Log registration
-			this.container.logger.info(`CTF Registration: ${userTag} (${userId}) registered as ${username} for ${ctfName}`);
+			this.container.logger.info(`CTF Registration: ${userTag} (${userId}) registered as ${username} for ${ctf.ctf_name}`);
 
 		} catch (error) {
 			this.container.logger.error('Error registering for CTF:', error);
@@ -142,48 +146,60 @@ class RegisterCTFCommand extends Command {
 	 * @returns {Promise<Object>} User data including userId and teamName
 	 */
 	async fetchCTFdUserData(ctfdUrl, username, ctf) {
-		// This is a placeholder for CTFd integration
-		// In a real implementation, you would:
-		// 1. Use the @ctfdio/ctfd-js library
-		// 2. Authenticate with CTFd API token (from ctf.api_token or environment variables)
-		// 3. Fetch user details by username
-		// 4. Fetch team details if user is in a team
+		const { CTFdClient } = require('../lib/ctfd');
 		
-		// Get API token from CTF record or fall back to environment variable
-		const apiToken = ctf.api_token || process.env.CTFD_API_TOKEN;
+		// Get API token from CTF record
+		const apiToken = ctf.api_token;
 		
 		if (!apiToken) {
-			throw new Error('CTFd integration requires API token. Please provide api_token when creating CTF or set CTFD_API_TOKEN environment variable.');
+			throw new Error('CTFd API token not configured. Please provide api_token when creating this CTF with /createctf.');
 		}
 		
-		// Example implementation (requires CTFd API token):
-		/*
-		const { CTFd } = require('@ctfdio/ctfd-js');
-		const ctfd = new CTFd(ctfdUrl, apiToken);
-		
-		// Search for user
-		const users = await ctfd.getUsers({ q: username });
-		if (users.length === 0) {
-			throw new Error('User not found on CTFd');
+		try {
+			// Initialize CTFd client
+			const ctfd = new CTFdClient(ctfdUrl, apiToken);
+			
+			// Search for user by username
+			this.container.logger.info(`Searching for user "${username}" on CTFd: ${ctfdUrl}`);
+			const users = await ctfd.getUsers({ q: username });
+			
+			if (!users || users.length === 0) {
+				throw new Error(`User "${username}" not found on CTFd platform. Make sure you're using the exact username from your CTFd account.`);
+			}
+			
+			// Find exact match (case-insensitive)
+			const user = users.find(u => u.name.toLowerCase() === username.toLowerCase()) || users[0];
+			this.container.logger.info(`Found CTFd user: ${user.name} (ID: ${user.id})`);
+			
+			let teamName = null;
+			
+			// Fetch team if user has one
+			if (user.team_id) {
+				try {
+					const team = await ctfd.getTeam(user.team_id);
+					teamName = team.name;
+					this.container.logger.info(`User is in team: ${teamName} (ID: ${user.team_id})`);
+				} catch (teamError) {
+					this.container.logger.warn(`Failed to fetch team info: ${teamError.message}`);
+					// Don't fail registration if team fetch fails
+				}
+			}
+			
+			return {
+				userId: user.id,
+				teamName: teamName
+			};
+		} catch (error) {
+			// Re-throw with more helpful error message
+			if (error.message.includes('not found')) {
+				throw error; // Already has a good message
+			}
+			if (error.status) {
+				// HTTP error from CTFd API
+				throw new Error(`CTFd API error (${error.status}): Failed to connect to CTFd`);
+			}
+			throw new Error(`Failed to verify on CTFd: ${error.message}`);
 		}
-		
-		const user = users[0];
-		let teamName = null;
-		
-		// Fetch team if user has one
-		if (user.team_id) {
-			const team = await ctfd.getTeam(user.team_id);
-			teamName = team.name;
-		}
-		
-		return {
-			userId: user.id,
-			teamName: teamName
-		};
-		*/
-
-		// For now, return null to indicate CTFd integration is not configured
-		throw new Error('CTFd integration requires API token configuration');
 	}
 }
 

@@ -45,7 +45,7 @@ class CreateCTFCommand extends Command {
 					option
 						.setName('api_token')
 						.setDescription('CTFd API token for automatic registration integration (optional)')
-						.setRequired(true)
+						.setRequired(false)
 				)
 				.addStringOption(option =>
 					option
@@ -187,7 +187,7 @@ class CreateCTFCommand extends Command {
 
 			// Store CTF details in database
 			try {
-				ctfOperations.createCTF({
+				const ctfId = ctfOperations.createCTF({
 					guild_id: interaction.guild.id,
 					channel_id: ctfChannel.id,
 					event_id: scheduledEvent.id,
@@ -199,10 +199,13 @@ class CreateCTFCommand extends Command {
 					api_token: apiToken,
 					created_by: interaction.user.id
 				});
-				this.container.logger.info(`Stored CTF "${ctfName}" in database (channel: ${ctfChannel.id})`);
+				this.container.logger.info(`Stored CTF "${ctfName}" in database (ID: ${ctfId}, channel: ${ctfChannel.id})`);
 			} catch (dbError) {
 				this.container.logger.error('Failed to store CTF in database:', dbError);
-				// Continue execution even if database fails
+				// Send warning message to the channel
+				await ctfChannel.send({
+					content: '⚠️ **Warning**: CTF was created but failed to register in the database. The `/registerctf` command may not work in this channel.\n\nError: ' + dbError.message
+				});
 			}
 
 			// Reply to the command
