@@ -141,6 +141,7 @@ class CreateCTFCommand extends Command {
 				.setDescription(description)
 				.addFields(
 					{ name: '📅 Start Time', value: `<t:${Math.floor(eventDate.getTime() / 1000)}:F>`, inline: false },
+					{ name: '🌐 CTF URL', value: ctfBaseUrl, inline: false },
 					{ name: '🔗 Event', value: `[View Event](${scheduledEvent.url})`, inline: false },
 					{ name: '📝 Register', value: 'Use `/registerctf <username>` to register your participation!', inline: false }
 				)
