@@ -43,6 +43,12 @@ class CreateCTFCommand extends Command {
 				)
 				.addStringOption(option =>
 					option
+						.setName('api_token')
+						.setDescription('CTFd API token for automatic registration integration (optional)')
+						.setRequired(true)
+				)
+				.addStringOption(option =>
+					option
 						.setName('ctf_end_date')
 						.setDescription('CTF end date and time (DD-MM-YYYY HH:MM in your timezone, defaults to +24h)')
 						.setRequired(false)
@@ -51,12 +57,6 @@ class CreateCTFCommand extends Command {
 					option
 						.setName('event_description')
 						.setDescription('Description of the CTF event')
-						.setRequired(false)
-				)
-				.addStringOption(option =>
-					option
-						.setName('api_token')
-						.setDescription('CTFd API token for automatic registration integration (optional)')
 						.setRequired(false)
 				)
 				.addAttachmentOption(option =>
