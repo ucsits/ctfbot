@@ -53,6 +53,12 @@ class CreateCTFCommand extends Command {
 						.setDescription('Description of the CTF event')
 						.setRequired(false)
 				)
+				.addStringOption(option =>
+					option
+						.setName('api_token')
+						.setDescription('CTFd API token for automatic registration integration (optional)')
+						.setRequired(false)
+				)
 				.addAttachmentOption(option =>
 					option
 						.setName('event_banner')
@@ -81,6 +87,7 @@ class CreateCTFCommand extends Command {
 		const endDateStr = interaction.options.getString('ctf_end_date');
 		const ctfBaseUrl = interaction.options.getString('ctf_base_url');
 		const timezone = interaction.options.getString('timezone');
+		const apiToken = interaction.options.getString('api_token');
 		const description = interaction.options.getString('event_description') || `Join us for ${ctfName}!`;
 		const banner = interaction.options.getAttachment('event_banner');
 
@@ -189,6 +196,7 @@ class CreateCTFCommand extends Command {
 					ctf_date: eventDate.toISOString(),
 					description: description,
 					banner_url: banner ? banner.url : null,
+					api_token: apiToken,
 					created_by: interaction.user.id
 				});
 				this.container.logger.info(`Stored CTF "${ctfName}" in database (channel: ${ctfChannel.id})`);

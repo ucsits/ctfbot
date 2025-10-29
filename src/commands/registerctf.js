@@ -65,8 +65,8 @@ class RegisterCTFCommand extends Command {
 			if (effectiveCtfdUrl) {
 				try {
 					// Note: CTFd integration requires authentication token
-					// This is a placeholder for future implementation
-					ctfdData = await this.fetchCTFdUserData(effectiveCtfdUrl, username);
+					// Pass the CTF object to access api_token
+					ctfdData = await this.fetchCTFdUserData(effectiveCtfdUrl, username, ctf);
 				} catch (error) {
 					this.container.logger.warn(`Failed to fetch CTFd data: ${error.message}`);
 				}
@@ -129,20 +129,28 @@ class RegisterCTFCommand extends Command {
 	 * Fetch user data from CTFd instance
 	 * @param {string} ctfdUrl - The CTFd instance URL
 	 * @param {string} username - The username to look up
+	 * @param {Object} ctf - The CTF object from database
 	 * @returns {Promise<Object>} User data including userId and teamName
 	 */
-	async fetchCTFdUserData(ctfdUrl, username) {
+	async fetchCTFdUserData(ctfdUrl, username, ctf) {
 		// This is a placeholder for CTFd integration
 		// In a real implementation, you would:
 		// 1. Use the @ctfdio/ctfd-js library
-		// 2. Authenticate with CTFd API token (stored in environment variables)
+		// 2. Authenticate with CTFd API token (from ctf.api_token or environment variables)
 		// 3. Fetch user details by username
 		// 4. Fetch team details if user is in a team
+		
+		// Get API token from CTF record or fall back to environment variable
+		const apiToken = ctf.api_token || process.env.CTFD_API_TOKEN;
+		
+		if (!apiToken) {
+			throw new Error('CTFd integration requires API token. Please provide api_token when creating CTF or set CTFD_API_TOKEN environment variable.');
+		}
 		
 		// Example implementation (requires CTFd API token):
 		/*
 		const { CTFd } = require('@ctfdio/ctfd-js');
-		const ctfd = new CTFd(ctfdUrl, process.env.CTFD_API_TOKEN);
+		const ctfd = new CTFd(ctfdUrl, apiToken);
 		
 		// Search for user
 		const users = await ctfd.getUsers({ q: username });

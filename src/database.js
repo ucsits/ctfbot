@@ -72,13 +72,14 @@ const ctfOperations = {
 	 * @param {string} data.ctf_date - ISO string of CTF date
 	 * @param {string} [data.description] - CTF description
 	 * @param {string} [data.banner_url] - Banner image URL
+	 * @param {string} [data.api_token] - CTFd API token
 	 * @param {string} data.created_by - User ID of creator
 	 * @returns {number} The ID of the created CTF
 	 */
 	createCTF: (data) => {
 		const stmt = db.prepare(`
-			INSERT INTO ctfs (guild_id, channel_id, event_id, ctf_name, ctf_base_url, ctf_date, description, banner_url, created_by)
-			VALUES (@guild_id, @channel_id, @event_id, @ctf_name, @ctf_base_url, @ctf_date, @description, @banner_url, @created_by)
+			INSERT INTO ctfs (guild_id, channel_id, event_id, ctf_name, ctf_base_url, ctf_date, description, banner_url, api_token, created_by)
+			VALUES (@guild_id, @channel_id, @event_id, @ctf_name, @ctf_base_url, @ctf_date, @description, @banner_url, @api_token, @created_by)
 		`);
 		const result = stmt.run(data);
 		return result.lastInsertRowid;
