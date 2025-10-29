@@ -36,11 +36,20 @@ class RegisterCTFCommand extends Command {
 	}
 
 	async chatInputRun(interaction) {
-		// Check if command is used in a CTF channel
+		// Check if command is used in a CTF channel (inside the CTF category)
 		const channel = interaction.channel;
-		if (!channel.name.startsWith('ctf-')) {
+		const categoryId = process.env.CTF_CATEGORY_ID;
+		
+		if (!categoryId) {
 			return interaction.reply({
-				content: '❌ This command can only be used in CTF channels (channels starting with `ctf-`).',
+				content: '❌ CTF category is not configured. Please set CTF_CATEGORY_ID in environment variables.',
+				ephemeral: true
+			});
+		}
+
+		if (channel.parentId !== categoryId) {
+			return interaction.reply({
+				content: '❌ This command can only be used in CTF channels (channels within the CTF category).',
 				ephemeral: true
 			});
 		}
