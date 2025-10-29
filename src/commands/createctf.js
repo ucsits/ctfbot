@@ -43,6 +43,12 @@ class CreateCTFCommand extends Command {
 				)
 				.addStringOption(option =>
 					option
+						.setName('ctf_end_date')
+						.setDescription('CTF end date and time (DD-MM-YYYY HH:MM in your timezone, defaults to +24h)')
+						.setRequired(false)
+				)
+				.addStringOption(option =>
+					option
 						.setName('event_description')
 						.setDescription('Description of the CTF event')
 						.setRequired(false)
@@ -72,13 +78,14 @@ class CreateCTFCommand extends Command {
 
 		const ctfName = interaction.options.getString('ctf_name');
 		const dateStr = interaction.options.getString('ctf_date');
+		const endDateStr = interaction.options.getString('ctf_end_date');
 		const ctfBaseUrl = interaction.options.getString('ctf_base_url');
 		const timezone = interaction.options.getString('timezone');
 		const description = interaction.options.getString('event_description') || `Join us for ${ctfName}!`;
 		const banner = interaction.options.getAttachment('event_banner');
 
 		try {
-			// Parse date and convert to UTC
+			// Parse start date and convert to UTC
 			let eventDate;
 			try {
 				eventDate = parseLocalDateToUTC(dateStr, timezone);
@@ -87,7 +94,24 @@ class CreateCTFCommand extends Command {
 			}
 
 			if (eventDate < new Date()) {
-				return interaction.editReply('❌ Event date must be in the future.');
+				return interaction.editReply('❌ Event start date must be in the future.');
+			}
+
+			// Parse end date if provided, otherwise default to +24 hours
+			let eventEndDate;
+			if (endDateStr) {
+				try {
+					eventEndDate = parseLocalDateToUTC(endDateStr, timezone);
+				} catch (error) {
+					return interaction.editReply(`❌ Invalid end date: ${error.message}`);
+				}
+
+				if (eventEndDate <= eventDate) {
+					return interaction.editReply('❌ Event end date must be after the start date.');
+				}
+			} else {
+				// Default to 24 hours after start
+				eventEndDate = new Date(eventDate.getTime() + 24 * 60 * 60 * 1000);
 			}
 
 			// Get or create CTF category
@@ -125,7 +149,7 @@ class CreateCTFCommand extends Command {
 				name: ctfName,
 				description: description,
 				scheduledStartTime: eventDate,
-				scheduledEndTime: new Date(eventDate.getTime() + 24 * 60 * 60 * 1000), // Default 24 hours duration
+				scheduledEndTime: eventEndDate,
 				privacyLevel: 2, // GUILD_ONLY
 				entityType: 3, // EXTERNAL
 				entityMetadata: {
@@ -140,7 +164,8 @@ class CreateCTFCommand extends Command {
 				.setTitle(`🚩 ${ctfName}`)
 				.setDescription(description)
 				.addFields(
-					{ name: '📅 Start Time', value: `<t:${Math.floor(eventDate.getTime() / 1000)}:F>`, inline: false },
+					{ name: '⏰ Start Time', value: `<t:${Math.floor(eventDate.getTime() / 1000)}:F>`, inline: true },
+					{ name: '⏱️ End Time', value: `<t:${Math.floor(eventEndDate.getTime() / 1000)}:F>`, inline: true },
 					{ name: '🌐 CTF URL', value: ctfBaseUrl, inline: false },
 					{ name: '🔗 Event', value: `[View Event](${scheduledEvent.url})`, inline: false },
 					{ name: '📝 Register', value: 'Use `/registerctf <username>` to register your participation!', inline: false }
