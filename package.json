@@ -14,7 +14,11 @@
   "dependencies": {
     "@ctfdio/ctfd-js": "^0.0.19",
     "@sapphire/framework": "^5.3.7",
+    "better-sqlite3": "^12.4.1",
     "discord.js": "14.x",
     "dotenv": "^17.2.3"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["better-sqlite3"]
   }
 }

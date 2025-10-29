@@ -1,6 +1,7 @@
 const { Command } = require('@sapphire/framework');
 const { EmbedBuilder } = require('discord.js');
 const { getIdHints } = require('../utils');
+const { ctfOperations, registrationOperations } = require('../database');
 
 class RegisterCTFCommand extends Command {
 	constructor(context, options) {
@@ -52,26 +53,44 @@ class RegisterCTFCommand extends Command {
 		const userTag = interaction.user.tag;
 
 		try {
-			// Store registration data (in a real implementation, this would be stored in a database)
-			// For now, we'll create an embed and send it to the channel
-			const ctfName = channel.name.replace('ctf-', '').replace(/-/g, ' ').toUpperCase();
+			// Get CTF from database
+			const ctf = ctfOperations.getCTFByChannelId(channel.id);
+			if (!ctf) {
+				return interaction.editReply('❌ This channel is not registered as a CTF channel in the database.');
+			}
 
 			// If CTFd URL is provided, attempt to fetch user details
 			let ctfdData = null;
-			if (ctfdUrl) {
+			const effectiveCtfdUrl = ctfdUrl || ctf.ctf_base_url;
+			if (effectiveCtfdUrl) {
 				try {
 					// Note: CTFd integration requires authentication token
 					// This is a placeholder for future implementation
-					ctfdData = await this.fetchCTFdUserData(ctfdUrl, username);
+					ctfdData = await this.fetchCTFdUserData(effectiveCtfdUrl, username);
 				} catch (error) {
 					this.container.logger.warn(`Failed to fetch CTFd data: ${error.message}`);
 				}
 			}
 
+			// Store registration in database
+			try {
+				registrationOperations.registerUser({
+					ctf_id: ctf.id,
+					user_id: userId,
+					username: username,
+					ctfd_user_id: ctfdData?.userId || null,
+					ctfd_team_name: ctfdData?.teamName || null
+				});
+				this.container.logger.info(`Registered ${userTag} for CTF "${ctf.ctf_name}"`);
+			} catch (dbError) {
+				this.container.logger.error('Failed to store registration:', dbError);
+				return interaction.editReply('❌ Failed to register. Please try again later.');
+			}
+
 			const embed = new EmbedBuilder()
 				.setColor(0x00FF00)
 				.setTitle('✅ Registration Successful')
-				.setDescription(`You have been registered for **${ctfName}**!`)
+				.setDescription(`You have been registered for **${ctf.ctf_name}**!`)
 				.addFields(
 					{ name: '👤 Discord User', value: `${interaction.user}`, inline: true },
 					{ name: '🏷️ CTF Username', value: username, inline: true }

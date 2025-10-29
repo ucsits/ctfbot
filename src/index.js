@@ -1,6 +1,10 @@
 const { SapphireClient } = require('@sapphire/framework');
 const { GatewayIntentBits } = require('discord.js');
+const { initDatabase } = require('./database');
 require('dotenv/config');
+
+// Initialize database
+initDatabase();
 
 // Create a new Sapphire client instance
 const client = new SapphireClient({

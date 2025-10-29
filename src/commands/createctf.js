@@ -1,6 +1,7 @@
 const { Command } = require('@sapphire/framework');
 const { PermissionFlagsBits, EmbedBuilder, ChannelType } = require('discord.js');
 const { getIdHints, parseLocalDateToUTC } = require('../utils');
+const { ctfOperations } = require('../database');
 
 class CreateCTFCommand extends Command {
 	constructor(context, options) {
@@ -26,6 +27,12 @@ class CreateCTFCommand extends Command {
 					option
 						.setName('ctf_date')
 						.setDescription('CTF start date and time (DD-MM-YYYY HH:MM in your timezone)')
+						.setRequired(true)
+				)
+				.addStringOption(option =>
+					option
+						.setName('ctf_base_url')
+						.setDescription('Base URL of the CTF (e.g., https://ctf.example.com)')
 						.setRequired(true)
 				)
 				.addStringOption(option =>
@@ -65,6 +72,7 @@ class CreateCTFCommand extends Command {
 
 		const ctfName = interaction.options.getString('ctf_name');
 		const dateStr = interaction.options.getString('ctf_date');
+		const ctfBaseUrl = interaction.options.getString('ctf_base_url');
 		const timezone = interaction.options.getString('timezone');
 		const description = interaction.options.getString('event_description') || `Join us for ${ctfName}!`;
 		const banner = interaction.options.getAttachment('event_banner');
@@ -143,6 +151,25 @@ class CreateCTFCommand extends Command {
 			}
 
 			await ctfChannel.send({ embeds: [welcomeEmbed] });
+
+			// Store CTF details in database
+			try {
+				ctfOperations.createCTF({
+					guild_id: interaction.guild.id,
+					channel_id: ctfChannel.id,
+					event_id: scheduledEvent.id,
+					ctf_name: ctfName,
+					ctf_base_url: ctfBaseUrl,
+					ctf_date: eventDate.toISOString(),
+					description: description,
+					banner_url: banner ? banner.url : null,
+					created_by: interaction.user.id
+				});
+				this.container.logger.info(`Stored CTF "${ctfName}" in database (channel: ${ctfChannel.id})`);
+			} catch (dbError) {
+				this.container.logger.error('Failed to store CTF in database:', dbError);
+				// Continue execution even if database fails
+			}
 
 			// Reply to the command
 			const embed = new EmbedBuilder()

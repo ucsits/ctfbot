@@ -1,6 +1,11 @@
 # Auto-generated command IDs
 src/commandIds.json
 
+# Database
+*.db
+*.db-shm
+*.db-wal
+
 # Logs
 logs
 *.log
