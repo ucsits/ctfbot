@@ -231,9 +231,73 @@ const registrationOperations = {
 	}
 };
 
+/**
+ * CTF challenges database operations
+ * @namespace challengeOperations
+ */
+const challengeOperations = {
+	/**
+	 * Add a challenge to a CTF
+	 * 
+	 * @param {Object} data - Challenge data
+	 * @param {number} data.ctf_id - CTF ID
+	 * @param {string} data.chal_name - Challenge name
+	 * @param {string} data.chal_category - Challenge category
+	 * @param {string} data.created_by - User ID of creator
+	 * @returns {number} The ID of the created challenge
+	 */
+	addChallenge: (data) => {
+		const stmt = db.prepare(`
+			INSERT INTO ctf_challenges (ctf_id, chal_name, chal_category, created_by)
+			VALUES (@ctf_id, @chal_name, @chal_category, @created_by)
+		`);
+		const result = stmt.run(data);
+		return result.lastInsertRowid;
+	},
+
+	/**
+	 * Get all challenges for a CTF
+	 * 
+	 * @param {number} ctfId - CTF ID
+	 * @returns {Object[]} Array of challenge data
+	 */
+	getChallengesByCTF: (ctfId) => {
+		const stmt = db.prepare('SELECT * FROM ctf_challenges WHERE ctf_id = ? ORDER BY chal_category, chal_name');
+		return stmt.all(ctfId);
+	},
+
+	/**
+	 * Mark a challenge as solved
+	 * 
+	 * @param {number} challengeId - Challenge ID
+	 * @param {string} userId - Discord user ID who solved it
+	 * @returns {Object} Update operation result
+	 */
+	markChallengeSolved: (challengeId, userId) => {
+		const stmt = db.prepare(`
+			UPDATE ctf_challenges 
+			SET solved = 1, solved_by = ?, solved_at = CURRENT_TIMESTAMP 
+			WHERE id = ?
+		`);
+		return stmt.run(userId, challengeId);
+	},
+
+	/**
+	 * Delete a challenge
+	 * 
+	 * @param {number} challengeId - Challenge ID
+	 * @returns {Object} Delete operation result
+	 */
+	deleteChallenge: (challengeId) => {
+		const stmt = db.prepare('DELETE FROM ctf_challenges WHERE id = ?');
+		return stmt.run(challengeId);
+	}
+};
+
 module.exports = {
 	db,
 	initDatabase,
 	ctfOperations,
-	registrationOperations
+	registrationOperations,
+	challengeOperations
 };
