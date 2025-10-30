@@ -64,6 +64,12 @@ class CreateCTFCommand extends Command {
 						.setName('event_banner')
 						.setDescription('Banner image for the CTF event')
 						.setRequired(false)
+				)
+				.addBooleanOption(option =>
+					option
+						.setName('team_mode')
+						.setDescription('Is this a team-based CTF? (default: false)')
+						.setRequired(false)
 				),
 			{
 				idHints: getIdHints(this.name)
@@ -88,6 +94,7 @@ class CreateCTFCommand extends Command {
 		const ctfBaseUrl = interaction.options.getString('ctf_base_url');
 		const timezone = interaction.options.getString('timezone');
 		const apiToken = interaction.options.getString('api_token');
+		const teamMode = interaction.options.getBoolean('team_mode') || false;
 		const description = interaction.options.getString('event_description') || `Join us for ${ctfName}!`;
 		const banner = interaction.options.getAttachment('event_banner');
 
@@ -197,9 +204,10 @@ class CreateCTFCommand extends Command {
 					description: description,
 					banner_url: banner ? banner.url : null,
 					api_token: apiToken,
+					team_mode: teamMode ? 1 : 0,
 					created_by: interaction.user.id
 				});
-				this.container.logger.info(`Stored CTF "${ctfName}" in database (ID: ${ctfId}, channel: ${ctfChannel.id})`);
+				this.container.logger.info(`Stored CTF "${ctfName}" in database (ID: ${ctfId}, channel: ${ctfChannel.id}, team_mode: ${teamMode})`);
 			} catch (dbError) {
 				this.container.logger.error('Failed to store CTF in database:', dbError);
 				// Send warning message to the channel

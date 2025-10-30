@@ -34,6 +34,7 @@ function initDatabase() {
 			description TEXT,
 			banner_url TEXT,
 			api_token TEXT,
+			team_mode INTEGER DEFAULT 0,
 			archived INTEGER DEFAULT 0,
 			created_at TEXT DEFAULT CURRENT_TIMESTAMP,
 			created_by TEXT NOT NULL
@@ -47,6 +48,7 @@ function initDatabase() {
 			ctf_id INTEGER NOT NULL,
 			user_id TEXT NOT NULL,
 			username TEXT NOT NULL,
+			team_name TEXT,
 			ctfd_user_id TEXT,
 			ctfd_team_name TEXT,
 			registered_at TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -219,6 +221,18 @@ const registrationOperations = {
 	},
 
 	/**
+	 * Get all team members for a CTF
+	 * 
+	 * @param {number} ctfId - CTF ID
+	 * @param {string} teamName - Team name
+	 * @returns {Object[]} Array of registration data for team members
+	 */
+	getTeamMembers: (ctfId, teamName) => {
+		const stmt = db.prepare('SELECT * FROM ctf_registrations WHERE ctf_id = ? AND team_name = ?');
+		return stmt.all(ctfId, teamName);
+	},
+
+	/**
 	 * Delete a registration
 	 * 
 	 * @param {number} ctfId - CTF ID
@@ -267,19 +281,63 @@ const challengeOperations = {
 	},
 
 	/**
-	 * Mark a challenge as solved
+	 * Get a challenge by name for a CTF
+	 * 
+	 * @param {number} ctfId - CTF ID
+	 * @param {string} chalName - Challenge name
+	 * @returns {Object|undefined} Challenge data or undefined if not found
+	 */
+	getChallengeByName: (ctfId, chalName) => {
+		const stmt = db.prepare('SELECT * FROM ctf_challenges WHERE ctf_id = ? AND chal_name = ?');
+		return stmt.get(ctfId, chalName);
+	},
+
+	/**
+	 * Mark a challenge as solved by a user
 	 * 
 	 * @param {number} challengeId - Challenge ID
 	 * @param {string} userId - Discord user ID who solved it
-	 * @returns {Object} Update operation result
+	 * @returns {number} The ID of the solve record
 	 */
 	markChallengeSolved: (challengeId, userId) => {
 		const stmt = db.prepare(`
+			INSERT INTO ctf_challenge_solves (challenge_id, user_id)
+			VALUES (?, ?)
+		`);
+		const result = stmt.run(challengeId, userId);
+		
+		// Update challenge as solved
+		const updateStmt = db.prepare(`
 			UPDATE ctf_challenges 
-			SET solved = 1, solved_by = ?, solved_at = CURRENT_TIMESTAMP 
+			SET solved = 1 
 			WHERE id = ?
 		`);
-		return stmt.run(userId, challengeId);
+		updateStmt.run(challengeId);
+		
+		return result.lastInsertRowid;
+	},
+
+	/**
+	 * Get all solvers for a challenge
+	 * 
+	 * @param {number} challengeId - Challenge ID
+	 * @returns {Object[]} Array of solve records
+	 */
+	getChallengeSolvers: (challengeId) => {
+		const stmt = db.prepare('SELECT * FROM ctf_challenge_solves WHERE challenge_id = ? ORDER BY solved_at ASC');
+		return stmt.all(challengeId);
+	},
+
+	/**
+	 * Check if a user has solved a challenge
+	 * 
+	 * @param {number} challengeId - Challenge ID
+	 * @param {string} userId - Discord user ID
+	 * @returns {Object|undefined} Solve record or undefined if not solved
+	 */
+	hasUserSolved: (challengeId, userId) => {
+		const stmt = db.prepare('SELECT * FROM ctf_challenge_solves WHERE challenge_id = ? AND user_id = ?');
+		return stmt.get(challengeId, userId);
 	},
 
 	/**

@@ -25,6 +25,12 @@ class RegisterCTFCommand extends Command {
 				)
 				.addStringOption(option =>
 					option
+						.setName('team_name')
+						.setDescription('Your team name (required for team-based CTFs)')
+						.setRequired(false)
+				)
+				.addStringOption(option =>
+					option
 						.setName('ctfd_url')
 						.setDescription('CTFd instance URL (e.g., https://ctf.example.com)')
 						.setRequired(false)
@@ -57,6 +63,7 @@ class RegisterCTFCommand extends Command {
 		await interaction.deferReply({ ephemeral: true });
 
 		const username = interaction.options.getString('username');
+		const teamName = interaction.options.getString('team_name');
 		const ctfdUrl = interaction.options.getString('ctfd_url');
 		const userId = interaction.user.id;
 		const userTag = interaction.user.tag;
@@ -66,6 +73,11 @@ class RegisterCTFCommand extends Command {
 			const ctf = ctfOperations.getCTFByChannelId(channel.id);
 			if (!ctf) {
 				return interaction.editReply('❌ This channel is not registered as a CTF channel in the database.');
+			}
+
+			// Check if team name is required for team-based CTF
+			if (ctf.team_mode && !teamName && !ctfdUrl) {
+				return interaction.editReply('❌ This is a team-based CTF. Please provide your team name using the `team_name` parameter.');
 			}
 
 			// If CTFd URL is provided, attempt to fetch user details
@@ -91,10 +103,11 @@ class RegisterCTFCommand extends Command {
 					ctf_id: ctf.id,
 					user_id: userId,
 					username: username,
+					team_name: teamName || ctfdData?.teamName || null,
 					ctfd_user_id: ctfdData?.userId || null,
 					ctfd_team_name: ctfdData?.teamName || null
 				});
-				this.container.logger.info(`Registered ${userTag} for CTF "${ctf.ctf_name}"`);
+				this.container.logger.info(`Registered ${userTag} for CTF "${ctf.ctf_name}" (team: ${teamName || ctfdData?.teamName || 'individual'})`);
 			} catch (dbError) {
 				this.container.logger.error('Failed to store registration:', dbError);
 				return interaction.editReply('❌ Failed to register. Please try again later.');
