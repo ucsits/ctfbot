@@ -80,10 +80,12 @@ class RegisterCTFCommand extends Command {
 				return interaction.editReply('❌ This is a team-based CTF. Please provide your team name using the `team_name` parameter.');
 			}
 
-			// If CTFd URL is provided, attempt to fetch user details
+			// If CTFd URL is provided AND API token exists, attempt to fetch user details
 			let ctfdData = null;
 			const effectiveCtfdUrl = ctfdUrl || ctf.ctf_base_url;
-			if (effectiveCtfdUrl) {
+			const hasApiToken = ctf.api_token && ctf.api_token.trim() !== '';
+			
+			if (effectiveCtfdUrl && hasApiToken) {
 				try {
 					// Note: CTFd integration requires authentication token
 					// Pass the CTF object to access api_token
@@ -95,6 +97,8 @@ class RegisterCTFCommand extends Command {
 						content: `❌ Failed to verify user on CTFd platform.\n**Error:** ${error.message}\n\nPlease check your username and try again.`
 					});
 				}
+			} else if (effectiveCtfdUrl && !hasApiToken) {
+				this.container.logger.info(`Skipping CTFd verification for ${username} - no API token configured`);
 			}
 
 			// Store registration in database
@@ -128,6 +132,11 @@ class RegisterCTFCommand extends Command {
 				embed.addFields(
 					{ name: '🆔 CTFd User ID', value: ctfdData.userId.toString(), inline: true },
 					{ name: '👥 Team', value: ctfdData.teamName || 'No team', inline: true }
+				);
+			} else if (teamName) {
+				// Show team name from manual input if CTFd data not available
+				embed.addFields(
+					{ name: '👥 Team', value: teamName, inline: true }
 				);
 			}
 
