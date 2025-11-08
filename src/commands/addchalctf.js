@@ -93,12 +93,12 @@ class AddChalCTFCommand extends Command {
 				await interaction.editReply({ embeds: [embed] });
 
 				// Announce in channel
-				const announceEmbed = new EmbedBuilder()
+				/*const announceEmbed = new EmbedBuilder()
 					.setColor(0x0099FF)
 					.setDescription(`🎯 New challenge added: **${chalName}** (${chalCategory})`)
 					.setTimestamp();
 
-				await channel.send({ embeds: [announceEmbed] });
+				await channel.send({ embeds: [announceEmbed] });*/
 
 			} catch (dbError) {
 				if (dbError.message.includes('UNIQUE constraint failed')) {
