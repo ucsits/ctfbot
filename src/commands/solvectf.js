@@ -154,7 +154,7 @@ class SolveCTFCommand extends Command {
 				await interaction.editReply({ embeds: [embed] });
 
 				// Announce in channel
-				const announceEmbed = new EmbedBuilder()
+				/*const announceEmbed = new EmbedBuilder()
 					.setColor(isFirstBlood ? 0xFF0000 : 0x0099FF)
 					.setDescription(
 						isFirstBlood 
@@ -163,7 +163,7 @@ class SolveCTFCommand extends Command {
 					)
 					.setTimestamp();
 
-				await channel.send({ embeds: [announceEmbed] });
+				await channel.send({ embeds: [announceEmbed] });*/
 
 			} catch (dbError) {
 				if (dbError.message.includes('UNIQUE constraint failed')) {
