@@ -39,24 +39,36 @@ class CTFdClient {
 			headers['Content-Type'] = 'application/json';
 		}
 
-		const response = await fetch(url, {
-			...options,
-			method,
-			headers
-		});
+		console.log(`[CTFd] Request: ${method} ${url}`);
 
-		if (!response.ok) {
-			throw new Error(`CTFd API error: ${response.status} ${response.statusText}`);
+		try {
+			const response = await fetch(url, {
+				...options,
+				method,
+				headers
+			});
+
+			console.log(`[CTFd] Response Status: ${response.status} ${response.statusText}`);
+
+			if (!response.ok) {
+				const text = await response.text();
+				console.error(`[CTFd] Error Response Body: ${text}`);
+				throw new Error(`CTFd API error: ${response.status} ${response.statusText}`);
+			}
+
+			const data = await response.json();
+			
+			// CTFd API returns data in { success: true, data: [...] } format
+			if (!data.success) {
+				console.error(`[CTFd] API Logic Error:`, data);
+				throw new Error(`CTFd API returned error: ${JSON.stringify(data)}`);
+			}
+
+			return data.data;
+		} catch (error) {
+			console.error(`[CTFd] Request Failed: ${method} ${url}`, error);
+			throw error;
 		}
-
-		const data = await response.json();
-		
-		// CTFd API returns data in { success: true, data: [...] } format
-		if (!data.success) {
-			throw new Error(`CTFd API returned error: ${JSON.stringify(data)}`);
-		}
-
-		return data.data;
 	}
 
 	/**
