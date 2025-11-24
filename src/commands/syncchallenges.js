@@ -156,22 +156,16 @@ class SyncChallengesCommand extends Command {
 							// Only process correct solves
 							if (solve.type && solve.type !== 'correct') continue;
 
-							const ctfdChalId = solve.challenge_id;
-							let localChalId = challengeMap.get(ctfdChalId);
-							
-							// If we don't have the ID mapped (either because we didn't fetch all challenges, or it's a new one)
-							if (!localChalId && solve.challenge) {
-								const chalName = solve.challenge.name;
-								
-								// Try to find it in existing local challenges
-								if (nameToLocalIdMap.has(chalName)) {
-									localChalId = nameToLocalIdMap.get(chalName);
-								}
+							if (!solve.challenge) continue;
 
+							const chalName = solve.challenge.name;
+							let localChalId = nameToLocalIdMap.get(chalName);
+
+							if (!localChalId) {
 								const chalCategory = solve.challenge.category;
 								const chalPoints = solve.challenge.value;
 
-								// Upsert challenge if it doesn't exist or to ensure points are up to date
+								// Upsert challenge
 								challengeOperations.upsertChallenge({
 									ctf_id: ctf.id,
 									chal_name: chalName,
@@ -180,17 +174,11 @@ class SyncChallengesCommand extends Command {
 									created_by: interaction.user.id
 								});
 
-								if (!localChalId) {
-									newChallenges.push(chalName);
-									const dbChal = challengeOperations.getChallengeByName(ctf.id, chalName);
-									if (dbChal) {
-										localChalId = dbChal.id;
-										nameToLocalIdMap.set(chalName, localChalId);
-									}
-								}
-								
-								if (localChalId) {
-									challengeMap.set(ctfdChalId, localChalId);
+								newChallenges.push(chalName);
+								const dbChal = challengeOperations.getChallengeByName(ctf.id, chalName);
+								if (dbChal) {
+									localChalId = dbChal.id;
+									nameToLocalIdMap.set(chalName, localChalId);
 								}
 							}
 
@@ -199,7 +187,6 @@ class SyncChallengesCommand extends Command {
 								if (!hasSolved) {
 									challengeOperations.markChallengeSolved(localChalId, reg.user_id);
 									solvesSynced++;
-									const chalName = solve.challenge ? solve.challenge.name : "Unknown Challenge";
 									newSolves.push(`<@${reg.user_id}> solved **${chalName}**`);
 								}
 							}
