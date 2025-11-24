@@ -91,7 +91,8 @@ class SyncChallengesCommand extends Command {
             const ctfdUserMap = new Map(); // ctfd_user_id -> discord_user_id
             for (const reg of registrations) {
                 if (reg.ctfd_user_id) {
-                    ctfdUserMap.set(String(reg.ctfd_user_id), reg.user_id);
+                    // Ensure we use integer string for mapping
+                    ctfdUserMap.set(String(parseInt(reg.ctfd_user_id)), reg.user_id);
                 }
             }
 
@@ -109,7 +110,7 @@ class SyncChallengesCommand extends Command {
 						
 						for (const solve of solves) {
 							// solve.user_id is the user who solved it
-							const ctfdUserId = String(solve.user_id);
+							const ctfdUserId = String(parseInt(solve.user_id));
 							const discordUserId = ctfdUserMap.get(ctfdUserId);
 
 							if (discordUserId) {
@@ -135,7 +136,8 @@ class SyncChallengesCommand extends Command {
 					if (!reg.ctfd_user_id) continue;
 
 					try {
-						const userSolves = await client.getUserSolves(reg.ctfd_user_id);
+                        const ctfdUserId = parseInt(reg.ctfd_user_id);
+						const userSolves = await client.getUserSolves(ctfdUserId);
 						
 						for (const solve of userSolves) {
 							let localChalId = challengeMap.get(solve.challenge_id);
