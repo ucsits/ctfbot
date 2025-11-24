@@ -157,6 +157,7 @@ class SyncChallengesCommand extends Command {
 
 							const chalName = solve.challenge.name;
 							let localChalId = nameToLocalIdMap.get(chalName);
+							console.log("[DEBUG] localChalId", localChalId);
 
 							if (!localChalId) {
 								const chalCategory = solve.challenge.category;
@@ -185,6 +186,7 @@ class SyncChallengesCommand extends Command {
 									challengeOperations.markChallengeSolved(localChalId, reg.user_id);
 									solvesSynced++;
 									newSolves.push(`<@${reg.user_id}> solved **${chalName}**`);
+									console.log("[INFO]", `<@${reg.user_id}> solved **${chalName}**`);
 								}
 							}
 						}
