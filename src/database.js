@@ -166,6 +166,34 @@ const ctfOperations = {
 	unarchiveCTF: (channelId) => {
 		const stmt = db.prepare('UPDATE ctfs SET archived = 0 WHERE channel_id = ?');
 		return stmt.run(channelId);
+	},
+
+	/**
+	 * Get summary stats for a CTF
+	 * 
+	 * @param {number} ctfId - CTF ID
+	 * @returns {Object[]} Array of user stats
+	 */
+	getCTFSummaryStats: (ctfId) => {
+		const stmt = db.prepare(`
+			SELECT 
+				r.user_id,
+				r.username,
+				r.team_name,
+				r.ctfd_team_name,
+				p.name as real_name,
+				p.nrp,
+				COUNT(s.id) as solve_count,
+				COALESCE(SUM(c.points), 0) as total_points
+			FROM ctf_registrations r
+			LEFT JOIN pacts p ON r.user_id = p.user_id
+			LEFT JOIN ctf_challenge_solves s ON s.user_id = r.user_id
+			LEFT JOIN ctf_challenges c ON s.challenge_id = c.id AND c.ctf_id = r.ctf_id
+			WHERE r.ctf_id = ?
+			GROUP BY r.user_id
+			ORDER BY total_points DESC
+		`);
+		return stmt.all(ctfId);
 	}
 };
 

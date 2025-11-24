@@ -96,6 +96,14 @@ class CTFdClient {
 	}
 
 	/**
+	 * Get scoreboard
+	 * @returns {Promise<Array>} Array of scoreboard entries
+	 */
+	async getScoreboard() {
+		return await this.request('/api/v1/scoreboard');
+	}
+
+	/**
 	 * Fetch user data from CTFd (legacy method for compatibility)
 	 * 
 	 * @param {string} username - Username to fetch
