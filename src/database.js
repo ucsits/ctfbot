@@ -352,10 +352,44 @@ const challengeOperations = {
 	}
 };
 
+/**
+ * Pact database operations
+ * @namespace pactOperations
+ */
+const pactOperations = {
+	/**
+	 * Create or update a pact
+	 * 
+	 * @param {string} userId - Discord user ID
+	 * @param {string} name - User's name
+	 * @param {string} nrp - User's NRP
+	 * @returns {Object} Operation result
+	 */
+	createPact: (userId, name, nrp) => {
+		const stmt = db.prepare(`
+			INSERT OR REPLACE INTO pacts (user_id, name, nrp)
+			VALUES (?, ?, ?)
+		`);
+		return stmt.run(userId, name, nrp);
+	},
+
+	/**
+	 * Get a pact by user ID
+	 * 
+	 * @param {string} userId - Discord user ID
+	 * @returns {Object|undefined} Pact record or undefined if not found
+	 */
+	getPact: (userId) => {
+		const stmt = db.prepare('SELECT * FROM pacts WHERE user_id = ?');
+		return stmt.get(userId);
+	}
+};
+
 module.exports = {
 	db,
 	initDatabase,
 	ctfOperations,
 	registrationOperations,
-	challengeOperations
+	challengeOperations,
+	pactOperations
 };
