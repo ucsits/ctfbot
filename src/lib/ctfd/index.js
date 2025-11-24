@@ -60,6 +60,26 @@ class CTFdClient {
 	}
 
 	/**
+	 * Get all challenges
+	 * @param {Object} params - Query parameters
+	 * @returns {Promise<Array>} Array of challenge objects
+	 */
+	async getChallenges(params = {}) {
+		const queryParams = new URLSearchParams(params);
+		const endpoint = `/api/v1/challenges${queryParams.toString() ? '?' + queryParams.toString() : ''}`;
+		return await this.request(endpoint);
+	}
+
+	/**
+	 * Get solves for a specific challenge
+	 * @param {number} challengeId - Challenge ID
+	 * @returns {Promise<Array>} Array of solve objects
+	 */
+	async getChallengeSolves(challengeId) {
+		return await this.request(`/api/v1/challenges/${challengeId}/solves`);
+	}
+
+	/**
 	 * Get users from CTFd (search)
 	 * @param {Object} params - Query parameters
 	 * @param {string} [params.q] - Search query for username

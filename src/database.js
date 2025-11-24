@@ -279,6 +279,28 @@ const registrationOperations = {
  */
 const challengeOperations = {
 	/**
+	 * Add or update a challenge (UPSERT)
+	 * 
+	 * @param {Object} data - Challenge data
+	 * @param {number} data.ctf_id - CTF ID
+	 * @param {string} data.chal_name - Challenge name
+	 * @param {string} data.chal_category - Challenge category
+	 * @param {number} data.points - Challenge points
+	 * @param {string} data.created_by - User ID of creator
+	 * @returns {Object} Operation result
+	 */
+	upsertChallenge: (data) => {
+		const stmt = db.prepare(`
+			INSERT INTO ctf_challenges (ctf_id, chal_name, chal_category, points, created_by)
+			VALUES (@ctf_id, @chal_name, @chal_category, @points, @created_by)
+			ON CONFLICT(ctf_id, chal_name) DO UPDATE SET
+				points = excluded.points,
+				chal_category = excluded.chal_category
+		`);
+		return stmt.run(data);
+	},
+
+	/**
 	 * Add a challenge to a CTF
 	 * 
 	 * @param {Object} data - Challenge data
