@@ -318,6 +318,18 @@ const challengeOperations = {
 	},
 
 	/**
+	 * Update points for a challenge
+	 * 
+	 * @param {number} challengeId - Challenge ID
+	 * @param {number} points - Points value
+	 * @returns {Object} Update operation result
+	 */
+	updateChallengePoints: (challengeId, points) => {
+		const stmt = db.prepare('UPDATE ctf_challenges SET points = ? WHERE id = ?');
+		return stmt.run(points, challengeId);
+	},
+
+	/**
 	 * Get all solvers for a challenge
 	 * 
 	 * @param {number} challengeId - Challenge ID
