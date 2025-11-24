@@ -14,7 +14,7 @@ class CTFdClient {
 	 */
 	constructor(baseUrl, apiToken) {
 		this.baseUrl = baseUrl.replace(/\/$/, ''); // Remove trailing slash
-		this.apiToken = apiToken;
+		this.apiToken = apiToken ? apiToken.trim() : null;
 	}
 
 	/**
@@ -28,15 +28,13 @@ class CTFdClient {
 		const url = `${this.baseUrl}${endpoint}`;
 		const method = options.method || 'GET';
 		
-		// Only set Content-Type for requests with a body
 		const headers = {
-			'Authorization': `Token ${this.apiToken}`,
+			'Content-Type': 'application/json',
 			...options.headers
 		};
-		
-		// Add Content-Type only for POST, PUT, PATCH requests
-		if (['POST', 'PUT', 'PATCH'].includes(method.toUpperCase()) && !headers['Content-Type']) {
-			headers['Content-Type'] = 'application/json';
+
+		if (this.apiToken) {
+			headers['Authorization'] = `Token ${this.apiToken}`;
 		}
 
 		console.log(`[CTFd] Request: ${method} ${url}`);
