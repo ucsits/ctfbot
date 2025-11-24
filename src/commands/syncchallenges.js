@@ -56,14 +56,21 @@ class SyncChallengesCommand extends Command {
 			const challengeMap = new Map(); // Map CTFd challenge ID to local DB ID
 			const newChallenges = [];
 
+			// Pre-load existing challenges to map by name
+			const existingChallenges = challengeOperations.getChallengesByCTF(ctf.id);
+			const nameToLocalIdMap = new Map();
+			for (const chal of existingChallenges) {
+				nameToLocalIdMap.set(chal.chal_name, chal.id);
+			}
+
 			// 1. Fetch and Sync Challenges
 			if (source !== 'users') {
 				await interaction.editReply('🔄 Fetching challenges from CTFd...');
 				challenges = await client.getChallenges();
 
 				for (const chal of challenges) {
-					const existing = challengeOperations.getChallengeByName(ctf.id, chal.name);
-					if (!existing) {
+					const existingId = nameToLocalIdMap.get(chal.name);
+					if (!existingId) {
 						newChallenges.push(chal.name);
 					}
 
@@ -76,9 +83,15 @@ class SyncChallengesCommand extends Command {
 					});
 					
 					// Get the local ID
-					const dbChal = challengeOperations.getChallengeByName(ctf.id, chal.name);
-					if (dbChal) {
-						challengeMap.set(chal.id, dbChal.id);
+					let dbChalId = existingId;
+					if (!dbChalId) {
+						const dbChal = challengeOperations.getChallengeByName(ctf.id, chal.name);
+						if (dbChal) dbChalId = dbChal.id;
+					}
+
+					if (dbChalId) {
+						challengeMap.set(chal.id, dbChalId);
+						nameToLocalIdMap.set(chal.name, dbChalId);
 					}
 				}
 				await interaction.editReply(`✅ Synced ${challenges.length} challenges. 🔄 Syncing solves...`);
@@ -149,11 +162,15 @@ class SyncChallengesCommand extends Command {
 							// If we don't have the ID mapped (either because we didn't fetch all challenges, or it's a new one)
 							if (!localChalId && solve.challenge) {
 								const chalName = solve.challenge.name;
+								
+								// Try to find it in existing local challenges
+								if (nameToLocalIdMap.has(chalName)) {
+									localChalId = nameToLocalIdMap.get(chalName);
+								}
+
 								const chalCategory = solve.challenge.category;
 								const chalPoints = solve.challenge.value;
 
-								let dbChal = challengeOperations.getChallengeByName(ctf.id, chalName);
-								
 								// Upsert challenge if it doesn't exist or to ensure points are up to date
 								challengeOperations.upsertChallenge({
 									ctf_id: ctf.id,
@@ -163,13 +180,16 @@ class SyncChallengesCommand extends Command {
 									created_by: interaction.user.id
 								});
 
-								if (!dbChal) {
+								if (!localChalId) {
 									newChallenges.push(chalName);
-									dbChal = challengeOperations.getChallengeByName(ctf.id, chalName);
+									const dbChal = challengeOperations.getChallengeByName(ctf.id, chalName);
+									if (dbChal) {
+										localChalId = dbChal.id;
+										nameToLocalIdMap.set(chalName, localChalId);
+									}
 								}
 								
-								if (dbChal) {
-									localChalId = dbChal.id;
+								if (localChalId) {
 									challengeMap.set(ctfdChalId, localChalId);
 								}
 							}
