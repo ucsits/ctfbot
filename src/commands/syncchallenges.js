@@ -53,7 +53,6 @@ class SyncChallengesCommand extends Command {
 			const client = createCTFdClient(ctf.ctf_base_url, ctf.api_token);
 			
 			let challenges = [];
-			const challengeMap = new Map(); // Map CTFd challenge ID to local DB ID
 			const newChallenges = [];
 
 			// Pre-load existing challenges to map by name
@@ -90,7 +89,6 @@ class SyncChallengesCommand extends Command {
 					}
 
 					if (dbChalId) {
-						challengeMap.set(chal.id, dbChalId);
 						nameToLocalIdMap.set(chal.name, dbChalId);
 					}
 				}
@@ -112,13 +110,14 @@ class SyncChallengesCommand extends Command {
             let solvesSynced = 0;
 			const newSolves = [];
 
-            // Method A: Iterate through challenges and get solves
+			// Method A: Iterate through challenges and get solves
 			if (source === 'direct') {
 				for (const chal of challenges) {
-					const localChalId = challengeMap.get(chal.id);
+					const localChalId = nameToLocalIdMap.get(chal.name);
 					if (!localChalId) continue;
 
 					try {
+						// We must use chal.id here because the API requires it
 						const solves = await client.getChallengeSolves(chal.id);
 						
 						for (const solve of solves) {
@@ -137,13 +136,11 @@ class SyncChallengesCommand extends Command {
 							}
 						}
 					} catch (err) {
-						console.error(`Failed to fetch solves for challenge ${chal.id}:`, err);
+						console.error(`Failed to fetch solves for challenge ${chal.name} (ID: ${chal.id}):`, err);
 						// Continue to next challenge
 					}
 				}
-			}
-
-            // Method B: Iterate through registered users and get their solves
+			}            // Method B: Iterate through registered users and get their solves
 			if (source === 'users') {
 				for (const reg of registrations) {
 					if (!reg.ctfd_user_id) continue;
