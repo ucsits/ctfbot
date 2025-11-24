@@ -52,36 +52,39 @@ class SyncChallengesCommand extends Command {
 		try {
 			const client = createCTFdClient(ctf.ctf_base_url, ctf.api_token);
 			
-			// 1. Fetch and Sync Challenges
-			await interaction.editReply('🔄 Fetching challenges from CTFd...');
-			const challenges = await client.getChallenges();
-			
+			let challenges = [];
 			const challengeMap = new Map(); // Map CTFd challenge ID to local DB ID
 			const newChallenges = [];
 
-			for (const chal of challenges) {
-				const existing = challengeOperations.getChallengeByName(ctf.id, chal.name);
-				if (!existing) {
-					newChallenges.push(chal.name);
+			// 1. Fetch and Sync Challenges
+			if (source !== 'users') {
+				await interaction.editReply('🔄 Fetching challenges from CTFd...');
+				challenges = await client.getChallenges();
+
+				for (const chal of challenges) {
+					const existing = challengeOperations.getChallengeByName(ctf.id, chal.name);
+					if (!existing) {
+						newChallenges.push(chal.name);
+					}
+
+					challengeOperations.upsertChallenge({
+						ctf_id: ctf.id,
+						chal_name: chal.name,
+						chal_category: chal.category,
+						points: chal.value,
+						created_by: interaction.user.id
+					});
+					
+					// Get the local ID
+					const dbChal = challengeOperations.getChallengeByName(ctf.id, chal.name);
+					if (dbChal) {
+						challengeMap.set(chal.id, dbChal.id);
+					}
 				}
-
-				challengeOperations.upsertChallenge({
-					ctf_id: ctf.id,
-					chal_name: chal.name,
-					chal_category: chal.category,
-					points: chal.value,
-					created_by: interaction.user.id
-				});
-				
-                // Get the local ID
-                const dbChal = challengeOperations.getChallengeByName(ctf.id, chal.name);
-                if (dbChal) {
-                    challengeMap.set(chal.id, dbChal.id);
-                }
+				await interaction.editReply(`✅ Synced ${challenges.length} challenges. 🔄 Syncing solves...`);
+			} else {
+				await interaction.editReply('🔄 Syncing solves from users...');
 			}
-
-            // 2. Sync Solves
-            await interaction.editReply(`✅ Synced ${challenges.length} challenges. 🔄 Syncing solves...`);
             
             // Get all registrations to map CTFd user IDs to Discord IDs
             const registrations = registrationOperations.getRegistrationsByCTF(ctf.id);
@@ -135,7 +138,33 @@ class SyncChallengesCommand extends Command {
 						const userSolves = await client.getUserSolves(reg.ctfd_user_id);
 						
 						for (const solve of userSolves) {
-							const localChalId = challengeMap.get(solve.challenge_id);
+							let localChalId = challengeMap.get(solve.challenge_id);
+							
+							// If we don't have the ID mapped (either because we didn't fetch all challenges, or it's a new one)
+							if (!localChalId && solve.challenge) {
+								const chalName = solve.challenge.name;
+								let dbChal = challengeOperations.getChallengeByName(ctf.id, chalName);
+								
+								// Upsert challenge if it doesn't exist or to ensure points are up to date
+								challengeOperations.upsertChallenge({
+									ctf_id: ctf.id,
+									chal_name: chalName,
+									chal_category: solve.challenge.category || 'Unknown',
+									points: solve.challenge.value || 0,
+									created_by: interaction.user.id
+								});
+
+								if (!dbChal) {
+									newChallenges.push(chalName);
+									dbChal = challengeOperations.getChallengeByName(ctf.id, chalName);
+								}
+								
+								if (dbChal) {
+									localChalId = dbChal.id;
+									challengeMap.set(solve.challenge_id, localChalId);
+								}
+							}
+
 							if (localChalId) {
 								const hasSolved = challengeOperations.hasUserSolved(localChalId, reg.user_id);
 								if (!hasSolved) {
