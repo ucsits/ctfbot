@@ -140,19 +140,26 @@ class SyncChallengesCommand extends Command {
 						const userSolves = await client.getUserSolves(ctfdUserId);
 						
 						for (const solve of userSolves) {
-							let localChalId = challengeMap.get(solve.challenge_id);
+							// Only process correct solves
+							if (solve.type && solve.type !== 'correct') continue;
+
+							const ctfdChalId = solve.challenge_id;
+							let localChalId = challengeMap.get(ctfdChalId);
 							
 							// If we don't have the ID mapped (either because we didn't fetch all challenges, or it's a new one)
 							if (!localChalId && solve.challenge) {
 								const chalName = solve.challenge.name;
+								const chalCategory = solve.challenge.category;
+								const chalPoints = solve.challenge.value;
+
 								let dbChal = challengeOperations.getChallengeByName(ctf.id, chalName);
 								
 								// Upsert challenge if it doesn't exist or to ensure points are up to date
 								challengeOperations.upsertChallenge({
 									ctf_id: ctf.id,
 									chal_name: chalName,
-									chal_category: solve.challenge.category || 'Unknown',
-									points: solve.challenge.value || 0,
+									chal_category: chalCategory || 'Unknown',
+									points: chalPoints || 0,
 									created_by: interaction.user.id
 								});
 
@@ -163,7 +170,7 @@ class SyncChallengesCommand extends Command {
 								
 								if (dbChal) {
 									localChalId = dbChal.id;
-									challengeMap.set(solve.challenge_id, localChalId);
+									challengeMap.set(ctfdChalId, localChalId);
 								}
 							}
 
