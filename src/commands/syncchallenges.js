@@ -16,7 +16,17 @@ class SyncChallengesCommand extends Command {
 		registry.registerChatInputCommand((builder) =>
 			builder
 				.setName(this.name)
-				.setDescription(this.description),
+				.setDescription(this.description)
+				.addStringOption(option =>
+					option
+						.setName('source')
+						.setDescription('Source to sync solves from (default: direct)')
+						.setRequired(false)
+						.addChoices(
+							{ name: 'Direct (from Challenges)', value: 'direct' },
+							{ name: 'Users (from User Profiles)', value: 'users' }
+						)
+				),
 			{
 				idHints: getIdHints(this.name)
 			}
@@ -26,6 +36,7 @@ class SyncChallengesCommand extends Command {
 	async chatInputRun(interaction) {
 		await interaction.deferReply();
 
+		const source = interaction.options.getString('source') || 'direct';
 		const ctf = ctfOperations.getCTFByChannelId(interaction.channelId);
 		if (!ctf) {
 			return interaction.editReply({
@@ -84,35 +95,64 @@ class SyncChallengesCommand extends Command {
             let solvesSynced = 0;
 			const newSolves = [];
 
-            for (const chal of challenges) {
-                const localChalId = challengeMap.get(chal.id);
-                if (!localChalId) continue;
+            // Method A: Iterate through challenges and get solves
+			if (source === 'direct') {
+				for (const chal of challenges) {
+					const localChalId = challengeMap.get(chal.id);
+					if (!localChalId) continue;
 
-                try {
-                    const solves = await client.getChallengeSolves(chal.id);
-                    
-                    for (const solve of solves) {
-                        // solve.user_id is the user who solved it
-                        const ctfdUserId = String(solve.user_id);
-                        const discordUserId = ctfdUserMap.get(ctfdUserId);
+					try {
+						const solves = await client.getChallengeSolves(chal.id);
+						
+						for (const solve of solves) {
+							// solve.user_id is the user who solved it
+							const ctfdUserId = String(solve.user_id);
+							const discordUserId = ctfdUserMap.get(ctfdUserId);
 
-                        if (discordUserId) {
-                            // Check if already solved locally
-                            const hasSolved = challengeOperations.hasUserSolved(localChalId, discordUserId);
-                            if (!hasSolved) {
-                                challengeOperations.markChallengeSolved(localChalId, discordUserId);
-                                solvesSynced++;
-								newSolves.push(`<@${discordUserId}> solved **${chal.name}**`);
-                            }
-                        }
-                    }
-                } catch (err) {
-                    console.error(`Failed to fetch solves for challenge ${chal.id}:`, err);
-                    // Continue to next challenge
-                }
-            }
+							if (discordUserId) {
+								// Check if already solved locally
+								const hasSolved = challengeOperations.hasUserSolved(localChalId, discordUserId);
+								if (!hasSolved) {
+									challengeOperations.markChallengeSolved(localChalId, discordUserId);
+									solvesSynced++;
+									newSolves.push(`<@${discordUserId}> solved **${chal.name}**`);
+								}
+							}
+						}
+					} catch (err) {
+						console.error(`Failed to fetch solves for challenge ${chal.id}:`, err);
+						// Continue to next challenge
+					}
+				}
+			}
 
-			let response = `✅ Sync complete!\n- Challenges processed: ${challenges.length}\n- New solves recorded: ${solvesSynced}`;
+            // Method B: Iterate through registered users and get their solves
+			if (source === 'users') {
+				for (const reg of registrations) {
+					if (!reg.ctfd_user_id) continue;
+
+					try {
+						const userSolves = await client.getUserSolves(reg.ctfd_user_id);
+						
+						for (const solve of userSolves) {
+							const localChalId = challengeMap.get(solve.challenge_id);
+							if (localChalId) {
+								const hasSolved = challengeOperations.hasUserSolved(localChalId, reg.user_id);
+								if (!hasSolved) {
+									challengeOperations.markChallengeSolved(localChalId, reg.user_id);
+									solvesSynced++;
+									const chalName = solve.challenge ? solve.challenge.name : "Unknown Challenge";
+									newSolves.push(`<@${reg.user_id}> solved **${chalName}**`);
+								}
+							}
+						}
+					} catch (err) {
+						console.error(`Failed to fetch solves for user ${reg.ctfd_user_id}:`, err);
+					}
+				}
+			}
+
+			let response = `✅ Sync complete (Source: ${source})!\n- Challenges processed: ${challenges.length}\n- New solves recorded: ${solvesSynced}`;
 			
 			if (newChallenges.length > 0) {
 				response += `\n\n**New Challenges:**\n${newChallenges.join('\n')}`;

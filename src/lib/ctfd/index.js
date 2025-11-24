@@ -80,6 +80,15 @@ class CTFdClient {
 	}
 
 	/**
+	 * Get solves for a specific user
+	 * @param {number} userId - User ID
+	 * @returns {Promise<Array>} Array of solve objects
+	 */
+	async getUserSolves(userId) {
+		return await this.request(`/api/v1/users/${userId}/solves`);
+	}
+
+	/**
 	 * Get users from CTFd (search)
 	 * @param {Object} params - Query parameters
 	 * @param {string} [params.q] - Search query for username
