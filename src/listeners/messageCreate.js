@@ -9,7 +9,9 @@ class MessageCreateListener extends Listener {
 	}
 
 	run(message) {
-		if (message.author.bot) return;
+		if (message.author.bot) {
+			return;
+		}
 
 		this.container.logger.debug(`${message.author.tag}: ${message.content}`);
 	}

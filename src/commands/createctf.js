@@ -2,6 +2,7 @@ const { Command } = require('@sapphire/framework');
 const { PermissionFlagsBits, EmbedBuilder, ChannelType } = require('discord.js');
 const { getIdHints, parseLocalDateToUTC } = require('../utils');
 const { ctfOperations } = require('../database');
+const config = require('../config');
 
 class CreateCTFCommand extends Command {
 	constructor(context, options) {
@@ -71,9 +72,9 @@ class CreateCTFCommand extends Command {
 						.setDescription('Is this a team-based CTF? (default: false)')
 						.setRequired(false)
 				),
-			{
-				idHints: getIdHints(this.name)
-			}
+		{
+			idHints: getIdHints(this.name)
+		}
 		);
 	}
 
@@ -129,15 +130,9 @@ class CreateCTFCommand extends Command {
 			}
 
 			// Get or create CTF category
-			const categoryId = process.env.CTF_CATEGORY_ID;
-			let category = null;
-
-			if (categoryId) {
-				category = interaction.guild.channels.cache.get(categoryId);
-			}
+			const category = interaction.guild.channels.cache.get(config.ctf.categoryId);
 
 			if (!category) {
-				// Panic if category not found
 				return interaction.editReply('❌ CTF category not found. Please set CTF_CATEGORY_ID in your environment variables.');
 			}
 

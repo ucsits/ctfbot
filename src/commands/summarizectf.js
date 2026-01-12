@@ -28,9 +28,9 @@ class SummarizeCTFCommand extends Command {
 							{ name: 'TSV (Tab Separated)', value: 'tsv' }
 						)
 				),
-			{
-				idHints: getIdHints(this.name)
-			}
+		{
+			idHints: getIdHints(this.name)
+		}
 		);
 	}
 
@@ -39,7 +39,7 @@ class SummarizeCTFCommand extends Command {
 
 		const format = interaction.options.getString('format') || 'pretty';
 		const ctf = ctfOperations.getCTFByChannelId(interaction.channelId);
-		
+
 		if (!ctf) {
 			return interaction.editReply({
 				content: '❌ This command can only be used in a CTF channel.',
@@ -87,7 +87,7 @@ class SummarizeCTFCommand extends Command {
 
 	async handleTSVOutput(interaction, stats, ctf) {
 		let tsvContent = 'Name\tNRP\tTeam\tPoints\tSolves\n';
-		
+
 		stats.forEach(s => {
 			const name = s.real_name || s.username;
 			const nrp = s.nrp || 'n/a';
@@ -107,12 +107,12 @@ class SummarizeCTFCommand extends Command {
 		if (!isMultiTeam) {
 			// Single team mode
 			// Try to find the team name from the first user who has one, or default to 'Unknown Team'
-			const teamName = stats.find(s => s.ctfd_team_name || s.team_name)?.ctfd_team_name 
-				|| stats.find(s => s.ctfd_team_name || s.team_name)?.team_name 
+			const teamName = stats.find(s => s.ctfd_team_name || s.team_name)?.ctfd_team_name
+				|| stats.find(s => s.ctfd_team_name || s.team_name)?.team_name
 				|| 'Unknown Team';
-				
+
 			const totalPoints = stats.reduce((sum, s) => sum + s.total_points, 0);
-			
+
 			let rank = 'N/A';
 			if (scoreboard.length > 0) {
 				const teamEntry = scoreboard.find(t => t.name === teamName);
@@ -126,7 +126,7 @@ class SummarizeCTFCommand extends Command {
 				const nrp = s.nrp || 'n/a';
 				output += `${index + 1}. ${name} (${nrp}) - ${s.total_points} pts\n`;
 			});
-			
+
 			output += `\n**Total Team Points:** ${totalPoints} pts\n`;
 			output += `**Leaderboard Position:** ${rank}`;
 
@@ -135,13 +135,15 @@ class SummarizeCTFCommand extends Command {
 			const teamGroups = {};
 			stats.forEach(s => {
 				const tName = s.team_name || 'Unassigned';
-				if (!teamGroups[tName]) teamGroups[tName] = [];
+				if (!teamGroups[tName]) {
+					teamGroups[tName] = [];
+				}
 				teamGroups[tName].push(s);
 			});
 
 			const sortedTeams = Object.entries(teamGroups).map(([tName, members]) => {
 				const tPoints = members.reduce((sum, m) => sum + m.total_points, 0);
-				
+
 				let tRank = 'N/A';
 				if (scoreboard.length > 0) {
 					const teamEntry = scoreboard.find(t => t.name === tName);
@@ -161,7 +163,7 @@ class SummarizeCTFCommand extends Command {
 			sortedTeams.forEach(team => {
 				const rankDisplay = team.rank !== 'N/A' ? `[${team.rank}]` : '[?]';
 				output += `${rankDisplay} ${team.name} (${team.points} pts)\n`;
-				
+
 				team.members.forEach((m, idx) => {
 					const name = m.real_name || m.username;
 					const nrp = m.nrp || 'n/a';

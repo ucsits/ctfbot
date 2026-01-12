@@ -1,6 +1,7 @@
 const { Listener } = require('@sapphire/framework');
 const fs = require('fs');
 const path = require('path');
+const config = require('../config');
 
 class ApplicationCommandRegistriesRegisteredListener extends Listener {
 	constructor(context, options) {
@@ -13,7 +14,7 @@ class ApplicationCommandRegistriesRegisteredListener extends Listener {
 	async run(registries) {
 		// File to store command IDs
 		const idHintsFile = path.join(__dirname, '..', 'commandIds.json');
-		
+
 		// Load existing command IDs
 		let commandIds = {};
 		if (fs.existsSync(idHintsFile)) {
@@ -27,7 +28,7 @@ class ApplicationCommandRegistriesRegisteredListener extends Listener {
 		// Fetch all application commands from Discord
 		try {
 			const commands = await this.container.client.application.commands.fetch();
-			
+
 			let updated = false;
 			for (const [id, command] of commands) {
 				if (!commandIds[command.name] || !commandIds[command.name].includes(id)) {
@@ -41,10 +42,10 @@ class ApplicationCommandRegistriesRegisteredListener extends Listener {
 			}
 
 			// Also check guild commands if GUILD_ID is set
-			if (process.env.GUILD_ID) {
-				const guild = await this.container.client.guilds.fetch(process.env.GUILD_ID);
+			if (config.discord.guildId) {
+				const guild = await this.container.client.guilds.fetch(config.discord.guildId);
 				const guildCommands = await guild.commands.fetch();
-				
+
 				for (const [id, command] of guildCommands) {
 					if (!commandIds[command.name] || !commandIds[command.name].includes(id)) {
 						if (!commandIds[command.name]) {

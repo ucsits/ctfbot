@@ -27,7 +27,7 @@ class CTFdClient {
 	async request(endpoint, options = {}) {
 		const url = `${this.baseUrl}${endpoint}`;
 		const method = options.method || 'GET';
-		
+
 		const headers = {
 			'Content-Type': 'application/json',
 			...options.headers
@@ -55,10 +55,10 @@ class CTFdClient {
 			}
 
 			const data = await response.json();
-			
+
 			// CTFd API returns data in { success: true, data: [...] } format
 			if (!data.success) {
-				console.error(`[CTFd] API Logic Error:`, data);
+				console.error('[CTFd] API Logic Error:', data);
 				throw new Error(`CTFd API returned error: ${JSON.stringify(data)}`);
 			}
 
@@ -106,7 +106,7 @@ class CTFdClient {
 	 */
 	async getUsers(params = {}) {
 		const queryParams = new URLSearchParams();
-		
+
 		if (params.q) {
 			queryParams.append('q', params.q);
 			queryParams.append('field', 'name'); // Search by name field
@@ -144,26 +144,26 @@ class CTFdClient {
 
 	/**
 	 * Fetch user data from CTFd (legacy method for compatibility)
-	 * 
+	 *
 	 * @param {string} username - Username to fetch
 	 * @returns {Promise<Object>} User data
 	 * @returns {string} return.userId - CTFd user ID
 	 * @returns {string} return.username - Username
 	 * @returns {string|null} return.teamName - Team name if user is in a team
-	 * 
+	 *
 	 * @example
 	 * const client = new CTFdClient('https://ctf.example.com', 'token');
 	 * const userData = await client.fetchUserData('john_doe');
 	 */
 	async fetchUserData(username) {
 		const users = await this.getUsers({ q: username });
-		
+
 		if (!users || users.length === 0) {
 			throw new Error('User not found');
 		}
 
 		const user = users.find(u => u.name.toLowerCase() === username.toLowerCase()) || users[0];
-		
+
 		let teamName = null;
 		if (user.team_id) {
 			try {
@@ -174,7 +174,7 @@ class CTFdClient {
 				teamName = null;
 			}
 		}
-		
+
 		return {
 			userId: user.id.toString(),
 			username: user.name,
@@ -184,7 +184,7 @@ class CTFdClient {
 
 	/**
 	 * Fetch team name from CTFd
-	 * 
+	 *
 	 * @param {number} teamId - Team ID
 	 * @returns {Promise<string|null>} Team name
 	 * @private
@@ -200,7 +200,7 @@ class CTFdClient {
 
 	/**
 	 * Test CTFd connection
-	 * 
+	 *
 	 * @returns {Promise<boolean>} True if connection is successful
 	 */
 	async testConnection() {
@@ -219,7 +219,7 @@ class CTFdClient {
 
 /**
  * Create a CTFd client instance
- * 
+ *
  * @param {string} baseUrl - Base URL of the CTFd instance
  * @param {string} [apiToken] - Optional API token
  * @returns {CTFdClient} CTFd client instance

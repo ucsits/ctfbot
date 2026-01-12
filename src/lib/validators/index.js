@@ -15,7 +15,7 @@ const { ValidationError } = require('../errors');
  */
 function validateURL(url, options = {}) {
 	const allowedProtocols = options.allowedProtocols || ['http:', 'https:'];
-	
+
 	try {
 		const urlObj = new URL(url);
 		if (!allowedProtocols.includes(urlObj.protocol)) {
@@ -47,7 +47,7 @@ function validateURL(url, options = {}) {
  */
 function validateDateFormat(dateStr) {
 	const dateMatch = dateStr.match(/^(\d{2})-(\d{2})-(\d{4})\s+(\d{2}):(\d{2})$/);
-	
+
 	if (!dateMatch) {
 		throw new ValidationError(
 			'❌ Invalid date format. Please use: DD-MM-YYYY HH:MM (e.g., 31-12-2025 20:00)'
@@ -55,7 +55,7 @@ function validateDateFormat(dateStr) {
 	}
 
 	const [, day, month, year, hour, minute] = dateMatch;
-	
+
 	// Validate ranges
 	const dayNum = parseInt(day, 10);
 	const monthNum = parseInt(month, 10);

@@ -46,9 +46,9 @@ class ScheduleCommand extends Command {
 						.setDescription('Banner image for the event')
 						.setRequired(false)
 				),
-			{
-				idHints: getIdHints(this.name)
-			}
+		{
+			idHints: getIdHints(this.name)
+		}
 		);
 	}
 

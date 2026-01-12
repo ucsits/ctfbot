@@ -12,7 +12,7 @@ class HelpCommand extends Command {
 
 	async messageRun(message) {
 		const commands = this.container.stores.get('commands');
-		
+
 		const commandList = commands
 			.map(cmd => `**${cmd.name}** - ${cmd.description}`)
 			.join('\n');
@@ -27,15 +27,15 @@ class HelpCommand extends Command {
 			builder
 				.setName(this.name)
 				.setDescription(this.description),
-			{
-				idHints: getIdHints(this.name)
-			}
+		{
+			idHints: getIdHints(this.name)
+		}
 		);
 	}
 
 	async chatInputRun(interaction) {
 		const commands = this.container.stores.get('commands');
-		
+
 		const commandList = commands
 			.map(cmd => `**${cmd.name}** - ${cmd.description}`)
 			.join('\n');

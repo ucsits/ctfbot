@@ -12,7 +12,7 @@ module.exports = {
 	formatDiscordTimestamp,
 	hoursToMs,
 	daysToMs,
-	
+
 	// Command ID utilities
 	getIdHints,
 	saveCommandIds

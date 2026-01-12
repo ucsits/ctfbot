@@ -2,6 +2,7 @@ const { Command } = require('@sapphire/framework');
 const { EmbedBuilder } = require('discord.js');
 const { getIdHints } = require('../utils');
 const { ctfOperations, registrationOperations, challengeOperations } = require('../database');
+const config = require('../config');
 
 class SolveCTFCommand extends Command {
 	constructor(context, options) {
@@ -24,9 +25,9 @@ class SolveCTFCommand extends Command {
 						.setRequired(true)
 						.setAutocomplete(true)
 				),
-			{
-				idHints: getIdHints(this.name)
-			}
+		{
+			idHints: getIdHints(this.name)
+		}
 		);
 	}
 
@@ -43,7 +44,7 @@ class SolveCTFCommand extends Command {
 
 			// Get all challenges for this CTF
 			const challenges = challengeOperations.getChallengesByCTF(ctf.id);
-			
+
 			// Filter challenges based on user input
 			const filtered = challenges
 				.filter(chal => chal.chal_name.toLowerCase().includes(focusedValue))
@@ -61,18 +62,9 @@ class SolveCTFCommand extends Command {
 	}
 
 	async chatInputRun(interaction) {
-		// Check if command is used in a CTF channel (inside the CTF category)
 		const channel = interaction.channel;
-		const categoryId = process.env.CTF_CATEGORY_ID;
-		
-		if (!categoryId) {
-			return interaction.reply({
-				content: '❌ CTF category is not configured. Please set CTF_CATEGORY_ID in environment variables.',
-				ephemeral: true
-			});
-		}
 
-		if (channel.parentId !== categoryId) {
+		if (channel.parentId !== config.ctf.categoryId) {
 			return interaction.reply({
 				content: '❌ This command can only be used in CTF channels (channels within the CTF category).',
 				ephemeral: true
@@ -114,7 +106,7 @@ class SolveCTFCommand extends Command {
 			if (ctf.team_mode && registration.team_name) {
 				const teamMembers = registrationOperations.getTeamMembers(ctf.id, registration.team_name);
 				const teamMemberIds = teamMembers.map(m => m.user_id);
-				
+
 				// Check if any team member has solved this challenge
 				for (const memberId of teamMemberIds) {
 					if (memberId !== userId && challengeOperations.hasUserSolved(challenge.id, memberId)) {
@@ -157,7 +149,7 @@ class SolveCTFCommand extends Command {
 				/*const announceEmbed = new EmbedBuilder()
 					.setColor(isFirstBlood ? 0xFF0000 : 0x0099FF)
 					.setDescription(
-						isFirstBlood 
+						isFirstBlood
 							? `🩸 **FIRST BLOOD!** ${interaction.user} solved **${chalName}** (${challenge.chal_category})`
 							: `✅ ${interaction.user} solved **${chalName}** (${challenge.chal_category})`
 					)

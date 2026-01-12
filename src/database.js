@@ -17,7 +17,7 @@ db.pragma('foreign_keys = ON');
 /**
  * Initialize database schema
  * Creates tables if they don't exist
- * 
+ *
  * @returns {void}
  */
 function initDatabase() {
@@ -62,7 +62,7 @@ function initDatabase() {
 	// Run migrations to apply any schema updates
 	const migrationsDir = path.join(__dirname, '..', 'migrations');
 	const result = runMigrations(db, migrationsDir);
-	
+
 	if (result.error) {
 		console.error('❌ Migration error:', result.error);
 	} else if (result.applied.length > 0) {
@@ -79,7 +79,7 @@ function initDatabase() {
 const ctfOperations = {
 	/**
 	 * Create a new CTF entry
-	 * 
+	 *
 	 * @param {Object} data - CTF data
 	 * @param {string} data.guild_id - Discord guild ID
 	 * @param {string} data.channel_id - Discord channel ID
@@ -104,7 +104,7 @@ const ctfOperations = {
 
 	/**
 	 * Get CTF by channel ID
-	 * 
+	 *
 	 * @param {string} channelId - Discord channel ID
 	 * @returns {Object|undefined} CTF data or undefined if not found
 	 */
@@ -115,7 +115,7 @@ const ctfOperations = {
 
 	/**
 	 * Get CTF by ID
-	 * 
+	 *
 	 * @param {number} id - CTF ID
 	 * @returns {Object|undefined} CTF data or undefined if not found
 	 */
@@ -126,7 +126,7 @@ const ctfOperations = {
 
 	/**
 	 * Get all CTFs for a guild
-	 * 
+	 *
 	 * @param {string} guildId - Discord guild ID
 	 * @returns {Object[]} Array of CTF data
 	 */
@@ -137,7 +137,7 @@ const ctfOperations = {
 
 	/**
 	 * Delete a CTF
-	 * 
+	 *
 	 * @param {number} id - CTF ID
 	 * @returns {Object} Delete operation result
 	 */
@@ -148,7 +148,7 @@ const ctfOperations = {
 
 	/**
 	 * Archive a CTF
-	 * 
+	 *
 	 * @param {string} channelId - Discord channel ID
 	 * @returns {Object} Update operation result
 	 */
@@ -159,7 +159,7 @@ const ctfOperations = {
 
 	/**
 	 * Unarchive a CTF
-	 * 
+	 *
 	 * @param {string} channelId - Discord channel ID
 	 * @returns {Object} Update operation result
 	 */
@@ -170,7 +170,7 @@ const ctfOperations = {
 
 	/**
 	 * Get summary stats for a CTF
-	 * 
+	 *
 	 * @param {number} ctfId - CTF ID
 	 * @returns {Object[]} Array of user stats
 	 */
@@ -204,7 +204,7 @@ const ctfOperations = {
 const registrationOperations = {
 	/**
 	 * Register a user for a CTF (UPSERT operation)
-	 * 
+	 *
 	 * @param {Object} data - Registration data
 	 * @param {number} data.ctf_id - CTF ID
 	 * @param {string} data.user_id - Discord user ID
@@ -227,7 +227,7 @@ const registrationOperations = {
 
 	/**
 	 * Get all registrations for a CTF
-	 * 
+	 *
 	 * @param {number} ctfId - CTF ID
 	 * @returns {Object[]} Array of registration data
 	 */
@@ -238,7 +238,7 @@ const registrationOperations = {
 
 	/**
 	 * Get user registration for a specific CTF
-	 * 
+	 *
 	 * @param {number} ctfId - CTF ID
 	 * @param {string} userId - Discord user ID
 	 * @returns {Object|undefined} Registration data or undefined if not found
@@ -250,7 +250,7 @@ const registrationOperations = {
 
 	/**
 	 * Get all team members for a CTF
-	 * 
+	 *
 	 * @param {number} ctfId - CTF ID
 	 * @param {string} teamName - Team name
 	 * @returns {Object[]} Array of registration data for team members
@@ -262,7 +262,7 @@ const registrationOperations = {
 
 	/**
 	 * Delete a registration
-	 * 
+	 *
 	 * @param {number} ctfId - CTF ID
 	 * @param {string} userId - Discord user ID
 	 * @returns {Object} Delete operation result
@@ -280,7 +280,7 @@ const registrationOperations = {
 const challengeOperations = {
 	/**
 	 * Add or update a challenge (UPSERT)
-	 * 
+	 *
 	 * @param {Object} data - Challenge data
 	 * @param {number} data.ctf_id - CTF ID
 	 * @param {string} data.chal_name - Challenge name
@@ -302,7 +302,7 @@ const challengeOperations = {
 
 	/**
 	 * Add a challenge to a CTF
-	 * 
+	 *
 	 * @param {Object} data - Challenge data
 	 * @param {number} data.ctf_id - CTF ID
 	 * @param {string} data.chal_name - Challenge name
@@ -321,7 +321,7 @@ const challengeOperations = {
 
 	/**
 	 * Get all challenges for a CTF
-	 * 
+	 *
 	 * @param {number} ctfId - CTF ID
 	 * @returns {Object[]} Array of challenge data
 	 */
@@ -332,7 +332,7 @@ const challengeOperations = {
 
 	/**
 	 * Get a challenge by name for a CTF
-	 * 
+	 *
 	 * @param {number} ctfId - CTF ID
 	 * @param {string} chalName - Challenge name
 	 * @returns {Object|undefined} Challenge data or undefined if not found
@@ -344,7 +344,7 @@ const challengeOperations = {
 
 	/**
 	 * Mark a challenge as solved by a user
-	 * 
+	 *
 	 * @param {number} challengeId - Challenge ID
 	 * @param {string} userId - Discord user ID who solved it
 	 * @returns {number} The ID of the solve record
@@ -355,7 +355,7 @@ const challengeOperations = {
 			VALUES (?, ?)
 		`);
 		const result = stmt.run(challengeId, userId);
-		
+
 		// Update challenge as solved
 		const updateStmt = db.prepare(`
 			UPDATE ctf_challenges 
@@ -363,13 +363,13 @@ const challengeOperations = {
 			WHERE id = ?
 		`);
 		updateStmt.run(challengeId);
-		
+
 		return result.lastInsertRowid;
 	},
 
 	/**
 	 * Update points for a challenge
-	 * 
+	 *
 	 * @param {number} challengeId - Challenge ID
 	 * @param {number} points - Points value
 	 * @returns {Object} Update operation result
@@ -381,7 +381,7 @@ const challengeOperations = {
 
 	/**
 	 * Get all solvers for a challenge
-	 * 
+	 *
 	 * @param {number} challengeId - Challenge ID
 	 * @returns {Object[]} Array of solve records
 	 */
@@ -392,7 +392,7 @@ const challengeOperations = {
 
 	/**
 	 * Check if a user has solved a challenge
-	 * 
+	 *
 	 * @param {number} challengeId - Challenge ID
 	 * @param {string} userId - Discord user ID
 	 * @returns {Object|undefined} Solve record or undefined if not solved
@@ -404,7 +404,7 @@ const challengeOperations = {
 
 	/**
 	 * Delete a challenge
-	 * 
+	 *
 	 * @param {number} challengeId - Challenge ID
 	 * @returns {Object} Delete operation result
 	 */
@@ -421,7 +421,7 @@ const challengeOperations = {
 const pactOperations = {
 	/**
 	 * Create or update a pact
-	 * 
+	 *
 	 * @param {string} userId - Discord user ID
 	 * @param {string} name - User's name
 	 * @param {string} nrp - User's NRP
@@ -437,7 +437,7 @@ const pactOperations = {
 
 	/**
 	 * Get a pact by user ID
-	 * 
+	 *
 	 * @param {string} userId - Discord user ID
 	 * @returns {Object|undefined} Pact record or undefined if not found
 	 */

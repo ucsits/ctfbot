@@ -2,6 +2,7 @@ const { Command } = require('@sapphire/framework');
 const { EmbedBuilder } = require('discord.js');
 const { getIdHints } = require('../utils');
 const { ctfOperations, registrationOperations } = require('../database');
+const config = require('../config');
 
 class RegisterCTFCommand extends Command {
 	constructor(context, options) {
@@ -35,25 +36,16 @@ class RegisterCTFCommand extends Command {
 						.setDescription('CTFd instance URL (e.g., https://ctf.example.com)')
 						.setRequired(false)
 				),
-			{
-				idHints: getIdHints(this.name)
-			}
+		{
+			idHints: getIdHints(this.name)
+		}
 		);
 	}
 
 	async chatInputRun(interaction) {
-		// Check if command is used in a CTF channel (inside the CTF category)
 		const channel = interaction.channel;
-		const categoryId = process.env.CTF_CATEGORY_ID;
-		
-		if (!categoryId) {
-			return interaction.reply({
-				content: '❌ CTF category is not configured. Please set CTF_CATEGORY_ID in environment variables.',
-				ephemeral: true
-			});
-		}
 
-		if (channel.parentId !== categoryId) {
+		if (channel.parentId !== config.ctf.categoryId) {
 			return interaction.reply({
 				content: '❌ This command can only be used in CTF channels (channels within the CTF category).',
 				ephemeral: true
@@ -84,7 +76,7 @@ class RegisterCTFCommand extends Command {
 			let ctfdData = null;
 			const effectiveCtfdUrl = ctfdUrl || ctf.ctf_base_url;
 			const hasApiToken = ctf.api_token && ctf.api_token.trim() !== '';
-			
+
 			if (effectiveCtfdUrl && hasApiToken) {
 				try {
 					// Note: CTFd integration requires authentication token
@@ -169,32 +161,32 @@ class RegisterCTFCommand extends Command {
 	 */
 	async fetchCTFdUserData(ctfdUrl, username, ctf) {
 		const { CTFdClient } = require('../lib/ctfd');
-		
+
 		// Get API token from CTF record
 		const apiToken = ctf.api_token;
-		
+
 		if (!apiToken) {
 			throw new Error('CTFd API token not configured. Please provide api_token when creating this CTF with /createctf.');
 		}
-		
+
 		try {
 			// Initialize CTFd client
 			const ctfd = new CTFdClient(ctfdUrl, apiToken);
-			
+
 			// Search for user by username
 			this.container.logger.info(`Searching for user "${username}" on CTFd: ${ctfdUrl}`);
 			const users = await ctfd.getUsers({ q: username });
-			
+
 			if (!users || users.length === 0) {
 				throw new Error(`User "${username}" not found on CTFd platform. Make sure you're using the exact username from your CTFd account.`);
 			}
-			
+
 			// Find exact match (case-insensitive)
 			const user = users.find(u => u.name.toLowerCase() === username.toLowerCase()) || users[0];
 			this.container.logger.info(`Found CTFd user: ${user.name} (ID: ${user.id})`);
-			
+
 			let teamName = null;
-			
+
 			// Fetch team if user has one
 			if (user.team_id) {
 				try {
@@ -206,7 +198,7 @@ class RegisterCTFCommand extends Command {
 					// Don't fail registration if team fetch fails
 				}
 			}
-			
+
 			return {
 				userId: user.id,
 				teamName: teamName

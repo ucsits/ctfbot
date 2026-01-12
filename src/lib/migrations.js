@@ -9,7 +9,7 @@ const Database = require('better-sqlite3');
 
 /**
  * Run all pending migrations
- * 
+ *
  * @param {Database.Database} db - Database instance
  * @param {string} [migrationsDir] - Directory containing migration files
  * @returns {Object} Migration results
@@ -51,7 +51,7 @@ function runMigrations(db, migrationsDir = path.join(__dirname, '../migrations')
 
 		try {
 			const sql = fs.readFileSync(path.join(migrationsDir, file), 'utf8');
-			
+
 			// Execute in a transaction
 			db.transaction(() => {
 				db.exec(sql);
@@ -71,7 +71,7 @@ function runMigrations(db, migrationsDir = path.join(__dirname, '../migrations')
 
 /**
  * Create a new migration file
- * 
+ *
  * @param {string} name - Migration name (e.g., 'add_user_preferences')
  * @param {string} [migrationsDir] - Directory to create migration in
  * @returns {string} Path to created migration file
@@ -110,7 +110,7 @@ INSERT OR IGNORE INTO migrations (name) VALUES ('${paddedNumber}_${name}');
 
 /**
  * List all migrations and their status
- * 
+ *
  * @param {Database.Database} db - Database instance
  * @param {string} [migrationsDir] - Directory containing migration files
  * @returns {Object[]} List of migrations with status

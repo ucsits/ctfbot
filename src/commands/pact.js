@@ -29,9 +29,9 @@ class PactCommand extends Command {
 						.setDescription('Your NRP (must be a number)')
 						.setRequired(true)
 				),
-			{
-				idHints: getIdHints(this.name)
-			}
+		{
+			idHints: getIdHints(this.name)
+		}
 		);
 	}
 

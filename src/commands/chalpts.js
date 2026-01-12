@@ -2,6 +2,7 @@ const { Command } = require('@sapphire/framework');
 const { EmbedBuilder } = require('discord.js');
 const { getIdHints } = require('../utils');
 const { ctfOperations, challengeOperations } = require('../database');
+const config = require('../config');
 
 class ChalPtsCommand extends Command {
 	constructor(context, options) {
@@ -29,25 +30,16 @@ class ChalPtsCommand extends Command {
 						.setDescription('Points for the challenge')
 						.setRequired(true)
 				),
-			{
-				idHints: getIdHints(this.name)
-			}
+		{
+			idHints: getIdHints(this.name)
+		}
 		);
 	}
 
 	async chatInputRun(interaction) {
-		// Check if command is used in a CTF channel (inside the CTF category)
 		const channel = interaction.channel;
-		const categoryId = process.env.CTF_CATEGORY_ID;
-		
-		if (!categoryId) {
-			return interaction.reply({
-				content: '❌ CTF category is not configured. Please set CTF_CATEGORY_ID in environment variables.',
-				ephemeral: true
-			});
-		}
 
-		if (channel.parentId !== categoryId) {
+		if (channel.parentId !== config.ctf.categoryId) {
 			return interaction.reply({
 				content: '❌ This command can only be used in CTF channels (channels within the CTF category).',
 				ephemeral: true

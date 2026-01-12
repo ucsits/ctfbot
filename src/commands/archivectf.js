@@ -17,9 +17,9 @@ class ArchiveCTFCommand extends Command {
 			builder
 				.setName(this.name)
 				.setDescription(this.description),
-			{
-				idHints: getIdHints(this.name)
-			}
+		{
+			idHints: getIdHints(this.name)
+		}
 		);
 	}
 

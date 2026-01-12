@@ -27,9 +27,9 @@ class SyncChallengesCommand extends Command {
 							{ name: 'Users (from User Profiles)', value: 'users' }
 						)
 				),
-			{
-				idHints: getIdHints(this.name)
-			}
+		{
+			idHints: getIdHints(this.name)
+		}
 		);
 	}
 
@@ -51,7 +51,7 @@ class SyncChallengesCommand extends Command {
 
 		try {
 			const client = createCTFdClient(ctf.ctf_base_url, ctf.api_token);
-			
+
 			let challenges = [];
 			const newChallenges = [];
 
@@ -80,12 +80,14 @@ class SyncChallengesCommand extends Command {
 						points: chal.value,
 						created_by: interaction.user.id
 					});
-					
+
 					// Get the local ID
 					let dbChalId = existingId;
 					if (!dbChalId) {
 						const dbChal = challengeOperations.getChallengeByName(ctf.id, chal.name);
-						if (dbChal) dbChalId = dbChal.id;
+						if (dbChal) {
+							dbChalId = dbChal.id;
+						}
 					}
 
 					if (dbChalId) {
@@ -96,30 +98,32 @@ class SyncChallengesCommand extends Command {
 			} else {
 				await interaction.editReply('🔄 Syncing solves from users...');
 			}
-            
-            // Get all registrations to map CTFd user IDs to Discord IDs
-            const registrations = registrationOperations.getRegistrationsByCTF(ctf.id);
-            const ctfdUserMap = new Map(); // ctfd_user_id -> discord_user_id
-            for (const reg of registrations) {
-                if (reg.ctfd_user_id) {
-                    // Ensure we use integer string for mapping
-                    ctfdUserMap.set(String(parseInt(reg.ctfd_user_id)), reg.user_id);
-                }
-            }
 
-            let solvesSynced = 0;
+			// Get all registrations to map CTFd user IDs to Discord IDs
+			const registrations = registrationOperations.getRegistrationsByCTF(ctf.id);
+			const ctfdUserMap = new Map(); // ctfd_user_id -> discord_user_id
+			for (const reg of registrations) {
+				if (reg.ctfd_user_id) {
+					// Ensure we use integer string for mapping
+					ctfdUserMap.set(String(parseInt(reg.ctfd_user_id)), reg.user_id);
+				}
+			}
+
+			let solvesSynced = 0;
 			const newSolves = [];
 
 			// Method A: Iterate through challenges and get solves
 			if (source === 'direct') {
 				for (const chal of challenges) {
 					const localChalId = nameToLocalIdMap.get(chal.name);
-					if (!localChalId) continue;
+					if (!localChalId) {
+						continue;
+					}
 
 					try {
 						// We must use chal.id here because the API requires it
 						const solves = await client.getChallengeSolves(chal.id);
-						
+
 						for (const solve of solves) {
 							// solve.user_id is the user who solved it
 							const ctfdUserId = String(parseInt(solve.user_id));
@@ -143,21 +147,27 @@ class SyncChallengesCommand extends Command {
 			}            // Method B: Iterate through registered users and get their solves
 			if (source === 'users') {
 				for (const reg of registrations) {
-					if (!reg.ctfd_user_id) continue;
+					if (!reg.ctfd_user_id) {
+						continue;
+					}
 
 					try {
-                        const ctfdUserId = parseInt(reg.ctfd_user_id);
+						const ctfdUserId = parseInt(reg.ctfd_user_id);
 						const userSolves = await client.getUserSolves(ctfdUserId);
-						
+
 						for (const solve of userSolves) {
 							// Only process correct solves
-							if (solve.type && solve.type !== 'correct') continue;
+							if (solve.type && solve.type !== 'correct') {
+								continue;
+							}
 
-							if (!solve.challenge) continue;
+							if (!solve.challenge) {
+								continue;
+							}
 
 							const chalName = solve.challenge.name;
 							let localChalId = nameToLocalIdMap.get(chalName);
-							console.log("[DEBUG] localChalId", localChalId);
+							console.log('[DEBUG] localChalId', localChalId);
 
 							if (!localChalId) {
 								const chalCategory = solve.challenge.category;
@@ -186,7 +196,7 @@ class SyncChallengesCommand extends Command {
 									challengeOperations.markChallengeSolved(localChalId, reg.user_id);
 									solvesSynced++;
 									newSolves.push(`<@${reg.user_id}> solved **${chalName}**`);
-									console.log("[INFO]", `<@${reg.user_id}> solved **${chalName}**`);
+									console.log('[INFO]', `<@${reg.user_id}> solved **${chalName}**`);
 								}
 							}
 						}
@@ -197,7 +207,7 @@ class SyncChallengesCommand extends Command {
 			}
 
 			let response = `✅ Sync complete (Source: ${source})!\n- Challenges processed: ${challenges.length}\n- New solves recorded: ${solvesSynced}`;
-			
+
 			if (newChallenges.length > 0) {
 				response += `\n\n**New Challenges:**\n${newChallenges.join('\n')}`;
 			}
