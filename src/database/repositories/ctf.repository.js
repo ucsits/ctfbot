@@ -49,25 +49,44 @@ const ctfOperations = {
 
 	getCTFSummaryStats: (ctfId) => {
 		const db = getConnection();
-		const stmt = db.prepare(`
+		const registrations = db.prepare(`
 			SELECT
 				r.user_id,
 				r.username,
 				r.team_name,
-				r.ctfd_team_name,
-				p.name as real_name,
-				p.nrp,
-				COUNT(s.id) as solve_count,
-				COALESCE(SUM(c.points), 0) as total_points
+				r.ctfd_team_name
 			FROM ctf_registrations r
-			LEFT JOIN pacts p ON r.user_id = p.user_id
-			LEFT JOIN ctf_challenge_solves s ON s.user_id = r.user_id
-			LEFT JOIN ctf_challenges c ON s.challenge_id = c.id AND c.ctf_id = r.ctf_id
 			WHERE r.ctf_id = ?
-			GROUP BY r.user_id
-			ORDER BY total_points DESC
-		`);
-		return stmt.all(ctfId);
+		`).all(ctfId);
+
+		const userIds = registrations.map(r => r.user_id);
+
+		const solves = userIds.length > 0
+			? db.prepare(`
+					SELECT
+						s.user_id,
+						COUNT(s.id) as solve_count,
+						COALESCE(SUM(c.points), 0) as total_points
+					FROM ctf_challenge_solves s
+					LEFT JOIN ctf_challenges c ON s.challenge_id = c.id AND c.ctf_id = ?
+					WHERE s.user_id IN (${userIds.map(() => '?').join(', ')})
+					GROUP BY s.user_id
+				`).all([...userIds, ...userIds.map(() => ctfId)])
+			: [];
+
+		const userIdToSolves = new Map(solves.map(s => [s.user_id, s]));
+
+		return registrations.map(r => {
+			const solveData = userIdToSolves.get(r.user_id) || { solve_count: 0, total_points: 0 };
+			return {
+				user_id: r.user_id,
+				username: r.username,
+				team_name: r.team_name,
+				ctfd_team_name: r.ctfd_team_name,
+				solve_count: solveData.solve_count,
+				total_points: solveData.total_points
+			};
+		}).sort((a, b) => b.total_points - a.total_points);
 	}
 };
 
