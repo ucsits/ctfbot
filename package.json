@@ -41,7 +41,8 @@
     "@sapphire/framework": "^5.3.7",
     "better-sqlite3": "^12.4.1",
     "discord.js": "14.x",
-    "dotenv": "^17.2.3"
+    "dotenv": "^17.2.3",
+    "luxon": "^3.7.2"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
