@@ -1,6 +1,6 @@
 const { Command } = require('@sapphire/framework');
 const { EmbedBuilder } = require('discord.js');
-const { getIdHints } = require('../utils');
+const { getIdHints } = require('../lib/utils');
 const { pactOperations } = require('../database');
 
 class PactCommand extends Command {

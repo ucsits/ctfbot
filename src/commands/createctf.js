@@ -1,6 +1,6 @@
 const { Command } = require('@sapphire/framework');
 const { PermissionFlagsBits, EmbedBuilder, ChannelType } = require('discord.js');
-const { getIdHints, parseLocalDateToUTC } = require('../utils');
+const { getIdHints, parseLocalDateToUTC } = require('../lib/utils');
 const { ctfOperations } = require('../database');
 const config = require('../config');
 

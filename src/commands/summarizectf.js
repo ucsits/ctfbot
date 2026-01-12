@@ -1,6 +1,6 @@
 const { Command } = require('@sapphire/framework');
 const { EmbedBuilder, AttachmentBuilder } = require('discord.js');
-const { getIdHints } = require('../utils');
+const { getIdHints } = require('../lib/utils');
 const { ctfOperations } = require('../database');
 const { createCTFdClient } = require('../lib/ctfd');
 

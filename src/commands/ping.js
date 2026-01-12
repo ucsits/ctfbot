@@ -1,5 +1,5 @@
 const { Command } = require('@sapphire/framework');
-const { getIdHints } = require('../utils');
+const { getIdHints } = require('../lib/utils');
 
 class PingCommand extends Command {
 	constructor(context, options) {

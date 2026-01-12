@@ -1,5 +1,5 @@
 const { Command } = require('@sapphire/framework');
-const { getIdHints } = require('../utils');
+const { getIdHints } = require('../lib/utils');
 const { ctfOperations, challengeOperations, registrationOperations } = require('../database');
 const { createCTFdClient } = require('../lib/ctfd');
 

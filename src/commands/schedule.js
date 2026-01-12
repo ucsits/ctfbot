@@ -1,6 +1,6 @@
 const { Command } = require('@sapphire/framework');
 const { PermissionFlagsBits, EmbedBuilder } = require('discord.js');
-const { getIdHints, parseLocalDateToUTC } = require('../utils');
+const { getIdHints, parseLocalDateToUTC } = require('../lib/utils');
 
 class ScheduleCommand extends Command {
 	constructor(context, options) {
