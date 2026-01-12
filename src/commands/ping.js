@@ -1,5 +1,4 @@
 const { Command } = require('@sapphire/framework');
-const { getIdHints } = require('../lib/utils');
 
 class PingCommand extends Command {
 	constructor(context, options) {
@@ -11,24 +10,15 @@ class PingCommand extends Command {
 	}
 
 	async messageRun(message) {
-		const msg = await message.reply('Pinging...');
+		await message.reply('Pinging...');
 
 		const ping = Math.round(this.container.client.ws.ping);
 
-		return msg.edit(`Pong! 🏓\nAPI Latency: ${ping}ms`);
-	}
-
-	registerApplicationCommands(registry) {
-		registry.registerChatInputCommand((builder) =>
-			builder
-				.setName(this.name)
-				.setDescription(this.description),
-		{ idHints: getIdHints(this.name) }
-		);
+		return message.edit(`Pong! 🏓\nAPI Latency: ${ping}ms`);
 	}
 
 	async chatInputRun(interaction) {
-		const msg = await interaction.reply({ content: 'Pinging...' });
+		await interaction.reply({ content: 'Pinging...' });
 
 		const ping = Math.round(this.container.client.ws.ping);
 

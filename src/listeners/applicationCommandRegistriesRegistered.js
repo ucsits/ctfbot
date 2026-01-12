@@ -11,7 +11,7 @@ class ApplicationCommandRegistriesRegisteredListener extends Listener {
 		});
 	}
 
-	async run(registries) {
+	async run(_registries) {
 		// File to store command IDs
 		const idHintsFile = path.join(__dirname, '..', 'commandIds.json');
 

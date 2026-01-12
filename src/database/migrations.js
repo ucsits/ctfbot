@@ -14,7 +14,11 @@ const { getConnection } = require('./connection');
  * @param {string} [migrationsDir] - Directory containing migration files
  * @returns {Object} Migration results
  */
-function runMigrations(db, migrationsDir = path.join(process.cwd(), 'migrations')) {
+// eslint-disable-next-line no-unused-vars
+function runMigrations(
+	db = getConnection(),
+	migrationsDir = path.join(process.cwd(), 'migrations')
+) {
 	// Ensure migrations table exists
 	db.exec(`
 		CREATE TABLE IF NOT EXISTS migrations (
