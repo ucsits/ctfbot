@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { getCTFForChannel, CTFNotFoundError } from '../../../src/lib/helpers/getCTFForChannel.js';
 
-vi.mock('../../../src/database');
+vi.mock('../../../src/database/index');
 
 describe('CTF Lookup Helper', () => {
 	const { ctfOperations } = require('../../../src/database');

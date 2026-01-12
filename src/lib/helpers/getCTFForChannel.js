@@ -1,4 +1,4 @@
-const { ctfOperations } = require('../../database');
+const { ctfOperations } = require('../../database/index');
 
 class CTFNotFoundError extends Error {
 	constructor(message) {

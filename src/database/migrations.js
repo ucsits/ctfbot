@@ -5,7 +5,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const Database = require('better-sqlite3');
+const { getConnection } = require('./connection');
 
 /**
  * Run all pending migrations
@@ -14,7 +14,7 @@ const Database = require('better-sqlite3');
  * @param {string} [migrationsDir] - Directory containing migration files
  * @returns {Object} Migration results
  */
-function runMigrations(db, migrationsDir = path.join(__dirname, '../migrations')) {
+function runMigrations(db, migrationsDir = path.join(process.cwd(), 'migrations')) {
 	// Ensure migrations table exists
 	db.exec(`
 		CREATE TABLE IF NOT EXISTS migrations (
@@ -76,7 +76,7 @@ function runMigrations(db, migrationsDir = path.join(__dirname, '../migrations')
  * @param {string} [migrationsDir] - Directory to create migration in
  * @returns {string} Path to created migration file
  */
-function createMigration(name, migrationsDir = path.join(__dirname, '../migrations')) {
+function createMigration(name, migrationsDir = path.join(process.cwd(), 'migrations')) {
 	// Ensure migrations directory exists
 	if (!fs.existsSync(migrationsDir)) {
 		fs.mkdirSync(migrationsDir, { recursive: true });
@@ -115,7 +115,7 @@ INSERT OR IGNORE INTO migrations (name) VALUES ('${paddedNumber}_${name}');
  * @param {string} [migrationsDir] - Directory containing migration files
  * @returns {Object[]} List of migrations with status
  */
-function listMigrations(db, migrationsDir = path.join(__dirname, '../migrations')) {
+function listMigrations(db, migrationsDir = path.join(process.cwd(), 'migrations')) {
 	// Get applied migrations
 	const appliedMigrations = db.prepare('SELECT name, applied_at FROM migrations').all();
 	const appliedMap = new Map(appliedMigrations.map(m => [m.name, m.applied_at]));
