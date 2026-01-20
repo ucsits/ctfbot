@@ -85,145 +85,170 @@ class CreateCTFCommand extends Command {
 
 		await interaction.deferReply();
 
-		const ctfName = interaction.options.getString('ctf_name');
-		const dateStr = interaction.options.getString('ctf_date');
-		const endDateStr = interaction.options.getString('ctf_end_date');
-		const ctfBaseUrl = interaction.options.getString('ctf_base_url');
-		const timezone = interaction.options.getString('timezone');
-		const apiToken = interaction.options.getString('api_token');
-		const teamMode = interaction.options.getBoolean('team_mode') || false;
-		const description = interaction.options.getString('event_description') || `Join us for ${ctfName}!`;
-		const banner = interaction.options.getAttachment('event_banner');
+		const options = this.parseOptions(interaction);
 
 		try {
-			// Parse start date and convert to UTC
-			let eventDate;
-			try {
-				eventDate = parseLocalDateToUTC(dateStr, timezone);
-			} catch (error) {
-				return interaction.editReply(`❌ ${error.message}`);
-			}
+			const dates = this.parseDates(options);
+			this.validateDates(dates);
 
-			if (eventDate < new Date()) {
-				return interaction.editReply('❌ Event start date must be in the future.');
-			}
+			const category = this.getCategory(interaction);
+			const channelName = this.formatChannelName(options.ctfName);
+			const ctfChannel = await this.createChannel(interaction, channelName, category, options);
+			const scheduledEvent = await this.createEvent(interaction, options, dates);
+			await this.sendWelcomeMessage(ctfChannel, options, dates, scheduledEvent);
+			await this.saveToDatabase(interaction, ctfChannel, scheduledEvent, options, dates);
 
-			// Parse end date if provided, otherwise default to +24 hours
-			let eventEndDate;
-			if (endDateStr) {
-				try {
-					eventEndDate = parseLocalDateToUTC(endDateStr, timezone);
-				} catch (error) {
-					return interaction.editReply(`❌ Invalid end date: ${error.message}`);
-				}
+			return this.sendConfirmation(interaction, ctfChannel, scheduledEvent, options);
 
-				if (eventEndDate <= eventDate) {
-					return interaction.editReply('❌ Event end date must be after the start date.');
-				}
-			} else {
-				// Default to 24 hours after start
-				eventEndDate = new Date(eventDate.getTime() + 24 * 60 * 60 * 1000);
-			}
-
-			// Get or create CTF category
-			const category = interaction.guild.channels.cache.get(config.ctf.categoryId);
-
-			if (!category) {
-				return interaction.editReply('❌ CTF category not found. Please set CTF_CATEGORY_ID in your environment variables.');
-			}
-
-			// Create channel name (lowercase, replace spaces with hyphens)
-			const channelName = ctfName.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
-
-			// Create CTF text channel
-			const ctfChannel = await interaction.guild.channels.create({
-				name: `${channelName}`,
-				type: ChannelType.GuildText,
-				parent: category.id,
-				topic: `${ctfName} - ${description}`,
-				permissionOverwrites: [
-					{
-						id: interaction.guild.id,
-						allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages]
-					}
-				]
-			});
-
-			// Create scheduled event
-			const scheduledEvent = await interaction.guild.scheduledEvents.create({
-				name: ctfName,
-				description: description,
-				scheduledStartTime: eventDate,
-				scheduledEndTime: eventEndDate,
-				privacyLevel: 2, // GUILD_ONLY
-				entityType: 3, // EXTERNAL
-				entityMetadata: {
-					location: 'Online'
-				},
-				image: banner ? banner.url : null
-			});
-
-			// Send welcome message to the new channel
-			const welcomeEmbed = new EmbedBuilder()
-				.setColor(0x0099FF)
-				.setTitle(`🚩 ${ctfName}`)
-				.setDescription(description)
-				.addFields(
-					{ name: '⏰ Start Time', value: `<t:${Math.floor(eventDate.getTime() / 1000)}:F>`, inline: true },
-					{ name: '⏱️ End Time', value: `<t:${Math.floor(eventEndDate.getTime() / 1000)}:F>`, inline: true },
-					{ name: '🌐 CTF URL', value: ctfBaseUrl, inline: false },
-					{ name: '🔗 Event', value: `[View Event](${scheduledEvent.url})`, inline: false },
-					{ name: '📝 Register', value: 'Use `/registerctf <username>` to register your participation!', inline: false }
-				)
-				.setTimestamp();
-
-			if (banner) {
-				welcomeEmbed.setImage(banner.url);
-			}
-
-			await ctfChannel.send({ embeds: [welcomeEmbed] });
-
-			// Store CTF details in database
-			try {
-				const ctfId = ctfOperations.createCTF({
-					guild_id: interaction.guild.id,
-					channel_id: ctfChannel.id,
-					event_id: scheduledEvent.id,
-					ctf_name: ctfName,
-					ctf_base_url: ctfBaseUrl,
-					ctf_date: eventDate.toISOString(),
-					description: description,
-					banner_url: banner ? banner.url : null,
-					api_token: apiToken,
-					team_mode: teamMode ? 1 : 0,
-					created_by: interaction.user.id
-				});
-				this.container.logger.info(`Stored CTF "${ctfName}" in database (ID: ${ctfId}, channel: ${ctfChannel.id}, team_mode: ${teamMode})`);
-			} catch (dbError) {
-				this.container.logger.error('Failed to store CTF in database:', dbError);
-				// Send warning message to the channel
-				await ctfChannel.send({
-					content: '⚠️ **Warning**: CTF was created but failed to register in the database. The `/registerctf` command may not work in this channel.\n\nError: ' + dbError.message
-				});
-			}
-
-			// Reply to the command
-			const embed = new EmbedBuilder()
-				.setColor(0x00FF00)
-				.setTitle('✅ CTF Created Successfully')
-				.setDescription(`**${ctfName}** has been set up!`)
-				.addFields(
-					{ name: '📢 Channel', value: `${ctfChannel}`, inline: true },
-					{ name: '📅 Start Time', value: `<t:${Math.floor(eventDate.getTime() / 1000)}:F>`, inline: false },
-					{ name: '🔗 Event Link', value: `[View Event](${scheduledEvent.url})`, inline: false }
-				)
-				.setTimestamp();
-
-			return interaction.editReply({ embeds: [embed] });
 		} catch (error) {
 			this.container.logger.error('Error creating CTF:', error);
 			return interaction.editReply('❌ Failed to create CTF. Please check permissions and try again.');
 		}
+	}
+
+	parseOptions(interaction) {
+		return {
+			ctfName: interaction.options.getString('ctf_name'),
+			dateStr: interaction.options.getString('ctf_date'),
+			endDateStr: interaction.options.getString('ctf_end_date'),
+			ctfBaseUrl: interaction.options.getString('ctf_base_url'),
+			timezone: interaction.options.getString('timezone'),
+			apiToken: interaction.options.getString('api_token'),
+			teamMode: interaction.options.getBoolean('team_mode') || false,
+			description: interaction.options.getString('event_description') || `Join us for ${interaction.options.getString('ctf_name')}!`,
+			banner: interaction.options.getAttachment('event_banner')
+		};
+	}
+
+	parseDates(options) {
+		let eventDate;
+		try {
+			eventDate = parseLocalDateToUTC(options.dateStr, options.timezone);
+		} catch (error) {
+			throw new Error(`❌ ${error.message}`);
+		}
+
+		let eventEndDate;
+		if (options.endDateStr) {
+			try {
+				eventEndDate = parseLocalDateToUTC(options.endDateStr, options.timezone);
+			} catch (error) {
+				throw new Error(`❌ Invalid end date: ${error.message}`);
+			}
+		} else {
+			eventEndDate = new Date(eventDate.getTime() + 24 * 60 * 60 * 1000);
+		}
+
+		return { eventDate, eventEndDate };
+	}
+
+	validateDates(dates) {
+		if (dates.eventDate < new Date()) {
+			throw new Error('❌ Event start date must be in the future.');
+		}
+		if (dates.eventEndDate <= dates.eventDate) {
+			throw new Error('❌ Event end date must be after the start date.');
+		}
+	}
+
+	getCategory(interaction) {
+		const category = interaction.guild.channels.cache.get(config.ctf.categoryId);
+		if (!category) {
+			throw new Error('❌ CTF category not found. Please set CTF_CATEGORY_ID in your environment variables.');
+		}
+		return category;
+	}
+
+	formatChannelName(ctfName) {
+		return ctfName.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+	}
+
+	async createChannel(interaction, channelName, category, options) {
+		return interaction.guild.channels.create({
+			name: channelName,
+			type: ChannelType.GuildText,
+			parent: category.id,
+			topic: `${options.ctfName} - ${options.description}`,
+			permissionOverwrites: [
+				{
+					id: interaction.guild.id,
+					allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages]
+				}
+			]
+		});
+	}
+
+	async createEvent(interaction, options, dates) {
+		return interaction.guild.scheduledEvents.create({
+			name: options.ctfName,
+			description: options.description,
+			scheduledStartTime: dates.eventDate,
+			scheduledEndTime: dates.eventEndDate,
+			privacyLevel: 2,
+			entityType: 3,
+			entityMetadata: { location: 'Online' },
+			image: options.banner?.url
+		});
+	}
+
+	async sendWelcomeMessage(channel, options, dates, scheduledEvent) {
+		const embed = new EmbedBuilder()
+			.setColor(0x0099FF)
+			.setTitle(`🚩 ${options.ctfName}`)
+			.setDescription(options.description)
+			.addFields(
+				{ name: '⏰ Start Time', value: `<t:${Math.floor(dates.eventDate.getTime() / 1000)}:F>`, inline: true },
+				{ name: '⏱️ End Time', value: `<t:${Math.floor(dates.eventEndDate.getTime() / 1000)}:F>`, inline: true },
+				{ name: '🌐 CTF URL', value: options.ctfBaseUrl, inline: false },
+				{ name: '🔗 Event', value: `[View Event](${scheduledEvent.url})`, inline: false },
+				{ name: '📝 Register', value: 'Use `/registerctf <username>` to register your participation!', inline: false }
+			)
+			.setTimestamp();
+
+		if (options.banner) {
+			embed.setImage(options.banner.url);
+		}
+
+		return channel.send({ embeds: [embed] });
+	}
+
+	async saveToDatabase(interaction, channel, event, options, dates) {
+		try {
+			const ctfId = ctfOperations.createCTF({
+				guild_id: interaction.guild.id,
+				channel_id: channel.id,
+				event_id: event.id,
+				ctf_name: options.ctfName,
+				ctf_base_url: options.ctfBaseUrl,
+				ctf_date: dates.eventDate.toISOString(),
+				description: options.description,
+				banner_url: options.banner?.url,
+				api_token: options.apiToken,
+				team_mode: options.teamMode ? 1 : 0,
+				created_by: interaction.user.id
+			});
+			this.container.logger.info(`Stored CTF "${options.ctfName}" in database (ID: ${ctfId})`);
+		} catch (dbError) {
+			this.container.logger.error('Failed to store CTF in database:', dbError);
+			await channel.send({
+				content: '⚠️ **Warning**: CTF was created but failed to register in the database. Error: ' + dbError.message
+			});
+		}
+	}
+
+	sendConfirmation(interaction, channel, event, options) {
+		const embed = new EmbedBuilder()
+			.setColor(0x00FF00)
+			.setTitle('✅ CTF Created Successfully')
+			.setDescription(`**${options.ctfName}** has been set up!`)
+			.addFields(
+				{ name: '📢 Channel', value: `${channel}`, inline: true },
+				{ name: '📅 Start Time', value: `<t:${Math.floor(event.scheduledStartTime.getTime() / 1000)}:F>`, inline: false },
+				{ name: '🔗 Event Link', value: `[View Event](${event.url})`, inline: false }
+			)
+			.setTimestamp();
+
+		return interaction.editReply({ embeds: [embed] });
 	}
 }
 

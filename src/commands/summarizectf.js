@@ -102,80 +102,9 @@ class SummarizeCTFCommand extends Command {
 	}
 
 	async handlePrettyOutput(interaction, stats, ctf, isMultiTeam, scoreboard) {
-		let output = '';
-
-		if (!isMultiTeam) {
-			// Single team mode
-			// Try to find the team name from the first user who has one, or default to 'Unknown Team'
-			const teamName = stats.find(s => s.ctfd_team_name || s.team_name)?.ctfd_team_name
-				|| stats.find(s => s.ctfd_team_name || s.team_name)?.team_name
-				|| 'Unknown Team';
-
-			const totalPoints = stats.reduce((sum, s) => sum + s.total_points, 0);
-
-			let rank = 'N/A';
-			if (scoreboard.length > 0) {
-				const teamEntry = scoreboard.find(t => t.name === teamName);
-				if (teamEntry) {
-					rank = teamEntry.pos;
-				}
-			}
-
-			stats.forEach((s, index) => {
-				const name = s.real_name || s.username;
-				const nrp = s.nrp || 'n/a';
-				output += `${index + 1}. ${name} (${nrp}) - ${s.total_points} pts\n`;
-			});
-
-			output += `\n**Total Team Points:** ${totalPoints} pts\n`;
-			output += `**Leaderboard Position:** ${rank}`;
-
-		} else {
-			// Multi team mode
-			const teamGroups = {};
-			stats.forEach(s => {
-				const tName = s.team_name || 'Unassigned';
-				if (!teamGroups[tName]) {
-					teamGroups[tName] = [];
-				}
-				teamGroups[tName].push(s);
-			});
-
-			const sortedTeams = Object.entries(teamGroups).map(([tName, members]) => {
-				const tPoints = members.reduce((sum, m) => sum + m.total_points, 0);
-
-				let tRank = 'N/A';
-				if (scoreboard.length > 0) {
-					const teamEntry = scoreboard.find(t => t.name === tName);
-					if (teamEntry) {
-						tRank = teamEntry.pos;
-					}
-				}
-
-				return {
-					name: tName,
-					points: tPoints,
-					rank: tRank,
-					members: members.sort((a, b) => b.total_points - a.total_points)
-				};
-			}).sort((a, b) => b.points - a.points);
-
-			sortedTeams.forEach(team => {
-				const rankDisplay = team.rank !== 'N/A' ? `[${team.rank}]` : '[?]';
-				output += `${rankDisplay} ${team.name} (${team.points} pts)\n`;
-
-				team.members.forEach((m, idx) => {
-					const name = m.real_name || m.username;
-					const nrp = m.nrp || 'n/a';
-					output += `${idx + 1}. ${name} (${nrp}) - ${m.total_points} pts\n`;
-				});
-				output += '\n';
-			});
-		}
-
-		if (output.length > 4000) {
-			output = output.substring(0, 4000) + '... (truncated)';
-		}
+		const output = isMultiTeam
+			? await this.formatMultiTeamOutput(stats, scoreboard)
+			: this.formatSingleTeamOutput(stats, scoreboard);
 
 		const embed = new EmbedBuilder()
 			.setColor(0x0099FF)
@@ -184,6 +113,71 @@ class SummarizeCTFCommand extends Command {
 			.setTimestamp();
 
 		return interaction.editReply({ embeds: [embed] });
+	}
+
+	formatSingleTeamOutput(stats, scoreboard) {
+		const teamName = stats.find(s => s.ctfd_team_name || s.team_name)?.ctfd_team_name
+			|| stats.find(s => s.ctfd_team_name || s.team_name)?.team_name
+			|| 'Unknown Team';
+
+		const totalPoints = stats.reduce((sum, s) => sum + s.total_points, 0);
+		const rank = this.getTeamRank(scoreboard, teamName);
+
+		let output = '';
+		stats.forEach((s, index) => {
+			const name = s.real_name || s.username;
+			const nrp = s.nrp || 'n/a';
+			output += `${index + 1}. ${name} (${nrp}) - ${s.total_points} pts\n`;
+		});
+
+		output += `\n**Total Team Points:** ${totalPoints} pts\n`;
+		output += `**Leaderboard Position:** ${rank}`;
+		return output;
+	}
+
+	formatMultiTeamOutput(stats, scoreboard) {
+		const teamGroups = {};
+		stats.forEach(s => {
+			const tName = s.team_name || 'Unassigned';
+			if (!teamGroups[tName]) {
+				teamGroups[tName] = [];
+			}
+			teamGroups[tName].push(s);
+		});
+
+		const sortedTeams = Object.entries(teamGroups).map(([tName, members]) => {
+			const tPoints = members.reduce((sum, m) => sum + m.total_points, 0);
+			return {
+				name: tName,
+				points: tPoints,
+				rank: this.getTeamRank(scoreboard, tName),
+				members: members.sort((a, b) => b.total_points - a.total_points)
+			};
+		}).sort((a, b) => b.points - a.points);
+
+		let output = '';
+		sortedTeams.forEach(team => {
+			const rankDisplay = team.rank !== 'N/A' ? `[${team.rank}]` : '[?]';
+			output += `${rankDisplay} ${team.name} (${team.points} pts)\n`;
+
+			team.members.forEach((m, idx) => {
+				const name = m.real_name || m.username;
+				const nrp = m.nrp || 'n/a';
+				output += `${idx + 1}. ${name} (${nrp}) - ${m.total_points} pts\n`;
+			});
+			output += '\n';
+		});
+
+		if (output.length > 4000) {
+			output = output.substring(0, 4000) + '... (truncated)';
+		}
+		return output;
+	}
+
+	getTeamRank(scoreboard, teamName) {
+		if (scoreboard.length === 0) return 'N/A';
+		const teamEntry = scoreboard.find(t => t.name === teamName);
+		return teamEntry ? teamEntry.pos : 'N/A';
 	}
 }
 
