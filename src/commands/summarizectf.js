@@ -175,7 +175,9 @@ class SummarizeCTFCommand extends Command {
 	}
 
 	getTeamRank(scoreboard, teamName) {
-		if (scoreboard.length === 0) return 'N/A';
+		if (scoreboard.length === 0) {
+			return 'N/A';
+		}
 		const teamEntry = scoreboard.find(t => t.name === teamName);
 		return teamEntry ? teamEntry.pos : 'N/A';
 	}

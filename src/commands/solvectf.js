@@ -63,7 +63,9 @@ class SolveCTFCommand extends Command {
 
 	async chatInputRun(interaction) {
 		const cancelled = await ensureCTFChannelReply(interaction);
-		if (cancelled) return;
+		if (cancelled) {
+			return;
+		}
 
 		await interaction.deferReply();
 
@@ -143,7 +145,7 @@ class SolveCTFCommand extends Command {
 
 			} catch (dbError) {
 				if (dbError.message.includes('UNIQUE constraint failed')) {
-return interaction.editReply(`You have already marked **${chalName}** as solved.`);
+					return interaction.editReply(`You have already marked **${chalName}** as solved.`);
 				}
 				this.container.logger.error('Failed to mark challenge as solved:', dbError);
 				return interaction.editReply('Failed to mark challenge as solved. Please try again later.');

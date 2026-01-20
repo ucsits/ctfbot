@@ -144,7 +144,9 @@ class SyncChallengesCommand extends Command {
 
 	async syncSolvesForChallenge(ctf, client, chal, ctfdUserMap, nameToLocalIdMap) {
 		const localChalId = nameToLocalIdMap.get(chal.name);
-		if (!localChalId) return { count: 0, solves: [] };
+		if (!localChalId) {
+			return { count: 0, solves: [] };
+		}
 
 		let count = 0;
 		const solves = [];
@@ -169,7 +171,9 @@ class SyncChallengesCommand extends Command {
 	}
 
 	async syncSolvesForUser(ctf, client, reg, nameToLocalIdMap) {
-		if (!reg.ctfd_user_id) return { count: 0, solves: [] };
+		if (!reg.ctfd_user_id) {
+			return { count: 0, solves: [] };
+		}
 
 		let count = 0;
 		const solves = [];
@@ -177,8 +181,12 @@ class SyncChallengesCommand extends Command {
 		try {
 			const userSolves = await client.getUserSolves(parseInt(reg.ctfd_user_id));
 			for (const solve of userSolves) {
-				if (solve.type && solve.type !== 'correct') continue;
-				if (!solve.challenge) continue;
+				if (solve.type && solve.type !== 'correct') {
+					continue;
+				}
+				if (!solve.challenge) {
+					continue;
+				}
 
 				const chalName = solve.challenge.name;
 				let localChalId = nameToLocalIdMap.get(chalName);

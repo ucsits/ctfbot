@@ -38,7 +38,9 @@ class AddChalCTFCommand extends Command {
 
 	async chatInputRun(interaction) {
 		const cancelled = await ensureCTFChannelReply(interaction);
-		if (cancelled) return;
+		if (cancelled) {
+			return;
+		}
 
 		await interaction.deferReply();
 

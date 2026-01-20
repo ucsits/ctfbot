@@ -44,7 +44,9 @@ class RegisterCTFCommand extends Command {
 
 	async chatInputRun(interaction) {
 		const cancelled = await ensureCTFChannelReply(interaction);
-		if (cancelled) return;
+		if (cancelled) {
+			return;
+		}
 
 		await interaction.deferReply({ ephemeral: true });
 
@@ -101,7 +103,7 @@ class RegisterCTFCommand extends Command {
 				this.container.logger.info(`Registered ${userTag} for CTF "${ctf.ctf_name}" (team: ${teamName || ctfdData?.teamName || 'individual'})`);
 			} catch (dbError) {
 				this.container.logger.error('Failed to store registration:', dbError);
-return interaction.editReply('Failed to register. Please try again later.');
+				return interaction.editReply('Failed to register. Please try again later.');
 			}
 
 			const embed = new EmbedBuilder()

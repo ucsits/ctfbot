@@ -26,7 +26,9 @@ class ArchiveCTFCommand extends Command {
 
 	async chatInputRun(interaction) {
 		const cancelled = await checkPermissionReply(interaction, PermissionFlagsBits.ManageChannels, 'Manage Channels');
-		if (cancelled) return;
+		if (cancelled) {
+			return;
+		}
 
 		await interaction.deferReply();
 
