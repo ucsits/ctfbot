@@ -2,6 +2,7 @@ const { Command } = require('@sapphire/framework');
 const { PermissionFlagsBits, EmbedBuilder, ChannelType } = require('discord.js');
 const { getIdHints } = require('../lib/utils');
 const { ctfOperations } = require('../database');
+const { checkPermissionReply } = require('../lib/middleware/ensurePermission');
 
 class ArchiveCTFCommand extends Command {
 	constructor(context, options) {
@@ -24,13 +25,8 @@ class ArchiveCTFCommand extends Command {
 	}
 
 	async chatInputRun(interaction) {
-		// Check for manage channels permission
-		if (!interaction.member.permissions.has(PermissionFlagsBits.ManageChannels)) {
-			return interaction.reply({
-				content: '❌ You need the "Manage Channels" permission to use this command.',
-				ephemeral: true
-			});
-		}
+		const cancelled = await checkPermissionReply(interaction, PermissionFlagsBits.ManageChannels, 'Manage Channels');
+		if (cancelled) return;
 
 		await interaction.deferReply();
 

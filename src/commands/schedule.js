@@ -1,6 +1,7 @@
 const { Command } = require('@sapphire/framework');
 const { PermissionFlagsBits, EmbedBuilder } = require('discord.js');
 const { getIdHints, parseLocalDateToUTC } = require('../lib/utils');
+const { checkPermissionReply } = require('../lib/middleware/ensurePermission');
 
 class ScheduleCommand extends Command {
 	constructor(context, options) {
@@ -53,13 +54,8 @@ class ScheduleCommand extends Command {
 	}
 
 	async chatInputRun(interaction) {
-		// Check for manage events permission
-		if (!interaction.member.permissions.has(PermissionFlagsBits.ManageEvents)) {
-			return interaction.reply({
-				content: '❌ You need the "Manage Events" permission to use this command.',
-				ephemeral: true
-			});
-		}
+		const cancelled = await checkPermissionReply(interaction, PermissionFlagsBits.ManageEvents, 'Manage Events');
+		if (cancelled) return;
 
 		await interaction.deferReply();
 

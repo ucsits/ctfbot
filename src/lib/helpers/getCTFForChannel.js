@@ -1,9 +1,9 @@
-const { ctfOperations } = require('../../database/index');
+const { ctfOperations } = require('../../database');
+const { CTFBotError } = require('../errors');
 
-class CTFNotFoundError extends Error {
+class CTFNotFoundError extends CTFBotError {
 	constructor(message) {
 		super(message);
-		this.name = 'CTFNotFoundError';
 	}
 }
 

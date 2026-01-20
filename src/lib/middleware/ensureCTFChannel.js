@@ -1,9 +1,9 @@
-const config = require('../../config/index.js');
+const config = require('../../config');
+const { CTFBotError } = require('../errors');
 
-class CTFChannelError extends Error {
+class CTFChannelError extends CTFBotError {
 	constructor(message) {
 		super(message);
-		this.name = 'CTFChannelError';
 	}
 }
 

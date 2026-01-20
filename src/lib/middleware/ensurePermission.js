@@ -1,9 +1,9 @@
 const { PermissionFlagsBits } = require('discord.js');
+const { CTFBotError } = require('../errors');
 
-class PermissionError extends Error {
+class PermissionError extends CTFBotError {
 	constructor(message) {
 		super(message);
-		this.name = 'PermissionError';
 	}
 }
 

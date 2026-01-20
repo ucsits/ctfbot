@@ -2,7 +2,7 @@ const { Command } = require('@sapphire/framework');
 const { EmbedBuilder } = require('discord.js');
 const { getIdHints } = require('../lib/utils');
 const { ctfOperations, registrationOperations } = require('../database');
-const config = require('../config');
+const { ensureCTFChannelReply } = require('../lib/middleware/ensureCTFChannel');
 
 class RegisterCTFCommand extends Command {
 	constructor(context, options) {
@@ -43,17 +43,12 @@ class RegisterCTFCommand extends Command {
 	}
 
 	async chatInputRun(interaction) {
-		const channel = interaction.channel;
-
-		if (channel.parentId !== config.ctf.categoryId) {
-			return interaction.reply({
-				content: '❌ This command can only be used in CTF channels (channels within the CTF category).',
-				ephemeral: true
-			});
-		}
+		const cancelled = await ensureCTFChannelReply(interaction);
+		if (cancelled) return;
 
 		await interaction.deferReply({ ephemeral: true });
 
+		const channel = interaction.channel;
 		const username = interaction.options.getString('username');
 		const teamName = interaction.options.getString('team_name');
 		const ctfdUrl = interaction.options.getString('ctfd_url');

@@ -3,6 +3,7 @@ const { PermissionFlagsBits, EmbedBuilder, ChannelType } = require('discord.js')
 const { getIdHints, parseLocalDateToUTC } = require('../lib/utils');
 const { ctfOperations } = require('../database');
 const config = require('../config');
+const { checkPermissionReply } = require('../lib/middleware/ensurePermission');
 
 class CreateCTFCommand extends Command {
 	constructor(context, options) {
@@ -79,13 +80,8 @@ class CreateCTFCommand extends Command {
 	}
 
 	async chatInputRun(interaction) {
-		// Check for manage channels permission
-		if (!interaction.member.permissions.has(PermissionFlagsBits.ManageChannels)) {
-			return interaction.reply({
-				content: '❌ You need the "Manage Channels" permission to use this command.',
-				ephemeral: true
-			});
-		}
+		const cancelled = await checkPermissionReply(interaction, PermissionFlagsBits.ManageChannels, 'Manage Channels');
+		if (cancelled) return;
 
 		await interaction.deferReply();
 

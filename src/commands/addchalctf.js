@@ -2,7 +2,7 @@ const { Command } = require('@sapphire/framework');
 const { EmbedBuilder } = require('discord.js');
 const { getIdHints } = require('../lib/utils');
 const { ctfOperations, challengeOperations } = require('../database');
-const config = require('../config');
+const { ensureCTFChannelReply } = require('../lib/middleware/ensureCTFChannel');
 
 class AddChalCTFCommand extends Command {
 	constructor(context, options) {
@@ -37,30 +37,23 @@ class AddChalCTFCommand extends Command {
 	}
 
 	async chatInputRun(interaction) {
-		const channel = interaction.channel;
-
-		if (channel.parentId !== config.ctf.categoryId) {
-			return interaction.reply({
-				content: '❌ This command can only be used in CTF channels (channels within the CTF category).',
-				ephemeral: true
-			});
-		}
+		const cancelled = await ensureCTFChannelReply(interaction);
+		if (cancelled) return;
 
 		await interaction.deferReply();
 
+		const channel = interaction.channel;
 		const chalName = interaction.options.getString('chal_name');
 		const chalCategory = interaction.options.getString('chal_category');
 		const userId = interaction.user.id;
 		const userTag = interaction.user.tag;
 
 		try {
-			// Get CTF from database
 			const ctf = ctfOperations.getCTFByChannelId(channel.id);
 			if (!ctf) {
 				return interaction.editReply('❌ This channel is not registered as a CTF channel in the database.');
 			}
 
-			// Add challenge to database
 			try {
 				const chalId = challengeOperations.addChallenge({
 					ctf_id: ctf.id,
@@ -83,14 +76,6 @@ class AddChalCTFCommand extends Command {
 					.setFooter({ text: `Challenge ID: ${chalId}` });
 
 				await interaction.editReply({ embeds: [embed] });
-
-				// Announce in channel
-				/*const announceEmbed = new EmbedBuilder()
-					.setColor(0x0099FF)
-					.setDescription(`🎯 New challenge added: **${chalName}** (${chalCategory})`)
-					.setTimestamp();
-
-				await channel.send({ embeds: [announceEmbed] });*/
 
 			} catch (dbError) {
 				if (dbError.message.includes('UNIQUE constraint failed')) {
