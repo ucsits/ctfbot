@@ -36,8 +36,24 @@ function hoursToMs(hours) {
 	return hours * 60 * 60 * 1000;
 }
 
+function validateEventDate(date, fieldName = 'Event') {
+	if (date < new Date()) {
+		throw new Error(`❌ ${fieldName} date must be in the future.`);
+	}
+	return true;
+}
+
+function validateEndDateAfterStart(startDate, endDate) {
+	if (endDate <= startDate) {
+		throw new Error('❌ End date must be after start date.');
+	}
+	return true;
+}
+
 module.exports = {
 	parseLocalDateToUTC,
 	formatDiscordTimestamp,
-	hoursToMs
+	hoursToMs,
+	validateEventDate,
+	validateEndDateAfterStart
 };

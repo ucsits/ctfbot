@@ -10,13 +10,22 @@ module.exports = {
 		INVALID_DATE_FORMAT: '❌ Invalid date format. Please use: DD-MM-YYYY HH:MM (e.g., 31-12-2025 20:00)',
 		INVALID_TIMEZONE: '❌ Invalid timezone. Please use a valid IANA timezone (e.g., Asia/Jakarta, Europe/London, America/New_York)',
 		DATE_IN_PAST: '❌ Event date must be in the future.',
+		END_BEFORE_START: '❌ End date must be after start date.',
 		CATEGORY_NOT_FOUND: '❌ CTF category not found. Please set CTF_CATEGORY_ID in your environment variables.',
 		NOT_CTF_CHANNEL: '❌ This command can only be used in CTF channels (channels starting with `ctf-`).',
+		NOT_IN_GUILD: '❌ This command can only be used in a guild channel.',
+		NOT_IN_TEXT_CHANNEL: '❌ This command must be used in a text channel.',
+		MANAGE_CHANNELS_PERMISSION: '❌ You need the "Manage Channels" permission to use this command.',
+		MANAGE_EVENTS_PERMISSION: '❌ You need the "Manage Events" permission to use this command.',
 		CTF_NOT_FOUND: '❌ This channel is not registered as a CTF channel in the database.',
+		CTF_ALREADY_ARCHIVED: '❌ This CTF is already archived.',
+		TEAM_NAME_REQUIRED: '❌ This is a team-based CTF. Please provide your team name using the `team_name` parameter.',
+		NOT_REGISTERED: '❌ You must register for this CTF first using `/registerctf`.',
 		REGISTRATION_FAILED: '❌ Failed to register. Please try again later.',
 		INVALID_URL: '❌ Invalid URL format. Please provide a valid URL starting with http:// or https://',
 		DATABASE_ERROR: '❌ A database error occurred. Please contact an administrator.',
-		CTFD_FETCH_FAILED: '⚠️ Could not fetch CTFd data, but registration was successful.'
+		CTFD_FETCH_FAILED: '⚠️ Could not fetch CTFd data, but registration was successful.',
+		GENERIC_ERROR: '❌ An error occurred. Please try again later.'
 	},
 
 	// Success Messages
