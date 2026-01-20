@@ -1,5 +1,5 @@
 const { Command } = require('@sapphire/framework');
-const { PermissionFlagsBits, EmbedBuilder } = require('discord.js');
+const { PermissionFlagsBits, EmbedBuilder, ChannelType } = require('discord.js');
 const { getIdHints, parseLocalDateToUTC } = require('../lib/utils');
 const { checkPermissionReply } = require('../lib/middleware/ensurePermission');
 
@@ -46,6 +46,13 @@ class ScheduleCommand extends Command {
 						.setName('event_banner')
 						.setDescription('Banner image for the event')
 						.setRequired(false)
+				)
+				.addChannelOption(option =>
+					option
+						.setName('voice_channel')
+						.setDescription('Voice or Stage channel for the event (optional, creates external event if omitted)')
+						.setRequired(false)
+						.addChannelTypes(ChannelType.GuildVoice, ChannelType.GuildStageVoice)
 				),
 		{
 			idHints: getIdHints(this.name)
@@ -55,7 +62,9 @@ class ScheduleCommand extends Command {
 
 	async chatInputRun(interaction) {
 		const cancelled = await checkPermissionReply(interaction, PermissionFlagsBits.ManageEvents, 'Manage Events');
-		if (cancelled) return;
+		if (cancelled) {
+			return;
+		}
 
 		await interaction.deferReply();
 
@@ -64,6 +73,7 @@ class ScheduleCommand extends Command {
 		const dateStr = interaction.options.getString('event_date');
 		const timezone = interaction.options.getString('timezone');
 		const banner = interaction.options.getAttachment('event_banner');
+		const voiceChannel = interaction.options.getChannel('voice_channel');
 
 		try {
 			// Parse date and convert to UTC
@@ -78,19 +88,34 @@ class ScheduleCommand extends Command {
 				return interaction.editReply('❌ Event date must be in the future.');
 			}
 
-			// Create scheduled event
-			const scheduledEvent = await interaction.guild.scheduledEvents.create({
-				name: title,
-				description: description,
-				scheduledStartTime: eventDate,
-				scheduledEndTime: new Date(eventDate.getTime() + 3 * 60 * 60 * 1000), // Default 3 hours duration
-				privacyLevel: 2, // GUILD_ONLY
-				entityType: 3, // EXTERNAL
-				entityMetadata: {
-					location: 'Online'
-				},
-				image: banner ? banner.url : null
-			});
+			const isVoiceEvent = voiceChannel !== null;
+			let scheduledEvent;
+
+			if (isVoiceEvent) {
+				scheduledEvent = await interaction.guild.scheduledEvents.create({
+					name: title,
+					description: description,
+					scheduledStartTime: eventDate,
+					scheduledEndTime: new Date(eventDate.getTime() + 3 * 60 * 60 * 1000),
+					privacyLevel: 2,
+					entityType: voiceChannel.type === ChannelType.GuildStageVoice ? 1 : 2,
+					channel: voiceChannel.id,
+					image: banner ? banner.url : null
+				});
+			} else {
+				scheduledEvent = await interaction.guild.scheduledEvents.create({
+					name: title,
+					description: description,
+					scheduledStartTime: eventDate,
+					scheduledEndTime: new Date(eventDate.getTime() + 3 * 60 * 60 * 1000),
+					privacyLevel: 2,
+					entityType: 3,
+					entityMetadata: {
+						location: 'Online'
+					},
+					image: banner ? banner.url : null
+				});
+			}
 
 			const embed = new EmbedBuilder()
 				.setColor(0x00FF00)
@@ -98,10 +123,15 @@ class ScheduleCommand extends Command {
 				.setDescription(`**${title}** has been scheduled!`)
 				.addFields(
 					{ name: '📅 Date & Time', value: `<t:${Math.floor(eventDate.getTime() / 1000)}:F>`, inline: false },
-					{ name: '📝 Description', value: description, inline: false },
-					{ name: '🔗 Event Link', value: `[View Event](${scheduledEvent.url})`, inline: false }
+					{ name: '📝 Description', value: description, inline: false }
 				)
 				.setTimestamp();
+
+			if (isVoiceEvent) {
+				embed.addFields({ name: '🔊 Channel', value: voiceChannel.toString(), inline: true });
+			}
+
+			embed.addFields({ name: '🔗 Event Link', value: `[View Event](${scheduledEvent.url})`, inline: false });
 
 			if (banner) {
 				embed.setImage(banner.url);

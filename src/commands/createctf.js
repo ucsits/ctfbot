@@ -72,6 +72,13 @@ class CreateCTFCommand extends Command {
 						.setName('team_mode')
 						.setDescription('Is this a team-based CTF? (default: false)')
 						.setRequired(false)
+				)
+				.addChannelOption(option =>
+					option
+						.setName('voice_channel')
+						.setDescription('Voice or Stage channel for the event (optional, creates external event if omitted)')
+						.setRequired(false)
+						.addChannelTypes(ChannelType.GuildVoice, ChannelType.GuildStageVoice)
 				),
 		{
 			idHints: getIdHints(this.name)
@@ -81,7 +88,9 @@ class CreateCTFCommand extends Command {
 
 	async chatInputRun(interaction) {
 		const cancelled = await checkPermissionReply(interaction, PermissionFlagsBits.ManageChannels, 'Manage Channels');
-		if (cancelled) return;
+		if (cancelled) {
+			return;
+		}
 
 		await interaction.deferReply();
 
@@ -116,7 +125,8 @@ class CreateCTFCommand extends Command {
 			apiToken: interaction.options.getString('api_token'),
 			teamMode: interaction.options.getBoolean('team_mode') || false,
 			description: interaction.options.getString('event_description') || `Join us for ${interaction.options.getString('ctf_name')}!`,
-			banner: interaction.options.getAttachment('event_banner')
+			banner: interaction.options.getAttachment('event_banner'),
+			voiceChannel: interaction.options.getChannel('voice_channel')
 		};
 	}
 
@@ -179,6 +189,21 @@ class CreateCTFCommand extends Command {
 	}
 
 	async createEvent(interaction, options, dates) {
+		const isVoiceEvent = options.voiceChannel !== null;
+
+		if (isVoiceEvent) {
+			return interaction.guild.scheduledEvents.create({
+				name: options.ctfName,
+				description: options.description,
+				scheduledStartTime: dates.eventDate,
+				scheduledEndTime: dates.eventEndDate,
+				privacyLevel: 2,
+				entityType: options.voiceChannel.type === ChannelType.GuildStageVoice ? 1 : 2,
+				channel: options.voiceChannel.id,
+				image: options.banner?.url
+			});
+		}
+
 		return interaction.guild.scheduledEvents.create({
 			name: options.ctfName,
 			description: options.description,
@@ -200,10 +225,15 @@ class CreateCTFCommand extends Command {
 				{ name: 'Start Time', value: `<t:${Math.floor(dates.eventDate.getTime() / 1000)}:F>`, inline: true },
 				{ name: 'End Time', value: `<t:${Math.floor(dates.eventEndDate.getTime() / 1000)}:F>`, inline: true },
 				{ name: 'CTF URL', value: options.ctfBaseUrl, inline: false },
-				{ name: 'Event', value: `[View Event](${scheduledEvent.url})`, inline: false },
-				{ name: 'Register', value: 'Use `/registerctf <username>` to register your participation!', inline: false }
+				{ name: 'Event', value: `[View Event](${scheduledEvent.url})`, inline: false }
 			)
 			.setTimestamp();
+
+		if (options.voiceChannel) {
+			embed.addFields({ name: '🔊 Channel', value: options.voiceChannel.toString(), inline: true });
+		}
+
+		embed.addFields({ name: 'Register', value: 'Use `/registerctf <username>` to register your participation!', inline: false });
 
 		if (options.banner) {
 			embed.setImage(options.banner.url);
@@ -243,10 +273,15 @@ class CreateCTFCommand extends Command {
 			.setDescription(`**${options.ctfName}** has been set up!`)
 			.addFields(
 				{ name: 'Channel', value: `${channel}`, inline: true },
-				{ name: 'Start Time', value: `<t:${Math.floor(event.scheduledStartTime.getTime() / 1000)}:F>`, inline: false },
-				{ name: 'Event Link', value: `[View Event](${event.url})`, inline: false }
+				{ name: 'Start Time', value: `<t:${Math.floor(event.scheduledStartTime.getTime() / 1000)}:F>`, inline: false }
 			)
 			.setTimestamp();
+
+		if (options.voiceChannel) {
+			embed.addFields({ name: '🔊 Voice Channel', value: options.voiceChannel.toString(), inline: true });
+		}
+
+		embed.addFields({ name: 'Event Link', value: `[View Event](${event.url})`, inline: false });
 
 		return interaction.editReply({ embeds: [embed] });
 	}
