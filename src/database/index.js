@@ -4,6 +4,7 @@ const ctfOperations = require('./repositories/ctf.repository');
 const registrationOperations = require('./repositories/registration.repository');
 const challengeOperations = require('./repositories/challenge.repository');
 const pactOperations = require('./repositories/pact.repository');
+const adminRepository = require('./repositories/admin.repository');
 
 function initDatabase() {
 	const db = getConnection();
@@ -93,5 +94,6 @@ module.exports = {
 	ctfOperations,
 	registrationOperations,
 	challengeOperations,
-	pactOperations
+	pactOperations,
+	adminRepository
 };

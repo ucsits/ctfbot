@@ -1,5 +1,6 @@
 const { PermissionFlagsBits } = require('discord.js');
 const { CTFBotError } = require('../errors');
+const { isAdmin } = require('./ensureAdmin');
 
 class PermissionError extends CTFBotError {
 	constructor(message) {
@@ -7,13 +8,19 @@ class PermissionError extends CTFBotError {
 	}
 }
 
-function checkPermission(interaction, permission, permissionName) {
+async function checkPermission(interaction, permission, permissionName) {
 	if (!interaction.member) {
-		throw new PermissionError('❌ This command can only be used in a guild.');
+		throw new PermissionError('This command can only be used in a guild.');
+	}
+
+	const isAdminUser = await isAdmin(interaction.user.id);
+
+	if (isAdminUser) {
+		return true;
 	}
 
 	if (!interaction.member.permissions.has(permission)) {
-		throw new PermissionError(`❌ You need the "${permissionName}" permission to use this command.`);
+		throw new PermissionError(`You need the "${permissionName}" permission to use this command.`);
 	}
 
 	return true;
@@ -21,7 +28,7 @@ function checkPermission(interaction, permission, permissionName) {
 
 async function checkPermissionReply(interaction, permission, permissionName) {
 	try {
-		checkPermission(interaction, permission, permissionName);
+		await checkPermission(interaction, permission, permissionName);
 		return false;
 	} catch (error) {
 		if (error instanceof PermissionError) {

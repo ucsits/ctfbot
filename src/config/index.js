@@ -53,6 +53,18 @@ const config = {
 		get isDevelopment() {
 			return this.env === 'development';
 		}
+	},
+
+	admin: {
+		get ids() {
+			const envIds = process.env.ADMIN_IDS?.split(',')
+				.map(id => id.trim())
+				.filter(Boolean) || [];
+			return envIds;
+		},
+		get isEnvConfigured() {
+			return this.ids.length > 0;
+		}
 	}
 };
 
