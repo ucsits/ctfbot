@@ -40,13 +40,13 @@ class SyncChallengesCommand extends Command {
 		const ctf = ctfOperations.getCTFByChannelId(interaction.channelId);
 		if (!ctf) {
 			return interaction.editReply({
-				content: '❌ This command can only be used in a CTF channel.',
+				content: 'This command can only be used in a CTF channel.',
 				ephemeral: true
 			});
 		}
 
 		if (!ctf.api_token || !ctf.ctf_base_url) {
-			return interaction.editReply('❌ CTFd API token or Base URL is not configured for this CTF.');
+			return interaction.editReply('CTFd API token or Base URL is not configured for this CTF.');
 		}
 
 		try {
@@ -58,7 +58,7 @@ class SyncChallengesCommand extends Command {
 			if (source !== 'users') {
 				await this.syncChallenges(interaction, ctf, client, nameToLocalIdMap, newChallenges);
 			} else {
-				await interaction.editReply('🔄 Syncing solves from users...');
+				await interaction.editReply('Syncing solves from users...');
 			}
 
 			const { solvesSynced, newSolves } = await this.syncSolves(interaction, ctf, client, source, nameToLocalIdMap);
@@ -67,7 +67,7 @@ class SyncChallengesCommand extends Command {
 
 		} catch (error) {
 			this.container.logger.error(error);
-			return interaction.editReply(`❌ Error syncing challenges: ${error.message}`);
+			return interaction.editReply(`Error syncing challenges: ${error.message}`);
 		}
 	}
 
@@ -81,7 +81,7 @@ class SyncChallengesCommand extends Command {
 	}
 
 	async syncChallenges(interaction, ctf, client, nameToLocalIdMap, newChallenges) {
-		await interaction.editReply('🔄 Fetching challenges from CTFd...');
+		await interaction.editReply('Fetching challenges from CTFd...');
 		const challenges = await client.getChallenges();
 
 		for (const chal of challenges) {
@@ -103,7 +103,7 @@ class SyncChallengesCommand extends Command {
 				nameToLocalIdMap.set(chal.name, dbChal.id);
 			}
 		}
-		await interaction.editReply(`✅ Synced ${challenges.length} challenges. 🔄 Syncing solves...`);
+		await interaction.editReply(`Synced ${challenges.length} challenges. Syncing solves...`);
 		return challenges;
 	}
 
@@ -212,7 +212,7 @@ class SyncChallengesCommand extends Command {
 	}
 
 	formatSyncResponse(interaction, source, solvesSynced, newChallenges, newSolves) {
-		let response = `✅ Sync complete (Source: ${source})!\n- Challenges processed: ${newChallenges.length}\n- New solves recorded: ${solvesSynced}`;
+		let response = `Sync complete (Source: ${source})!\n- Challenges processed: ${newChallenges.length}\n- New solves recorded: ${solvesSynced}`;
 
 		if (newChallenges.length > 0) {
 			response += `\n\n**New Challenges:**\n${newChallenges.join('\n')}`;

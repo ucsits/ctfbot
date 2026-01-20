@@ -36,11 +36,11 @@ class ArchiveCTFCommand extends Command {
 			// Get CTF from database
 			const ctf = ctfOperations.getCTFByChannelId(channel.id);
 			if (!ctf) {
-				return interaction.editReply('❌ This channel is not registered as a CTF channel in the database.');
+				return interaction.editReply('This channel is not registered as a CTF channel in the database.');
 			}
 
 			if (ctf.archived) {
-				return interaction.editReply('❌ This CTF is already archived.');
+				return interaction.editReply('This CTF is already archived.');
 			}
 
 			// Get current year for the category name
@@ -92,11 +92,11 @@ class ArchiveCTFCommand extends Command {
 
 			const embed = new EmbedBuilder()
 				.setColor(0xFFA500)
-				.setTitle('📦 CTF Archived')
+				.setTitle('CTF Archived')
 				.setDescription(`**${ctf.ctf_name}** has been archived!`)
 				.addFields(
-					{ name: '📁 Moved to', value: archiveCategoryName, inline: true },
-					{ name: '📅 Archived on', value: `<t:${Math.floor(Date.now() / 1000)}:F>`, inline: false }
+					{ name: 'Moved to', value: archiveCategoryName, inline: true },
+					{ name: 'Archived on', value: `<t:${Math.floor(Date.now() / 1000)}:F>`, inline: false }
 				)
 				.setTimestamp();
 
@@ -106,7 +106,7 @@ class ArchiveCTFCommand extends Command {
 
 		} catch (error) {
 			this.container.logger.error('Error archiving CTF:', error);
-			return interaction.editReply('❌ Failed to archive CTF. Please check permissions and try again.');
+			return interaction.editReply('Failed to archive CTF. Please check permissions and try again.');
 		}
 	}
 }

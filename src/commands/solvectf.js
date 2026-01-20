@@ -77,25 +77,25 @@ class SolveCTFCommand extends Command {
 			// Get CTF from database
 			const ctf = ctfOperations.getCTFByChannelId(channel.id);
 			if (!ctf) {
-				return interaction.editReply('❌ This channel is not registered as a CTF channel in the database.');
+				return interaction.editReply('This channel is not registered as a CTF channel in the database.');
 			}
 
 			// Check if user is registered for this CTF
 			const registration = registrationOperations.getUserRegistration(ctf.id, userId);
 			if (!registration) {
-				return interaction.editReply('❌ You must register for this CTF first using `/registerctf`.');
+				return interaction.editReply('You must register for this CTF first using `/registerctf`.');
 			}
 
 			// Get challenge from database
 			const challenge = challengeOperations.getChallengeByName(ctf.id, chalName);
 			if (!challenge) {
-				return interaction.editReply(`❌ Challenge **${chalName}** does not exist. Make sure it was added with \`/addchalctf\` first.`);
+				return interaction.editReply(`Challenge **${chalName}** does not exist. Make sure it was added with \`/addchalctf\` first.`);
 			}
 
 			// Check if user already solved this challenge
 			const alreadySolved = challengeOperations.hasUserSolved(challenge.id, userId);
 			if (alreadySolved) {
-				return interaction.editReply(`❌ You have already marked **${chalName}** as solved.`);
+				return interaction.editReply(`You have already marked **${chalName}** as solved.`);
 			}
 
 			// For team-based CTFs, check if any team member already solved it
@@ -108,7 +108,7 @@ class SolveCTFCommand extends Command {
 					if (memberId !== userId && challengeOperations.hasUserSolved(challenge.id, memberId)) {
 						const solver = teamMembers.find(m => m.user_id === memberId);
 						return interaction.editReply(
-							`❌ Your team member **${solver.username}** has already solved **${chalName}**. Only one solve per team is allowed.`
+							`Your team member **${solver.username}** has already solved **${chalName}**. Only one solve per team is allowed.`
 						);
 					}
 				}
@@ -126,32 +126,32 @@ class SolveCTFCommand extends Command {
 
 				const embed = new EmbedBuilder()
 					.setColor(isFirstBlood ? 0xFF0000 : 0x00FF00)
-					.setTitle(isFirstBlood ? '🩸 First Blood!' : '✅ Challenge Solved')
+					.setTitle(isFirstBlood ? 'First Blood!' : 'Challenge Solved')
 					.setDescription(`**${chalName}** solved by ${interaction.user}!`)
 					.addFields(
-						{ name: '📁 Category', value: challenge.chal_category, inline: true },
-						{ name: '👤 Solver', value: registration.username, inline: true },
-						{ name: '🏆 Solve Count', value: `${solverCount} solve${solverCount !== 1 ? 's' : ''}`, inline: true }
+						{ name: 'Category', value: challenge.chal_category, inline: true },
+						{ name: 'Solver', value: registration.username, inline: true },
+						{ name: 'Solve Count', value: `${solverCount} solve${solverCount !== 1 ? 's' : ''}`, inline: true }
 					)
 					.setTimestamp();
 
 				if (registration.ctfd_team_name) {
-					embed.addFields({ name: '👥 Team', value: registration.ctfd_team_name, inline: true });
+					embed.addFields({ name: 'Team', value: registration.ctfd_team_name, inline: true });
 				}
 
 				await interaction.editReply({ embeds: [embed] });
 
 			} catch (dbError) {
 				if (dbError.message.includes('UNIQUE constraint failed')) {
-					return interaction.editReply(`❌ You have already marked **${chalName}** as solved.`);
+return interaction.editReply(`You have already marked **${chalName}** as solved.`);
 				}
 				this.container.logger.error('Failed to mark challenge as solved:', dbError);
-				return interaction.editReply('❌ Failed to mark challenge as solved. Please try again later.');
+				return interaction.editReply('Failed to mark challenge as solved. Please try again later.');
 			}
 
 		} catch (error) {
 			this.container.logger.error('Error solving challenge:', error);
-			return interaction.editReply('❌ Failed to solve challenge. Please try again later.');
+			return interaction.editReply('Failed to solve challenge. Please try again later.');
 		}
 	}
 }

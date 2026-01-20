@@ -102,7 +102,7 @@ class CreateCTFCommand extends Command {
 
 		} catch (error) {
 			this.container.logger.error('Error creating CTF:', error);
-			return interaction.editReply('❌ Failed to create CTF. Please check permissions and try again.');
+			return interaction.editReply('Failed to create CTF. Please check permissions and try again.');
 		}
 	}
 
@@ -125,7 +125,7 @@ class CreateCTFCommand extends Command {
 		try {
 			eventDate = parseLocalDateToUTC(options.dateStr, options.timezone);
 		} catch (error) {
-			throw new Error(`❌ ${error.message}`);
+			throw new Error(`${error.message}`);
 		}
 
 		let eventEndDate;
@@ -133,7 +133,7 @@ class CreateCTFCommand extends Command {
 			try {
 				eventEndDate = parseLocalDateToUTC(options.endDateStr, options.timezone);
 			} catch (error) {
-				throw new Error(`❌ Invalid end date: ${error.message}`);
+				throw new Error(`Invalid end date: ${error.message}`);
 			}
 		} else {
 			eventEndDate = new Date(eventDate.getTime() + 24 * 60 * 60 * 1000);
@@ -144,17 +144,17 @@ class CreateCTFCommand extends Command {
 
 	validateDates(dates) {
 		if (dates.eventDate < new Date()) {
-			throw new Error('❌ Event start date must be in the future.');
+			throw new Error('Event start date must be in the future.');
 		}
 		if (dates.eventEndDate <= dates.eventDate) {
-			throw new Error('❌ Event end date must be after the start date.');
+			throw new Error('Event end date must be after the start date.');
 		}
 	}
 
 	getCategory(interaction) {
 		const category = interaction.guild.channels.cache.get(config.ctf.categoryId);
 		if (!category) {
-			throw new Error('❌ CTF category not found. Please set CTF_CATEGORY_ID in your environment variables.');
+			throw new Error('CTF category not found. Please set CTF_CATEGORY_ID in your environment variables.');
 		}
 		return category;
 	}
@@ -194,14 +194,14 @@ class CreateCTFCommand extends Command {
 	async sendWelcomeMessage(channel, options, dates, scheduledEvent) {
 		const embed = new EmbedBuilder()
 			.setColor(0x0099FF)
-			.setTitle(`🚩 ${options.ctfName}`)
+			.setTitle(`${options.ctfName}`)
 			.setDescription(options.description)
 			.addFields(
-				{ name: '⏰ Start Time', value: `<t:${Math.floor(dates.eventDate.getTime() / 1000)}:F>`, inline: true },
-				{ name: '⏱️ End Time', value: `<t:${Math.floor(dates.eventEndDate.getTime() / 1000)}:F>`, inline: true },
-				{ name: '🌐 CTF URL', value: options.ctfBaseUrl, inline: false },
-				{ name: '🔗 Event', value: `[View Event](${scheduledEvent.url})`, inline: false },
-				{ name: '📝 Register', value: 'Use `/registerctf <username>` to register your participation!', inline: false }
+				{ name: 'Start Time', value: `<t:${Math.floor(dates.eventDate.getTime() / 1000)}:F>`, inline: true },
+				{ name: 'End Time', value: `<t:${Math.floor(dates.eventEndDate.getTime() / 1000)}:F>`, inline: true },
+				{ name: 'CTF URL', value: options.ctfBaseUrl, inline: false },
+				{ name: 'Event', value: `[View Event](${scheduledEvent.url})`, inline: false },
+				{ name: 'Register', value: 'Use `/registerctf <username>` to register your participation!', inline: false }
 			)
 			.setTimestamp();
 
@@ -231,7 +231,7 @@ class CreateCTFCommand extends Command {
 		} catch (dbError) {
 			this.container.logger.error('Failed to store CTF in database:', dbError);
 			await channel.send({
-				content: '⚠️ **Warning**: CTF was created but failed to register in the database. Error: ' + dbError.message
+				content: 'Warning: CTF was created but failed to register in the database. Error: ' + dbError.message
 			});
 		}
 	}
@@ -239,12 +239,12 @@ class CreateCTFCommand extends Command {
 	sendConfirmation(interaction, channel, event, options) {
 		const embed = new EmbedBuilder()
 			.setColor(0x00FF00)
-			.setTitle('✅ CTF Created Successfully')
+			.setTitle('CTF Created Successfully')
 			.setDescription(`**${options.ctfName}** has been set up!`)
 			.addFields(
-				{ name: '📢 Channel', value: `${channel}`, inline: true },
-				{ name: '📅 Start Time', value: `<t:${Math.floor(event.scheduledStartTime.getTime() / 1000)}:F>`, inline: false },
-				{ name: '🔗 Event Link', value: `[View Event](${event.url})`, inline: false }
+				{ name: 'Channel', value: `${channel}`, inline: true },
+				{ name: 'Start Time', value: `<t:${Math.floor(event.scheduledStartTime.getTime() / 1000)}:F>`, inline: false },
+				{ name: 'Event Link', value: `[View Event](${event.url})`, inline: false }
 			)
 			.setTimestamp();
 

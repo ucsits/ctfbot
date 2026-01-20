@@ -59,12 +59,12 @@ class RegisterCTFCommand extends Command {
 			// Get CTF from database
 			const ctf = ctfOperations.getCTFByChannelId(channel.id);
 			if (!ctf) {
-				return interaction.editReply('❌ This channel is not registered as a CTF channel in the database.');
+				return interaction.editReply('This channel is not registered as a CTF channel in the database.');
 			}
 
 			// Check if team name is required for team-based CTF
 			if (ctf.team_mode && !teamName && !ctfdUrl) {
-				return interaction.editReply('❌ This is a team-based CTF. Please provide your team name using the `team_name` parameter.');
+				return interaction.editReply('This is a team-based CTF. Please provide your team name using the `team_name` parameter.');
 			}
 
 			// If CTFd URL is provided AND API token exists, attempt to fetch user details
@@ -81,7 +81,7 @@ class RegisterCTFCommand extends Command {
 					this.container.logger.warn(`Failed to fetch CTFd data: ${error.message}`);
 					// Return error to user if CTFd verification fails
 					return interaction.editReply({
-						content: `❌ Failed to verify user on CTFd platform.\n**Error:** ${error.message}\n\nPlease check your username and try again.`
+						content: `Failed to verify user on CTFd platform.\n**Error:** ${error.message}\n\nPlease check your username and try again.`
 					});
 				}
 			} else if (effectiveCtfdUrl && !hasApiToken) {
@@ -101,29 +101,29 @@ class RegisterCTFCommand extends Command {
 				this.container.logger.info(`Registered ${userTag} for CTF "${ctf.ctf_name}" (team: ${teamName || ctfdData?.teamName || 'individual'})`);
 			} catch (dbError) {
 				this.container.logger.error('Failed to store registration:', dbError);
-				return interaction.editReply('❌ Failed to register. Please try again later.');
+return interaction.editReply('Failed to register. Please try again later.');
 			}
 
 			const embed = new EmbedBuilder()
 				.setColor(0x00FF00)
-				.setTitle('✅ Registration Successful')
+				.setTitle('Registration Successful')
 				.setDescription(`You have been registered for **${ctf.ctf_name}**!`)
 				.addFields(
-					{ name: '👤 Discord User', value: `${interaction.user}`, inline: true },
-					{ name: '🏷️ CTF Username', value: username, inline: true }
+					{ name: 'Discord User', value: `${interaction.user}`, inline: true },
+					{ name: 'CTF Username', value: username, inline: true }
 				)
 				.setTimestamp()
 				.setFooter({ text: `User ID: ${userId}` });
 
 			if (ctfdData) {
 				embed.addFields(
-					{ name: '🆔 CTFd User ID', value: ctfdData.userId.toString(), inline: true },
-					{ name: '👥 Team', value: ctfdData.teamName || 'No team', inline: true }
+					{ name: 'CTFd User ID', value: ctfdData.userId.toString(), inline: true },
+					{ name: 'Team', value: ctfdData.teamName || 'No team', inline: true }
 				);
 			} else if (teamName) {
 				// Show team name from manual input if CTFd data not available
 				embed.addFields(
-					{ name: '👥 Team', value: teamName, inline: true }
+					{ name: 'Team', value: teamName, inline: true }
 				);
 			}
 
@@ -133,7 +133,7 @@ class RegisterCTFCommand extends Command {
 			// Announce registration in channel
 			const announceEmbed = new EmbedBuilder()
 				.setColor(0x0099FF)
-				.setDescription(`🚩 ${interaction.user} registered as **${username}**`)
+				.setDescription(`${interaction.user} registered as **${username}**`)
 				.setTimestamp();
 
 			await channel.send({ embeds: [announceEmbed] });
@@ -143,7 +143,7 @@ class RegisterCTFCommand extends Command {
 
 		} catch (error) {
 			this.container.logger.error('Error registering for CTF:', error);
-			return interaction.editReply('❌ Failed to register. Please try again later.');
+			return interaction.editReply('Failed to register. Please try again later.');
 		}
 	}
 
