@@ -145,18 +145,6 @@ class SolveCTFCommand extends Command {
 
 				await interaction.editReply({ embeds: [embed] });
 
-				// Announce in channel
-				/*const announceEmbed = new EmbedBuilder()
-					.setColor(isFirstBlood ? 0xFF0000 : 0x0099FF)
-					.setDescription(
-						isFirstBlood
-							? `🩸 **FIRST BLOOD!** ${interaction.user} solved **${chalName}** (${challenge.chal_category})`
-							: `✅ ${interaction.user} solved **${chalName}** (${challenge.chal_category})`
-					)
-					.setTimestamp();
-
-				await channel.send({ embeds: [announceEmbed] });*/
-
 			} catch (dbError) {
 				if (dbError.message.includes('UNIQUE constraint failed')) {
 					return interaction.editReply(`❌ You have already marked **${chalName}** as solved.`);

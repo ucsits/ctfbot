@@ -36,13 +36,8 @@ function hoursToMs(hours) {
 	return hours * 60 * 60 * 1000;
 }
 
-function daysToMs(days) {
-	return days * 24 * 60 * 60 * 1000;
-}
-
 module.exports = {
 	parseLocalDateToUTC,
 	formatDiscordTimestamp,
-	hoursToMs,
-	daysToMs
+	hoursToMs
 };

@@ -29,15 +29,6 @@ module.exports = {
 		CTF: 'ctf-'
 	},
 
-	// Embed Colors
-	COLORS: {
-		SUCCESS: 0x00FF00,
-		ERROR: 0xFF0000,
-		INFO: 0x0099FF,
-		WARNING: 0xFFAA00,
-		PRIMARY: 0x0099FF
-	},
-
 	// Date Formats
 	DATE_FORMATS: {
 		INPUT: 'DD-MM-YYYY HH:MM',
