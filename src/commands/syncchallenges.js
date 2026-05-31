@@ -111,19 +111,20 @@ class SyncChallengesCommand extends Command {
 	async syncSolves(interaction, ctf, client, source, nameToLocalIdMap, challenges = []) {
 		const registrations = registrationOperations.getRegistrationsByCTF(ctf.id);
 		const ctfdUserMap = this.buildUserMap(registrations);
+		const userRegMap = new Map(registrations.map(r => [r.user_id, r]));
 
 		let solvesSynced = 0;
 		const newSolves = [];
 
 		if (source === 'direct') {
 			for (const chal of challenges) {
-				const result = await this.syncSolvesForChallenge(ctf, client, chal, ctfdUserMap, nameToLocalIdMap);
+				const result = await this.syncSolvesForChallenge(ctf, client, chal, ctfdUserMap, nameToLocalIdMap, userRegMap);
 				solvesSynced += result.count;
 				newSolves.push(...result.solves);
 			}
 		} else {
 			for (const reg of registrations) {
-				const result = await this.syncSolvesForUser(ctf, client, reg, nameToLocalIdMap);
+				const result = await this.syncSolvesForUser(ctf, client, reg, nameToLocalIdMap, userRegMap);
 				solvesSynced += result.count;
 				newSolves.push(...result.solves);
 			}
@@ -142,7 +143,7 @@ class SyncChallengesCommand extends Command {
 		return ctfdUserMap;
 	}
 
-	async syncSolvesForChallenge(ctf, client, chal, ctfdUserMap, nameToLocalIdMap) {
+	async syncSolvesForChallenge(ctf, client, chal, ctfdUserMap, nameToLocalIdMap, userRegMap) {
 		const localChalId = nameToLocalIdMap.get(chal.name);
 		if (!localChalId) {
 			return { count: 0, solves: [] };
@@ -157,11 +158,26 @@ class SyncChallengesCommand extends Command {
 				const ctfdUserId = String(parseInt(solve.user_id));
 				const discordUserId = ctfdUserMap.get(ctfdUserId);
 
-				if (discordUserId && !challengeOperations.hasUserSolved(localChalId, discordUserId)) {
-					challengeOperations.markChallengeSolved(localChalId, discordUserId, solve.date);
-					count++;
-					solves.push(`<@${discordUserId}> solved **${chal.name}**`);
+				if (!discordUserId || challengeOperations.hasUserSolved(localChalId, discordUserId)) {
+					continue;
 				}
+
+				if (ctf.team_mode) {
+					const reg = userRegMap.get(discordUserId);
+					if (reg && reg.team_name) {
+						const teamMembers = registrationOperations.getTeamMembers(ctf.id, reg.team_name);
+						const alreadySolved = teamMembers.some(m =>
+							m.user_id !== discordUserId && challengeOperations.hasUserSolved(localChalId, m.user_id)
+						);
+						if (alreadySolved) {
+							continue;
+						}
+					}
+				}
+
+				challengeOperations.markChallengeSolved(localChalId, discordUserId, solve.date);
+				count++;
+				solves.push(`<@${discordUserId}> solved **${chal.name}**`);
 			}
 		} catch (err) {
 			this.container.logger.error(`Failed to fetch solves for challenge ${chal.name}:`, err);
@@ -170,7 +186,7 @@ class SyncChallengesCommand extends Command {
 		return { count, solves };
 	}
 
-	async syncSolvesForUser(ctf, client, reg, nameToLocalIdMap) {
+	async syncSolvesForUser(ctf, client, reg, nameToLocalIdMap, userRegMap) {
 		if (!reg.ctfd_user_id) {
 			return { count: 0, solves: [] };
 		}
@@ -197,7 +213,7 @@ class SyncChallengesCommand extends Command {
 						chal_name: chalName,
 						chal_category: solve.challenge.category || 'Unknown',
 						points: solve.challenge.value || 0,
-						created_by: null
+						created_by: 'ctfd_sync'
 					});
 					const dbChal = challengeOperations.getChallengeByName(ctf.id, chalName);
 					if (dbChal) {
@@ -206,11 +222,23 @@ class SyncChallengesCommand extends Command {
 					}
 				}
 
-				if (localChalId && !challengeOperations.hasUserSolved(localChalId, reg.user_id)) {
-					challengeOperations.markChallengeSolved(localChalId, reg.user_id, solve.date);
-					count++;
-					solves.push(`<@${reg.user_id}> solved **${chalName}**`);
+				if (!localChalId || challengeOperations.hasUserSolved(localChalId, reg.user_id)) {
+					continue;
 				}
+
+				if (ctf.team_mode && reg.team_name) {
+					const teamMembers = registrationOperations.getTeamMembers(ctf.id, reg.team_name);
+					const alreadySolved = teamMembers.some(m =>
+						m.user_id !== reg.user_id && challengeOperations.hasUserSolved(localChalId, m.user_id)
+					);
+					if (alreadySolved) {
+						continue;
+					}
+				}
+
+				challengeOperations.markChallengeSolved(localChalId, reg.user_id, solve.date);
+				count++;
+				solves.push(`<@${reg.user_id}> solved **${chalName}**`);
 			}
 		} catch (err) {
 			this.container.logger.error(`Failed to fetch solves for user ${reg.ctfd_user_id}:`, err);
