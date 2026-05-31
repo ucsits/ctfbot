@@ -71,7 +71,7 @@ const ctfOperations = {
 					LEFT JOIN ctf_challenges c ON s.challenge_id = c.id AND c.ctf_id = ?
 					WHERE s.user_id IN (${userIds.map(() => '?').join(', ')})
 					GROUP BY s.user_id
-				`).all([...userIds, ...userIds.map(() => ctfId)])
+				`).all([ctfId, ...userIds])
 			: [];
 
 		const userIdToSolves = new Map(solves.map(s => [s.user_id, s]));
