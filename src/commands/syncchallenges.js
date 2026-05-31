@@ -158,26 +158,37 @@ class SyncChallengesCommand extends Command {
 				const ctfdUserId = String(parseInt(solve.user_id));
 				const discordUserId = ctfdUserMap.get(ctfdUserId);
 
-				if (!discordUserId || challengeOperations.hasUserSolved(localChalId, discordUserId)) {
-					continue;
-				}
+				if (discordUserId) {
+					if (challengeOperations.hasUserSolved(localChalId, discordUserId)) {
+						continue;
+					}
 
-				if (ctf.team_mode) {
-					const reg = userRegMap.get(discordUserId);
-					if (reg && reg.team_name) {
-						const teamMembers = registrationOperations.getTeamMembers(ctf.id, reg.team_name);
-						const alreadySolved = teamMembers.some(m =>
-							m.user_id !== discordUserId && challengeOperations.hasUserSolved(localChalId, m.user_id)
-						);
-						if (alreadySolved) {
-							continue;
+					if (ctf.team_mode) {
+						const reg = userRegMap.get(discordUserId);
+						if (reg && reg.team_name) {
+							const teamMembers = registrationOperations.getTeamMembers(ctf.id, reg.team_name);
+							const alreadySolved = teamMembers.some(m =>
+								m.user_id !== discordUserId && challengeOperations.hasUserSolved(localChalId, m.user_id)
+							);
+							if (alreadySolved) {
+								continue;
+							}
 						}
 					}
-				}
 
-				challengeOperations.markChallengeSolved(localChalId, discordUserId, solve.date);
-				count++;
-				solves.push(`<@${discordUserId}> solved **${chal.name}**`);
+					challengeOperations.markChallengeSolved(localChalId, discordUserId, solve.date);
+					count++;
+					solves.push(`<@${discordUserId}> solved **${chal.name}**`);
+				} else {
+					if (challengeOperations.hasCtfdUserSolved(localChalId, ctfdUserId)) {
+						continue;
+					}
+
+					const ctfdUsername = solve.user?.name || 'Unknown';
+					challengeOperations.markChallengeSolvedForCtfdUser(localChalId, ctfdUserId, ctfdUsername, solve.date);
+					count++;
+					solves.push(`${ctfdUsername} (unregistered) solved **${chal.name}**`);
+				}
 			}
 		} catch (err) {
 			this.container.logger.error(`Failed to fetch solves for challenge ${chal.name}:`, err);
