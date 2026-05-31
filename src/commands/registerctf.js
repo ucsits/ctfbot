@@ -1,7 +1,7 @@
 const { Command } = require('@sapphire/framework');
 const { EmbedBuilder } = require('discord.js');
 const { getIdHints } = require('../lib/utils');
-const { ctfOperations, registrationOperations } = require('../database');
+const { ctfOperations, registrationOperations, challengeOperations } = require('../database');
 const { ensureCTFChannelReply } = require('../lib/middleware/ensureCTFChannel');
 
 class RegisterCTFCommand extends Command {
@@ -106,6 +106,14 @@ class RegisterCTFCommand extends Command {
 				return interaction.editReply('Failed to register. Please try again later.');
 			}
 
+			let pendingSolvesResult = null;
+			if (ctfdData?.userId) {
+				pendingSolvesResult = challengeOperations.transferPendingSolves(ctf.id, ctfdData.userId, userId);
+				if (pendingSolvesResult.transferred > 0) {
+					this.container.logger.info(`Transferred ${pendingSolvesResult.transferred} pending solves for ${username}`);
+				}
+			}
+
 			const embed = new EmbedBuilder()
 				.setColor(0x00FF00)
 				.setTitle('Registration Successful')
@@ -126,6 +134,12 @@ class RegisterCTFCommand extends Command {
 				// Show team name from manual input if CTFd data not available
 				embed.addFields(
 					{ name: 'Team', value: teamName, inline: true }
+				);
+			}
+
+			if (pendingSolvesResult && pendingSolvesResult.transferred > 0) {
+				embed.addFields(
+					{ name: 'Solves Claimed', value: `${pendingSolvesResult.transferred} solve${pendingSolvesResult.transferred !== 1 ? 's' : ''} transferred from CTFd`, inline: true }
 				);
 			}
 
