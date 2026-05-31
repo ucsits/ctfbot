@@ -158,7 +158,7 @@ class SyncChallengesCommand extends Command {
 				const discordUserId = ctfdUserMap.get(ctfdUserId);
 
 				if (discordUserId && !challengeOperations.hasUserSolved(localChalId, discordUserId)) {
-					challengeOperations.markChallengeSolved(localChalId, discordUserId);
+					challengeOperations.markChallengeSolved(localChalId, discordUserId, solve.date);
 					count++;
 					solves.push(`<@${discordUserId}> solved **${chal.name}**`);
 				}
@@ -207,7 +207,7 @@ class SyncChallengesCommand extends Command {
 				}
 
 				if (localChalId && !challengeOperations.hasUserSolved(localChalId, reg.user_id)) {
-					challengeOperations.markChallengeSolved(localChalId, reg.user_id);
+					challengeOperations.markChallengeSolved(localChalId, reg.user_id, solve.date);
 					count++;
 					solves.push(`<@${reg.user_id}> solved **${chalName}**`);
 				}

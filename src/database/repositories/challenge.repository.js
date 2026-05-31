@@ -35,20 +35,13 @@ const challengeOperations = {
 		return stmt.get(ctfId, chalName);
 	},
 
-	markChallengeSolved: (challengeId, userId) => {
+	markChallengeSolved: (challengeId, userId, solvedAt) => {
 		const db = getConnection();
 		const stmt = db.prepare(`
-			INSERT INTO ctf_challenge_solves (challenge_id, user_id)
-			VALUES (?, ?)
+			INSERT INTO ctf_challenge_solves (challenge_id, user_id, solved_at)
+			VALUES (?, ?, COALESCE(?, CURRENT_TIMESTAMP))
 		`);
-		const result = stmt.run(challengeId, userId);
-
-		const updateStmt = db.prepare(`
-			UPDATE ctf_challenges
-			SET solved = 1
-			WHERE id = ?
-		`);
-		updateStmt.run(challengeId);
+		const result = stmt.run(challengeId, userId, solvedAt || null);
 
 		return result.lastInsertRowid;
 	},
