@@ -62,11 +62,24 @@ class CTFdClient {
 				throw new Error(`CTFd API returned error: ${JSON.stringify(data)}`);
 			}
 
-			return data.data;
+			return data;
 		} catch (error) {
 			console.error(`[CTFd] Request Failed: ${method} ${url}`, error);
 			throw error;
 		}
+	}
+
+	async paginatedRequest(endpoint) {
+		const results = [];
+		let currentEndpoint = endpoint;
+
+		while (currentEndpoint) {
+			const response = await this.request(currentEndpoint);
+			results.push(...(Array.isArray(response.data) ? response.data : [response.data]));
+			currentEndpoint = response.meta?.next || null;
+		}
+
+		return results;
 	}
 
 	/**
@@ -77,7 +90,7 @@ class CTFdClient {
 	async getChallenges(params = {}) {
 		const queryParams = new URLSearchParams(params);
 		const endpoint = `/api/v1/challenges${queryParams.toString() ? '?' + queryParams.toString() : ''}`;
-		return await this.request(endpoint);
+		return await this.paginatedRequest(endpoint);
 	}
 
 	/**
@@ -86,7 +99,7 @@ class CTFdClient {
 	 * @returns {Promise<Array>} Array of solve objects
 	 */
 	async getChallengeSolves(challengeId) {
-		return await this.request(`/api/v1/challenges/${challengeId}/solves`);
+		return await this.paginatedRequest(`/api/v1/challenges/${challengeId}/solves`);
 	}
 
 	/**
@@ -95,7 +108,7 @@ class CTFdClient {
 	 * @returns {Promise<Array>} Array of solve objects
 	 */
 	async getUserSolves(userId) {
-		return await this.request(`/api/v1/users/${userId}/solves`);
+		return await this.paginatedRequest(`/api/v1/users/${userId}/solves`);
 	}
 
 	/**
@@ -113,7 +126,7 @@ class CTFdClient {
 		}
 
 		const endpoint = `/api/v1/users${queryParams.toString() ? '?' + queryParams.toString() : ''}`;
-		return await this.request(endpoint);
+		return await this.paginatedRequest(endpoint);
 	}
 
 	/**
@@ -122,7 +135,8 @@ class CTFdClient {
 	 * @returns {Promise<Object>} User object
 	 */
 	async getUser(userId) {
-		return await this.request(`/api/v1/users/${userId}`);
+		const response = await this.request(`/api/v1/users/${userId}`);
+		return response.data;
 	}
 
 	/**
@@ -131,7 +145,8 @@ class CTFdClient {
 	 * @returns {Promise<Object>} Team object
 	 */
 	async getTeam(teamId) {
-		return await this.request(`/api/v1/teams/${teamId}`);
+		const response = await this.request(`/api/v1/teams/${teamId}`);
+		return response.data;
 	}
 
 	/**
@@ -139,7 +154,7 @@ class CTFdClient {
 	 * @returns {Promise<Array>} Array of scoreboard entries
 	 */
 	async getScoreboard() {
-		return await this.request('/api/v1/scoreboard');
+		return await this.paginatedRequest('/api/v1/scoreboard');
 	}
 
 	/**
