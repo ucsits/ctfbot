@@ -62,9 +62,13 @@ function initDatabase() {
 			challenge_id INTEGER NOT NULL,
 			user_id TEXT NOT NULL,
 			solved_at TEXT DEFAULT CURRENT_TIMESTAMP,
-			FOREIGN KEY (challenge_id) REFERENCES ctf_challenges(id) ON DELETE CASCADE
+			FOREIGN KEY (challenge_id) REFERENCES ctf_challenges(id) ON DELETE CASCADE,
+			UNIQUE(challenge_id, user_id)
 		)
 	`);
+
+	db.exec('CREATE INDEX IF NOT EXISTS idx_challenge_solves_challenge_id ON ctf_challenge_solves(challenge_id)');
+	db.exec('CREATE INDEX IF NOT EXISTS idx_challenge_solves_user_id ON ctf_challenge_solves(user_id)');
 
 	db.exec(`
 		CREATE TABLE IF NOT EXISTS pacts (
