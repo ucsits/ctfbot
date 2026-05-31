@@ -15,6 +15,17 @@ class CTFdClient {
 	constructor(baseUrl, apiToken) {
 		this.baseUrl = baseUrl.replace(/\/$/, ''); // Remove trailing slash
 		this.apiToken = apiToken ? apiToken.trim() : null;
+		this._lastRequestTime = 0;
+		this._minRequestInterval = 200;
+	}
+
+	async _rateLimit() {
+		const now = Date.now();
+		const elapsed = now - this._lastRequestTime;
+		if (elapsed < this._minRequestInterval) {
+			await new Promise(resolve => setTimeout(resolve, this._minRequestInterval - elapsed));
+		}
+		this._lastRequestTime = Date.now();
 	}
 
 	/**
@@ -25,6 +36,7 @@ class CTFdClient {
 	 * @returns {Promise<any>} Response data
 	 */
 	async request(endpoint, options = {}) {
+		await this._rateLimit();
 		const url = `${this.baseUrl}${endpoint}`;
 		const method = options.method || 'GET';
 
