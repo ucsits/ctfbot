@@ -186,7 +186,7 @@ class SyncChallengesCommand extends Command {
 		return { count, solves };
 	}
 
-	async syncSolvesForUser(ctf, client, reg, nameToLocalIdMap, userRegMap) {
+	async syncSolvesForUser(ctf, client, reg, nameToLocalIdMap, _userRegMap) {
 		if (!reg.ctfd_user_id) {
 			return { count: 0, solves: [] };
 		}
