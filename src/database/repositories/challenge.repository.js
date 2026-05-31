@@ -64,6 +64,55 @@ const challengeOperations = {
 		return stmt.get(challengeId, userId);
 	},
 
+	markChallengeSolvedForCtfdUser: (challengeId, ctfdUserId, ctfdUsername, solvedAt) => {
+		const db = getConnection();
+		const userId = `ctfd:${ctfdUserId}`;
+		const stmt = db.prepare(`
+			INSERT INTO ctf_challenge_solves (challenge_id, user_id, ctfd_username, solved_at)
+			VALUES (?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))
+		`);
+		return stmt.run(challengeId, userId, ctfdUsername, solvedAt || null);
+	},
+
+	hasCtfdUserSolved: (challengeId, ctfdUserId) => {
+		const db = getConnection();
+		const userId = `ctfd:${ctfdUserId}`;
+		const stmt = db.prepare('SELECT * FROM ctf_challenge_solves WHERE challenge_id = ? AND user_id = ?');
+		return stmt.get(challengeId, userId);
+	},
+
+	transferPendingSolves: (ctfId, ctfdUserId, discordUserId) => {
+		const db = getConnection();
+		const pendingUserId = `ctfd:${ctfdUserId}`;
+
+		const pendingSolves = db.prepare(`
+			SELECT s.id, s.challenge_id
+			FROM ctf_challenge_solves s
+			JOIN ctf_challenges c ON s.challenge_id = c.id
+			WHERE s.user_id = ? AND c.ctf_id = ?
+		`).all(pendingUserId, ctfId);
+
+		let transferred = 0;
+		let dropped = 0;
+
+		for (const solve of pendingSolves) {
+			try {
+				db.prepare('UPDATE ctf_challenge_solves SET user_id = ?, ctfd_username = NULL WHERE id = ?')
+					.run(discordUserId, solve.id);
+				transferred++;
+			} catch (err) {
+				if (err.message.includes('UNIQUE constraint')) {
+					db.prepare('DELETE FROM ctf_challenge_solves WHERE id = ?').run(solve.id);
+					dropped++;
+				} else {
+					throw err;
+				}
+			}
+		}
+
+		return { transferred, dropped };
+	},
+
 	deleteChallenge: (challengeId) => {
 		const db = getConnection();
 		const stmt = db.prepare('DELETE FROM ctf_challenges WHERE id = ?');
