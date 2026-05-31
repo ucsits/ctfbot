@@ -55,13 +55,14 @@ class SyncChallengesCommand extends Command {
 
 			const nameToLocalIdMap = await this.loadExistingChallenges(ctf);
 
+			let challenges = [];
 			if (source !== 'users') {
-				await this.syncChallenges(interaction, ctf, client, nameToLocalIdMap, newChallenges);
+				challenges = await this.syncChallenges(interaction, ctf, client, nameToLocalIdMap, newChallenges);
 			} else {
 				await interaction.editReply('Syncing solves from users...');
 			}
 
-			const { solvesSynced, newSolves } = await this.syncSolves(interaction, ctf, client, source, nameToLocalIdMap);
+			const { solvesSynced, newSolves } = await this.syncSolves(interaction, ctf, client, source, nameToLocalIdMap, challenges);
 
 			return this.formatSyncResponse(interaction, source, solvesSynced, newChallenges, newSolves);
 
@@ -107,7 +108,7 @@ class SyncChallengesCommand extends Command {
 		return challenges;
 	}
 
-	async syncSolves(interaction, ctf, client, source, nameToLocalIdMap) {
+	async syncSolves(interaction, ctf, client, source, nameToLocalIdMap, challenges = []) {
 		const registrations = registrationOperations.getRegistrationsByCTF(ctf.id);
 		const ctfdUserMap = this.buildUserMap(registrations);
 
@@ -115,7 +116,6 @@ class SyncChallengesCommand extends Command {
 		const newSolves = [];
 
 		if (source === 'direct') {
-			const challenges = await client.getChallenges();
 			for (const chal of challenges) {
 				const result = await this.syncSolvesForChallenge(ctf, client, chal, ctfdUserMap, nameToLocalIdMap);
 				solvesSynced += result.count;
