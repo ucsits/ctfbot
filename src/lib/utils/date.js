@@ -67,6 +67,49 @@ function validateEndDateAfterStart(startDate, endDate) {
 	return true;
 }
 
+/**
+ * Compute unix-second range for a period relative to now.
+ *
+ * @param {'week'|'month'|'quarter'|'year'} period
+ * @param {number} now - Current unix timestamp (seconds)
+ * @returns {{ start: number, end: number }}
+ */
+function computePeriodRange(period, now) {
+	const date = new Date(now * 1000);
+	const startOfDay = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
+
+	switch (period) {
+		case 'week': {
+			// Start of current ISO week (Monday)
+			const dayOfWeek = date.getUTCDay() || 7; // Mon=1 … Sun=7
+			const mondayOffset = (dayOfWeek - 1) * 86400;
+			const weekStart = startOfDay / 1000 - mondayOffset;
+			return { start: weekStart, end: weekStart + 7 * 86400 - 1 };
+		}
+		case 'month': {
+			const monthStart = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1) / 1000;
+			const nextMonth = date.getUTCMonth() + 1;
+			const monthEnd = nextMonth === 12
+				? Date.UTC(date.getUTCFullYear() + 1, 0, 1) / 1000 - 1
+				: Date.UTC(date.getUTCFullYear(), nextMonth, 1) / 1000 - 1;
+			return { start: monthStart, end: monthEnd };
+		}
+		case 'quarter': {
+			const q = Math.floor(date.getUTCMonth() / 3);
+			const qStart = Date.UTC(date.getUTCFullYear(), q * 3, 1) / 1000;
+			const qEnd = Date.UTC(date.getUTCFullYear(), (q + 1) * 3, 1) / 1000 - 1;
+			return { start: qStart, end: qEnd };
+		}
+		case 'year': {
+			const yearStart = Date.UTC(date.getUTCFullYear(), 0, 1) / 1000;
+			const yearEnd = Date.UTC(date.getUTCFullYear() + 1, 0, 1) / 1000 - 1;
+			return { start: yearStart, end: yearEnd };
+		}
+		default:
+			return { start: 0, end: Infinity };
+	}
+}
+
 module.exports = {
 	parseLocalDateToUTC,
 	formatDateInterpretation,
@@ -74,5 +117,6 @@ module.exports = {
 	hoursToMs,
 	daysToMs,
 	validateEventDate,
-	validateEndDateAfterStart
+	validateEndDateAfterStart,
+	computePeriodRange
 };

@@ -3,7 +3,7 @@
  * @module utils
  */
 
-const { parseLocalDateToUTC, formatDateInterpretation, formatDiscordTimestamp, hoursToMs, daysToMs } = require('./date');
+const { parseLocalDateToUTC, formatDateInterpretation, formatDiscordTimestamp, hoursToMs, daysToMs, computePeriodRange } = require('./date');
 const { getIdHints, saveCommandIds } = require('./commandIds');
 const timezoneUtils = require('./timezones');
 
@@ -14,6 +14,7 @@ module.exports = {
 	formatDiscordTimestamp,
 	hoursToMs,
 	daysToMs,
+	computePeriodRange,
 
 	// Timezone utilities
 	...timezoneUtils,
