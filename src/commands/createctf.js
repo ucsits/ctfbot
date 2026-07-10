@@ -217,10 +217,11 @@ class CreateCTFCommand extends Command {
 	}
 
 	async sendWelcomeMessage(channel, options, dates, scheduledEvent) {
+		const interpretation = formatDateInterpretation(options.dateStr, options.timezone, dates.eventDate);
 		const embed = new EmbedBuilder()
 			.setColor(0x0099FF)
 			.setTitle(`${options.ctfName}`)
-			.setDescription(options.description)
+			.setDescription(`${options.description}\n\n${interpretation}`)
 			.addFields(
 				{ name: 'Start Time', value: `<t:${Math.floor(dates.eventDate.getTime() / 1000)}:F>`, inline: true },
 				{ name: 'End Time', value: `<t:${Math.floor(dates.eventEndDate.getTime() / 1000)}:F>`, inline: true },
@@ -267,10 +268,11 @@ class CreateCTFCommand extends Command {
 	}
 
 	sendConfirmation(interaction, channel, event, options) {
+		const interpretation = formatDateInterpretation(options.dateStr, options.timezone, new Date(event.scheduledStartTime));
 		const embed = new EmbedBuilder()
 			.setColor(0x00FF00)
 			.setTitle('CTF Created Successfully')
-			.setDescription(`**${options.ctfName}** has been set up!`)
+			.setDescription(`**${options.ctfName}** has been set up!\n\n${interpretation}`)
 			.addFields(
 				{ name: 'Channel', value: `${channel}`, inline: true },
 				{ name: 'Start Time', value: `<t:${Math.floor(event.scheduledStartTime.getTime() / 1000)}:F>`, inline: false }
