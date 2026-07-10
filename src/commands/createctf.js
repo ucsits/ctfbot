@@ -40,8 +40,8 @@ class CreateCTFCommand extends Command {
 				.addStringOption(option =>
 					option
 						.setName('timezone')
-						.setDescription('Your timezone (e.g., Asia/Jakarta, Europe/London)')
-						.setRequired(true)
+						.setDescription('Your timezone (default: Asia/Jakarta)')
+						.setRequired(false)
 				)
 				.addStringOption(option =>
 					option
@@ -121,7 +121,7 @@ class CreateCTFCommand extends Command {
 			dateStr: interaction.options.getString('ctf_date'),
 			endDateStr: interaction.options.getString('ctf_end_date'),
 			ctfBaseUrl: interaction.options.getString('ctf_base_url'),
-			timezone: interaction.options.getString('timezone'),
+			timezone: interaction.options.getString('timezone') || 'Asia/Jakarta',
 			apiToken: interaction.options.getString('api_token'),
 			teamMode: interaction.options.getBoolean('team_mode') || false,
 			description: interaction.options.getString('event_description') || `Join us for ${interaction.options.getString('ctf_name')}!`,

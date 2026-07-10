@@ -35,7 +35,10 @@ module.exports = {
 		DISPLAY: '<t:{timestamp}:F>'
 	},
 
-	// Default Timezones (for autocomplete suggestions)
+	// Default timezone when user omits the timezone option
+	DEFAULT_TIMEZONE: 'Asia/Jakarta',
+
+	// Common Timezones (for autocomplete suggestions)
 	COMMON_TIMEZONES: [
 		'Asia/Jakarta',
 		'Asia/Singapore',

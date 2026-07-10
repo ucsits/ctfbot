@@ -40,7 +40,7 @@ class TaskCommand extends Command {
 							opt.setName('deadline').setDescription('Deadline in DD-MM-YYYY HH:MM in your timezone').setRequired(true)
 						)
 						.addStringOption(opt =>
-							opt.setName('timezone').setDescription('Your timezone (e.g. Asia/Jakarta, Europe/London)').setRequired(true)
+							opt.setName('timezone').setDescription('Your timezone (default: Asia/Jakarta)').setRequired(false)
 						)
 						.addStringOption(opt =>
 							opt.setName('description').setDescription('Task description').setRequired(false)
@@ -111,7 +111,7 @@ class TaskCommand extends Command {
 		const assignTo = interaction.options.getUser('assign_to');
 		const deadlineStr = interaction.options.getString('deadline');
 
-		const timezone = interaction.options.getString('timezone');
+		const timezone = interaction.options.getString('timezone') || 'Asia/Jakarta';
 
 		// Parse deadline with timezone support
 		let deadlineDate;

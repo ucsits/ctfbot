@@ -38,8 +38,8 @@ class ScheduleCommand extends Command {
 				.addStringOption(option =>
 					option
 						.setName('timezone')
-						.setDescription('Your timezone (e.g., Asia/Jakarta, Europe/London)')
-						.setRequired(true)
+						.setDescription('Your timezone (default: Asia/Jakarta)')
+						.setRequired(false)
 				)
 				.addAttachmentOption(option =>
 					option
@@ -71,7 +71,7 @@ class ScheduleCommand extends Command {
 		const title = interaction.options.getString('event_title');
 		const description = interaction.options.getString('event_description');
 		const dateStr = interaction.options.getString('event_date');
-		const timezone = interaction.options.getString('timezone');
+		const timezone = interaction.options.getString('timezone') || 'Asia/Jakarta';
 		const banner = interaction.options.getAttachment('event_banner');
 		const voiceChannel = interaction.options.getChannel('voice_channel');
 
