@@ -137,6 +137,9 @@ function _buildBlockEmbed(block) {
 
 	const { type } = parsed;
 
+	// Luce API returns timestamp in seconds; convert to ms for Date()
+	const blockDate = new Date((block.timestamp || Math.floor(Date.now() / 1000)) * 1000);
+
 	switch (type) {
 		case 'rep': {
 			const amount = parsed.amount || 0;
@@ -148,7 +151,7 @@ function _buildBlockEmbed(block) {
 					`<@${parsed.fromUser}> gave **${sign}** rep to <@${parsed.toUser}>`
 				)
 				.addFields({ name: 'Block', value: `#${block.height}`, inline: true })
-				.setTimestamp(new Date(block.timestamp || Date.now()));
+				.setTimestamp(blockDate);
 		}
 		case 'task':
 			return new EmbedBuilder()
@@ -160,7 +163,7 @@ function _buildBlockEmbed(block) {
 					{ name: 'Assigned to', value: `<@${parsed.assignedTo}>`, inline: true },
 					{ name: 'Block', value: `#${block.height}`, inline: true }
 				)
-				.setTimestamp(new Date(block.timestamp || Date.now()));
+				.setTimestamp(blockDate);
 		case 'task_done':
 			return new EmbedBuilder()
 				.setColor(0x00FF00)
@@ -170,7 +173,7 @@ function _buildBlockEmbed(block) {
 					{ name: 'Completed by', value: `<@${parsed.completedBy}>`, inline: true },
 					{ name: 'Block', value: `#${block.height}`, inline: true }
 				)
-				.setTimestamp(new Date(block.timestamp || Date.now()));
+				.setTimestamp(blockDate);
 		case 'document':
 			return new EmbedBuilder()
 				.setColor(0xFFAA00)
@@ -180,7 +183,7 @@ function _buildBlockEmbed(block) {
 					{ name: 'Author', value: `<@${parsed.author}>`, inline: true },
 					{ name: 'Block', value: `#${block.height}`, inline: true }
 				)
-				.setTimestamp(new Date(block.timestamp || Date.now()));
+				.setTimestamp(blockDate);
 		default:
 			return new EmbedBuilder()
 				.setColor(0x808080)
@@ -190,7 +193,7 @@ function _buildBlockEmbed(block) {
 					{ name: 'Author', value: `<@${block.author}>`, inline: true },
 					{ name: 'Type', value: type || 'unknown', inline: true }
 				)
-				.setTimestamp(new Date(block.timestamp || Date.now()));
+				.setTimestamp(blockDate);
 	}
 }
 
