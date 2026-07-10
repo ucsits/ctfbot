@@ -6,7 +6,7 @@
  * @module services/reminder
  */
 
-const { container } = require('@sapphire/pieces');
+const { container } = require('@sapphire/framework');
 const constants = require('../lib/constants/config');
 const taskRepository = require('../database/repositories/task.repository');
 

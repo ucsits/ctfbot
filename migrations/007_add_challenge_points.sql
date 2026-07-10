@@ -1,2 +1,4 @@
 -- Add points column to ctf_challenges table
-ALTER TABLE ctf_challenges ADD COLUMN points INTEGER DEFAULT 0;
+-- NOTE: points is already defined inline in database/index.js,
+-- so ALTER TABLE is skipped. This migration is kept as a no-op
+-- for historical continuity.

@@ -32,14 +32,14 @@ class TaskCommand extends Command {
 						.addStringOption(opt =>
 							opt.setName('title').setDescription('Task title').setRequired(true)
 						)
-						.addStringOption(opt =>
-							opt.setName('description').setDescription('Task description').setRequired(false)
-						)
 						.addUserOption(opt =>
 							opt.setName('assign_to').setDescription('Who to assign this task to').setRequired(true)
 						)
 						.addStringOption(opt =>
 							opt.setName('deadline').setDescription('Deadline in DD-MM-YYYY HH:MM (UTC)').setRequired(true)
+						)
+						.addStringOption(opt =>
+							opt.setName('description').setDescription('Task description').setRequired(false)
 						)
 				)
 

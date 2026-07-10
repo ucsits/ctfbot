@@ -84,7 +84,7 @@ function initDatabase() {
 	console.log('Database initialized successfully');
 
 	const migrationsDir = require('path').join(process.cwd(), 'migrations');
-	const result = runMigrations(migrationsDir);
+	const result = runMigrations(getConnection(), migrationsDir);
 
 	if (result.error) {
 		console.error('❌ Migration error:', result.error);
