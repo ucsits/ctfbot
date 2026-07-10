@@ -4,7 +4,7 @@
  */
 
 const { SapphireClient } = require('@sapphire/framework');
-const { GatewayIntentBits } = require('discord.js');
+const { GatewayIntentBits, Partials } = require('discord.js');
 const { initDatabase } = require('./database');
 const config = require('./config');
 
@@ -19,6 +19,11 @@ const client = new SapphireClient({
 		GatewayIntentBits.GuildMessageReactions,
 		GatewayIntentBits.MessageContent,
 		GatewayIntentBits.GuildMembers
+	],
+	partials: [
+		Partials.Message,
+		Partials.Channel,
+		Partials.Reaction
 	],
 	loadMessageCommandListeners: true,
 	baseUserDirectory: __dirname,
