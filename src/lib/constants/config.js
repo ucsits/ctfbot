@@ -60,6 +60,14 @@ module.exports = {
 		BACKUP_INTERVAL: 24 * 60 * 60 * 1000 // 24 hours
 	},
 
+	// Luce Blockchain
+	LUCE: {
+		DEFAULT_PORT: '5500'
+	},
+
+	// Reminder Channel
+	REMINDER_CHANNEL_ID: '1524933314119467200',
+
 	// Rate Limits
 	RATE_LIMITS: {
 		COMMANDS_PER_MINUTE: 10,
