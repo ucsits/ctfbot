@@ -5,6 +5,9 @@ const registrationOperations = require('./repositories/registration.repository')
 const challengeOperations = require('./repositories/challenge.repository');
 const pactOperations = require('./repositories/pact.repository');
 const adminRepository = require('./repositories/admin.repository');
+const taskRepository = require('./repositories/task.repository');
+const reputationRepository = require('./repositories/reputation.repository');
+const documentRepository = require('./repositories/document.repository');
 
 function initDatabase() {
 	const db = getConnection();
@@ -99,5 +102,8 @@ module.exports = {
 	registrationOperations,
 	challengeOperations,
 	pactOperations,
-	adminRepository
+	adminRepository,
+	taskRepository,
+	reputationRepository,
+	documentRepository
 };
