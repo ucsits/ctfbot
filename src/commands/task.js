@@ -177,7 +177,8 @@ class TaskCommand extends Command {
 				embed.addFields({ name: 'Description', value: description, inline: false });
 			}
 
-			return interaction.editReply({ embeds: [embed] });
+			const interpretation = formatDateInterpretation(deadlineStr, timezone, deadlineDate);
+			return interaction.editReply({ content: interpretation, embeds: [embed] });
 		} catch (error) {
 			this.container.logger.error('Error creating task:', error);
 			return interaction.editReply('❌ Failed to create task. Blockchain error: ' + error.message);
