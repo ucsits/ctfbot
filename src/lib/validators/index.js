@@ -3,6 +3,7 @@
  * @module validators
  */
 
+const { DateTime } = require('luxon');
 const { ValidationError } = require('../errors');
 const { suggestTimezones } = require('../utils/timezones');
 
@@ -84,6 +85,81 @@ function validateDateFormat(dateStr) {
 }
 
 /**
+ * Flexible date format patterns for validation (mirrors date.js FLEXIBLE_FORMATS).
+ * @type {string[]}
+ */
+const FLEXIBLE_DATE_FORMATS = [
+	'dd-MM-yyyy HH:mm',
+	'dd-MM-yyyy HH:mm:ss',
+	'dd-MM-yyyy',
+	'dd/MM/yyyy HH:mm',
+	'dd/MM/yyyy HH:mm:ss',
+	'dd/MM/yyyy',
+	'dd.MM.yyyy HH:mm',
+	'dd.MM.yyyy',
+	'd-M-yyyy H:m',
+	'd-M-yyyy H:m:s',
+	'd/M/yyyy H:m',
+	'd/M/yyyy H:m:s',
+	'yyyy-MM-dd HH:mm',
+	'yyyy-MM-dd HH:mm:ss',
+	'yyyy-MM-dd',
+	'yyyy/MM/dd HH:mm',
+	'yyyy/MM/dd',
+	'MM/dd/yyyy HH:mm',
+	'MM/dd/yyyy HH:mm:ss',
+	'MM-dd-yyyy HH:mm',
+	'M/d/yyyy H:m',
+	'M/d/yyyy H:m:s',
+];
+
+/**
+ * Validate a date string using flexible format matching.
+ * Returns parsed components in the same shape as {@link validateDateFormat}.
+ *
+ * @param {string} dateStr - Date string to validate
+ * @returns {Object} Parsed date components
+ * @returns {string} return.day - Day (01-31)
+ * @returns {string} return.month - Month (01-12)
+ * @returns {string} return.year - Year (YYYY)
+ * @returns {string} return.hour - Hour (00-23)
+ * @returns {string} return.minute - Minute (00-59)
+ * @throws {ValidationError} If no format matches
+ */
+function validateFlexibleDateFormat(dateStr) {
+	const trimmed = dateStr.trim();
+
+	for (const fmt of FLEXIBLE_DATE_FORMATS) {
+		const dt = DateTime.fromFormat(trimmed, fmt);
+		if (dt.isValid) {
+			return {
+				day: String(dt.day).padStart(2, '0'),
+				month: String(dt.month).padStart(2, '0'),
+				year: String(dt.year),
+				hour: String(dt.hour).padStart(2, '0'),
+				minute: String(dt.minute).padStart(2, '0')
+			};
+		}
+	}
+
+	// ISO 8601 fallback
+	const iso = DateTime.fromISO(trimmed);
+	if (iso.isValid) {
+		return {
+			day: String(iso.day).padStart(2, '0'),
+			month: String(iso.month).padStart(2, '0'),
+			year: String(iso.year),
+			hour: String(iso.hour).padStart(2, '0'),
+			minute: String(iso.minute).padStart(2, '0')
+		};
+	}
+
+	throw new ValidationError(
+		'❌ Invalid date format. Try: DD-MM-YYYY HH:MM (e.g., 31-12-2025 20:00)'
+	);
+}
+
+/**
  * Validates an IANA timezone string
  * @param {string} timezone - Timezone to validate
  * @returns {boolean} True if valid
@@ -151,6 +227,7 @@ function validateUsername(username) {
 module.exports = {
 	validateURL,
 	validateDateFormat,
+	validateFlexibleDateFormat,
 	validateTimezone,
 	validateFutureDate,
 	sanitizeChannelName,

@@ -4,27 +4,98 @@
  */
 
 const { DateTime } = require('luxon');
-const { validateDateFormat, validateTimezone } = require('../validators');
+const { validateTimezone } = require('../validators');
+const { ValidationError } = require('../errors');
 
-function parseLocalDateToUTC(dateStr, timezone) {
-	const { day, month, year, hour, minute } = validateDateFormat(dateStr);
+/**
+ * Flexible date format patterns tried in order.
+ * DD-first formats have priority to disambiguate DD-MM vs MM-DD.
+ * @type {string[]}
+ */
+const FLEXIBLE_FORMATS = [
+	// DD-MM-YYYY — highest priority
+	'dd-MM-yyyy HH:mm',
+	'dd-MM-yyyy HH:mm:ss',
+	'dd-MM-yyyy',
+	// DD/MM/YYYY
+	'dd/MM/yyyy HH:mm',
+	'dd/MM/yyyy HH:mm:ss',
+	'dd/MM/yyyy',
+	// DD.MM.YYYY
+	'dd.MM.yyyy HH:mm',
+	'dd.MM.yyyy',
+	// single-digit D-M-YYYY
+	'd-M-yyyy H:m',
+	'd-M-yyyy H:m:s',
+	'd/M/yyyy H:m',
+	'd/M/yyyy H:m:s',
+	// YYYY-MM-DD (ISO-like)
+	'yyyy-MM-dd HH:mm',
+	'yyyy-MM-dd HH:mm:ss',
+	'yyyy-MM-dd',
+	'yyyy/MM/dd HH:mm',
+	'yyyy/MM/dd',
+	// US-style MM/DD/YYYY (last — highest ambiguity)
+	'MM/dd/yyyy HH:mm',
+	'MM/dd/yyyy HH:mm:ss',
+	'MM-dd-yyyy HH:mm',
+	'M/d/yyyy H:m',
+	'M/d/yyyy H:m:s',
+];
+
+/**
+ * Parse a date string in a relaxed, multi-format fashion and convert to UTC.
+ *
+ * Accepted formats include:
+ *   `31-12-2025 20:00`      (DD-MM-YYYY HH:MM)
+ *   `31-12-2025`            (DD-MM-YYYY date-only → midnight)
+ *   `31/12/2025 20:00`      (DD/MM/YYYY HH:MM)
+ *   `2025-12-31 20:00`      (YYYY-MM-DD HH:MM)
+ *   `31.12.2025 20:00`      (DD.MM.YYYY HH:MM)
+ *   `1-12-2025 8:0`         (single-digit day/month/hour)
+ *   `12/31/2025 20:00`      (MM/DD/YYYY HH:MM — US style)
+ *   `2025-12-31T20:00:00Z`  (ISO 8601)
+ *
+ * @param {string} dateStr - Raw user date string
+ * @param {string} timezone - IANA timezone identifier
+ * @returns {Date} UTC Date object
+ * @throws {ValidationError} When no format matches
+ */
+function parseFlexibleDateToUTC(dateStr, timezone) {
 	validateTimezone(timezone);
 
-	const localDate = DateTime.fromObject(
-		{
-			year,
-			month,
-			day,
-			hour,
-			minute,
-			second: 0
-		},
-		{
-			zone: timezone
-		}
-	);
+	const trimmed = dateStr.trim();
 
-	return localDate.toUTC().toJSDate();
+	// Try each known format
+	for (const fmt of FLEXIBLE_FORMATS) {
+		const dt = DateTime.fromFormat(trimmed, fmt, { zone: timezone });
+		if (dt.isValid) {
+			return dt.toUTC().toJSDate();
+		}
+	}
+
+	// Catch-all: try ISO 8601 (handles e.g. "2025-12-31T20:00:00Z")
+	const iso = DateTime.fromISO(trimmed, { zone: timezone });
+	if (iso.isValid) {
+		return iso.toUTC().toJSDate();
+	}
+
+	throw new ValidationError(
+		'❌ Invalid date format. Try one of these examples:\n' +
+		'  `31-12-2025 20:00`   (DD-MM-YYYY HH:MM)\n' +
+		'  `2025-12-31 20:00`   (YYYY-MM-DD HH:MM)\n' +
+		'  `31/12/2025 20:00`   (DD/MM/YYYY HH:MM)'
+	);
+}
+
+/**
+ * Parse a local date string to UTC (alias for {@link parseFlexibleDateToUTC}).
+ * @param {string} dateStr - Date string
+ * @param {string} timezone - IANA timezone
+ * @returns {Date} UTC Date
+ */
+function parseLocalDateToUTC(dateStr, timezone) {
+	return parseFlexibleDateToUTC(dateStr, timezone);
 }
 
 function formatDiscordTimestamp(date, style = 'F') {
@@ -34,7 +105,7 @@ function formatDiscordTimestamp(date, style = 'F') {
 
 /**
  * Build a user-friendly string showing what date was parsed and how it maps to UTC.
- * @param {string} dateStr - Original user input (DD-MM-YYYY HH:MM)
+ * @param {string} dateStr - Original user input (any supported format)
  * @param {string} timezone - IANA timezone string
  * @param {Date} utcDate - The resulting UTC date
  * @returns {string} Formatted interpretation string
@@ -112,6 +183,7 @@ function computePeriodRange(period, now) {
 
 module.exports = {
 	parseLocalDateToUTC,
+	parseFlexibleDateToUTC,
 	formatDateInterpretation,
 	formatDiscordTimestamp,
 	hoursToMs,
