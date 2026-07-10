@@ -4,6 +4,7 @@ const { randomUUID } = require('crypto');
 const documentRepository = require('../database/repositories/document.repository');
 const luce = require('../lib/luce');
 const { checkPermissionReply } = require('../lib/middleware/ensurePermission');
+const { ensureGovernanceChannelReply } = require('../lib/middleware/ensureGovernanceChannel');
 const { PermissionFlagsBits } = require('discord.js');
 
 class DocumentCommand extends Command {
@@ -50,6 +51,10 @@ class DocumentCommand extends Command {
 	}
 
 	async chatInputRun(interaction) {
+		// Restrict to governance channel categories
+		const cancelled = await ensureGovernanceChannelReply(interaction);
+		if (cancelled) return;
+
 		const sub = interaction.options.getSubcommand();
 		if (sub === 'add') return this._add(interaction);
 		if (sub === 'get') return this._get(interaction);

@@ -54,6 +54,17 @@ module.exports = {
 		'UTC'
 	],
 
+	// Governance channel categories (where task & document commands are allowed)
+	GOVERNANCE_CATEGORIES: [
+		'1386740819545030676',
+		'1403399481696714843',
+		'1392005579865587754',
+		'1392006043806076959',
+		'1392005958904971305',
+		'1392006872520724521',
+		'1448569466194759751'
+	],
+
 	// Database
 	DATABASE: {
 		FILE_NAME: 'ctfbot.db',

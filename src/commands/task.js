@@ -6,6 +6,7 @@ const taskRepository = require('../database/repositories/task.repository');
 const luce = require('../lib/luce');
 const { sendErrorResponse, sendSuccessResponse } = require('../lib/utils/response');
 const { checkPermissionReply } = require('../lib/middleware/ensurePermission');
+const { ensureGovernanceChannelReply } = require('../lib/middleware/ensureGovernanceChannel');
 const constants = require('../lib/constants/config');
 
 class TaskCommand extends Command {
@@ -81,6 +82,10 @@ class TaskCommand extends Command {
 	}
 
 	async chatInputRun(interaction) {
+		// Restrict to governance channel categories
+		const cancelled = await ensureGovernanceChannelReply(interaction);
+		if (cancelled) return;
+
 		const sub = interaction.options.getSubcommand();
 
 		if (sub === 'add') return this._add(interaction);
