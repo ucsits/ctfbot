@@ -32,6 +32,19 @@ function formatDiscordTimestamp(date, style = 'F') {
 	return `<t:${timestamp}:${style}>`;
 }
 
+/**
+ * Build a user-friendly string showing what date was parsed and how it maps to UTC.
+ * @param {string} dateStr - Original user input (DD-MM-YYYY HH:MM)
+ * @param {string} timezone - IANA timezone string
+ * @param {Date} utcDate - The resulting UTC date
+ * @returns {string} Formatted interpretation string
+ */
+function formatDateInterpretation(dateStr, timezone, utcDate) {
+	const ts = Math.floor(utcDate.getTime() / 1000);
+	return `📅 **Your input:** ${dateStr} (${timezone})
+🌐 **UTC:** <t:${ts}:F> (<t:${ts}:R>)`;
+}
+
 function hoursToMs(hours) {
 	return hours * 60 * 60 * 1000;
 }
@@ -56,6 +69,7 @@ function validateEndDateAfterStart(startDate, endDate) {
 
 module.exports = {
 	parseLocalDateToUTC,
+	formatDateInterpretation,
 	formatDiscordTimestamp,
 	hoursToMs,
 	daysToMs,
