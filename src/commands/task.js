@@ -1,6 +1,6 @@
 const { Command } = require('@sapphire/framework');
 const { PermissionFlagsBits, EmbedBuilder } = require('discord.js');
-const { v4: uuidv4 } = require('uuid');
+const { randomUUID } = require('crypto');
 const { getConnection } = require('../database/connection');
 const taskRepository = require('../database/repositories/task.repository');
 const luce = require('../lib/luce');
@@ -115,7 +115,7 @@ class TaskCommand extends Command {
 			return interaction.editReply('❌ Deadline must be in the future.');
 		}
 
-		const taskId = uuidv4();
+		const taskId = randomUUID();
 
 		try {
 			// 1. Write to blockchain

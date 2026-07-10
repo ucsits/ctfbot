@@ -1,6 +1,6 @@
 const { Command } = require('@sapphire/framework');
 const { EmbedBuilder } = require('discord.js');
-const { v4: uuidv4 } = require('uuid');
+const { randomUUID } = require('crypto');
 const documentRepository = require('../database/repositories/document.repository');
 const luce = require('../lib/luce');
 const { checkPermissionReply } = require('../lib/middleware/ensurePermission');
@@ -64,7 +64,7 @@ class DocumentCommand extends Command {
 
 		const title = interaction.options.getString('title');
 		const content = interaction.options.getString('content');
-		const docId = uuidv4();
+		const docId = randomUUID();
 
 		try {
 			const data = JSON.stringify({
