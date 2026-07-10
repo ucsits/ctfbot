@@ -55,6 +55,8 @@ const FLEXIBLE_FORMATS = [
  *   `1-12-2025 8:0`         (single-digit day/month/hour)
  *   `12/31/2025 20:00`      (MM/DD/YYYY HH:MM — US style)
  *   `2025-12-31T20:00:00Z`  (ISO 8601)
+ *   `1735689600`            (Unix timestamp seconds — Discord @time compatible)
+ *   `<t:1735689600:F>`      (Discord @time helper format)
  *
  * @param {string} dateStr - Raw user date string
  * @param {string} timezone - IANA timezone identifier
@@ -66,7 +68,25 @@ function parseFlexibleDateToUTC(dateStr, timezone) {
 
 	const trimmed = dateStr.trim();
 
-	// Try each known format
+	// 1. Try Discord @time helper format: <t:UNIX_SECONDS> or <t:UNIX_SECONDS:LETTER>
+	const discordTimeMatch = trimmed.match(/^<t:(\d+)(?::[tTdDfFR])?>$/);
+	if (discordTimeMatch) {
+		const unixSeconds = parseInt(discordTimeMatch[1], 10);
+		return new Date(unixSeconds * 1000);
+	}
+
+	// 2. Try raw Unix timestamp (seconds) — 10-digit epoch or any reasonable-length digits
+	const unixMatch = trimmed.match(/^(\d{8,10})(?:\.\d+)?$/);
+	if (unixMatch) {
+		const unixSeconds = parseInt(unixMatch[1], 10);
+		// Sanity check: year must be between 2000 and 2100
+		const d = new Date(unixSeconds * 1000);
+		if (d.getFullYear() >= 2000 && d.getFullYear() <= 2100) {
+			return d;
+		}
+	}
+
+	// 3. Try each known date format
 	for (const fmt of FLEXIBLE_FORMATS) {
 		const dt = DateTime.fromFormat(trimmed, fmt, { zone: timezone });
 		if (dt.isValid) {
@@ -74,7 +94,7 @@ function parseFlexibleDateToUTC(dateStr, timezone) {
 		}
 	}
 
-	// Catch-all: try ISO 8601 (handles e.g. "2025-12-31T20:00:00Z")
+	// 4. Catch-all: try ISO 8601 (handles e.g. "2025-12-31T20:00:00Z")
 	const iso = DateTime.fromISO(trimmed, { zone: timezone });
 	if (iso.isValid) {
 		return iso.toUTC().toJSDate();
@@ -84,7 +104,8 @@ function parseFlexibleDateToUTC(dateStr, timezone) {
 		'❌ Invalid date format. Try one of these examples:\n' +
 		'  `31-12-2025 20:00`   (DD-MM-YYYY HH:MM)\n' +
 		'  `2025-12-31 20:00`   (YYYY-MM-DD HH:MM)\n' +
-		'  `31/12/2025 20:00`   (DD/MM/YYYY HH:MM)'
+		'  `31/12/2025 20:00`   (DD/MM/YYYY HH:MM)\n' +
+		'  `1735689600`         (Unix timestamp — Discord @time compatible)'
 	);
 }
 

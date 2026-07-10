@@ -38,7 +38,7 @@ class TaskCommand extends Command {
 							opt.setName('assign_to').setDescription('Who to assign this task to').setRequired(true)
 						)
 						.addStringOption(opt =>
-							opt.setName('deadline').setDescription('Deadline in DD-MM-YYYY HH:MM in your timezone').setRequired(true)
+							opt.setName('deadline').setDescription('Deadline — DD-MM-YYYY HH:MM or Unix timestamp (@time compatible)').setRequired(true)
 						)
 						.addStringOption(opt =>
 							opt.setName('timezone').setDescription('Your timezone (default: Asia/Jakarta)').setRequired(false)

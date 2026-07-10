@@ -32,7 +32,7 @@ class ScheduleCommand extends Command {
 				.addStringOption(option =>
 					option
 						.setName('event_date')
-						.setDescription('Event date and time (DD-MM-YYYY HH:MM in your timezone)')
+						.setDescription('Event date — DD-MM-YYYY HH:MM or Unix timestamp (@time compatible)')
 						.setRequired(true)
 				)
 				.addStringOption(option =>

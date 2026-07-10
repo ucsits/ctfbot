@@ -28,7 +28,7 @@ class CreateCTFCommand extends Command {
 				.addStringOption(option =>
 					option
 						.setName('ctf_date')
-						.setDescription('CTF start date and time (DD-MM-YYYY HH:MM in your timezone)')
+						.setDescription('CTF start date — DD-MM-YYYY HH:MM or Unix timestamp (@time compatible)')
 						.setRequired(true)
 				)
 				.addStringOption(option =>
@@ -52,7 +52,7 @@ class CreateCTFCommand extends Command {
 				.addStringOption(option =>
 					option
 						.setName('ctf_end_date')
-						.setDescription('CTF end date and time (DD-MM-YYYY HH:MM in your timezone, defaults to +24h)')
+						.setDescription('CTF end date — DD-MM-YYYY HH:MM or Unix timestamp (@time compatible, defaults +24h)')
 						.setRequired(false)
 				)
 				.addStringOption(option =>

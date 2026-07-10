@@ -117,6 +117,10 @@ const FLEXIBLE_DATE_FORMATS = [
  * Validate a date string using flexible format matching.
  * Returns parsed components in the same shape as {@link validateDateFormat}.
  *
+ * Also accepts:
+ *   `1735689600`            (Unix timestamp seconds — Discord @time compatible)
+ *   `<t:1735689600:F>`      (Discord @time helper format)
+ *
  * @param {string} dateStr - Date string to validate
  * @returns {Object} Parsed date components
  * @returns {string} return.day - Day (01-31)
@@ -129,6 +133,36 @@ const FLEXIBLE_DATE_FORMATS = [
 function validateFlexibleDateFormat(dateStr) {
 	const trimmed = dateStr.trim();
 
+	// 1. Discord @time helper format: <t:UNIX_SECONDS> or <t:UNIX_SECONDS:LETTER>
+	const discordTimeMatch = trimmed.match(/^<t:(\d+)(?::[tTdDfFR])?>$/);
+	if (discordTimeMatch) {
+		const date = new Date(parseInt(discordTimeMatch[1], 10) * 1000);
+		return {
+			day: String(date.getUTCDate()).padStart(2, '0'),
+			month: String(date.getUTCMonth() + 1).padStart(2, '0'),
+			year: String(date.getUTCFullYear()),
+			hour: String(date.getUTCHours()).padStart(2, '0'),
+			minute: String(date.getUTCMinutes()).padStart(2, '0')
+		};
+	}
+
+	// 2. Raw Unix timestamp (seconds) — 8-10 digit epoch
+	const unixMatch = trimmed.match(/^(\d{8,10})(?:\.\d+)?$/);
+	if (unixMatch) {
+		const unixSeconds = parseInt(unixMatch[1], 10);
+		const date = new Date(unixSeconds * 1000);
+		if (date.getUTCFullYear() >= 2000 && date.getUTCFullYear() <= 2100) {
+			return {
+				day: String(date.getUTCDate()).padStart(2, '0'),
+				month: String(date.getUTCMonth() + 1).padStart(2, '0'),
+				year: String(date.getUTCFullYear()),
+				hour: String(date.getUTCHours()).padStart(2, '0'),
+				minute: String(date.getUTCMinutes()).padStart(2, '0')
+			};
+		}
+	}
+
+	// 3. Try each known date format
 	for (const fmt of FLEXIBLE_DATE_FORMATS) {
 		const dt = DateTime.fromFormat(trimmed, fmt);
 		if (dt.isValid) {
@@ -142,7 +176,7 @@ function validateFlexibleDateFormat(dateStr) {
 		}
 	}
 
-	// ISO 8601 fallback
+	// 4. ISO 8601 fallback
 	const iso = DateTime.fromISO(trimmed);
 	if (iso.isValid) {
 		return {
@@ -155,7 +189,9 @@ function validateFlexibleDateFormat(dateStr) {
 	}
 
 	throw new ValidationError(
-		'❌ Invalid date format. Try: DD-MM-YYYY HH:MM (e.g., 31-12-2025 20:00)'
+		'❌ Invalid date format. Try:\n' +
+		'  `31-12-2025 20:00`   (DD-MM-YYYY HH:MM)\n' +
+		'  `1735689600`         (Unix timestamp — Discord @time compatible)'
 	);
 }
 

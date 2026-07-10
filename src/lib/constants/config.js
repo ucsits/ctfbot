@@ -31,7 +31,7 @@ module.exports = {
 
 	// Date Formats
 	DATE_FORMATS: {
-		INPUT: 'DD-MM-YYYY HH:MM',
+		INPUT: 'DD-MM-YYYY HH:MM or a Unix timestamp (Discord @time compatible)',
 		DISPLAY: '<t:{timestamp}:F>'
 	},
 
