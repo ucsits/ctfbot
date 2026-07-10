@@ -6,6 +6,8 @@
 const fs = require('fs');
 const path = require('path');
 const { getConnection } = require('./connection');
+const { logger } = require('../lib/logger');
+const migrationLogger = logger.child('Migration');
 
 /**
  * Run all pending migrations
@@ -63,9 +65,9 @@ function runMigrations(
 			})();
 
 			applied.push(name);
-			console.log(`✅ Applied migration: ${name}`);
+			migrationLogger.info(`Applied migration: ${name}`);
 		} catch (error) {
-			console.error(`❌ Failed to apply migration ${name}:`, error);
+			migrationLogger.error(`Failed to apply migration ${name}`, error);
 			return { applied, skipped, error: error.message };
 		}
 	}
@@ -108,7 +110,7 @@ INSERT OR IGNORE INTO migrations (name) VALUES ('${paddedNumber}_${name}');
 `;
 
 	fs.writeFileSync(filepath, template);
-	console.log(`✅ Created migration: ${filename}`);
+	migrationLogger.info(`Created migration: ${filename}`);
 	return filepath;
 }
 

@@ -19,6 +19,15 @@ const validateEnv = () => {
 const config = {
 	validate: validateEnv,
 
+	logging: {
+		get level() {
+			return process.env.LOG_LEVEL || 'info';
+		},
+		get verbose() {
+			return process.env.VERBOSE_LOGGING === 'true';
+		}
+	},
+
 	discord: {
 		get token() {
 			if (!process.env.DISCORD_TOKEN) {

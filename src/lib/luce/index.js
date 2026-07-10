@@ -10,6 +10,9 @@
 const LUCE_PORT = process.env.LUCE_PORT || '5500';
 const BASE_URL = `http://127.0.0.1:${LUCE_PORT}/api/v1`;
 
+const { logger } = require('../logger');
+const luceLog = logger.child('Luce');
+
 /**
  * Append a new block to the blockchain.
  *
@@ -19,6 +22,8 @@ const BASE_URL = `http://127.0.0.1:${LUCE_PORT}/api/v1`;
  * @returns {Promise<object>} The created block response
  */
 async function appendBlock({ author, data }) {
+	luceLog.debug(`Append block (author=${author})`);
+
 	const res = await fetch(`${BASE_URL}/blocks`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
@@ -27,10 +32,13 @@ async function appendBlock({ author, data }) {
 
 	if (!res.ok) {
 		const body = await res.json().catch(() => ({}));
+		luceLog.error(`Append failed (${res.status}): ${body.error || res.statusText}`);
 		throw new Error(`Blockchain append failed (${res.status}): ${body.error || res.statusText}`);
 	}
 
-	return res.json();
+	const result = await res.json();
+	luceLog.info(`Block appended at height ${result.height}`);
+	return result;
 }
 
 /**
@@ -39,8 +47,13 @@ async function appendBlock({ author, data }) {
  */
 async function listBlocks() {
 	const res = await fetch(`${BASE_URL}/blocks`);
-	if (!res.ok) throw new Error(`Blockchain list failed (${res.status})`);
-	return res.json();
+	if (!res.ok) {
+		luceLog.error(`List blocks failed (${res.status})`);
+		throw new Error(`Blockchain list failed (${res.status})`);
+	}
+	const blocks = await res.json();
+	luceLog.debug(`Listed ${blocks.length} blocks`);
+	return blocks;
 }
 
 /**
@@ -49,8 +62,12 @@ async function listBlocks() {
  * @returns {Promise<object>}
  */
 async function getBlock(height) {
+	luceLog.debug(`Get block at height ${height}`);
 	const res = await fetch(`${BASE_URL}/blocks/${height}`);
-	if (!res.ok) throw new Error(`Blockchain get failed (${res.status})`);
+	if (!res.ok) {
+		luceLog.error(`Get block at ${height} failed (${res.status})`);
+		throw new Error(`Blockchain get failed (${res.status})`);
+	}
 	return res.json();
 }
 
@@ -60,8 +77,12 @@ async function getBlock(height) {
  */
 async function getHeight() {
 	const res = await fetch(`${BASE_URL}/chain/height`);
-	if (!res.ok) throw new Error(`Blockchain height failed (${res.status})`);
+	if (!res.ok) {
+		luceLog.error(`Get height failed (${res.status})`);
+		throw new Error(`Blockchain height failed (${res.status})`);
+	}
 	const body = await res.json();
+	luceLog.debug(`Chain height: ${body.height}`);
 	return body.height;
 }
 
@@ -71,8 +92,12 @@ async function getHeight() {
  */
 async function validateChain() {
 	const res = await fetch(`${BASE_URL}/chain/validate`);
-	if (!res.ok) throw new Error(`Blockchain validate failed (${res.status})`);
+	if (!res.ok) {
+		luceLog.error(`Validate chain failed (${res.status})`);
+		throw new Error(`Blockchain validate failed (${res.status})`);
+	}
 	const body = await res.json();
+	luceLog.info(`Chain valid: ${body.valid}`);
 	return body.valid;
 }
 

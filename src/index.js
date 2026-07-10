@@ -3,12 +3,27 @@
  * @module index
  */
 
-const { SapphireClient } = require('@sapphire/framework');
+const { SapphireClient, LogLevel } = require('@sapphire/framework');
 const { GatewayIntentBits, Partials } = require('discord.js');
 const { initDatabase } = require('./database');
 const config = require('./config');
+const { logger } = require('./lib/logger');
 
 config.validate();
+
+logger.info('Starting CTFBot...');
+
+// Map LOG_LEVEL env to Sapphire LogLevel
+const LOG_LEVEL_MAP = {
+	trace: LogLevel.Trace,
+	debug: LogLevel.Debug,
+	info: LogLevel.Info,
+	warn: LogLevel.Warn,
+	error: LogLevel.Error,
+	none: LogLevel.None
+};
+
+const logLevel = LOG_LEVEL_MAP[config.logging.level] ?? LogLevel.Info;
 
 initDatabase();
 
@@ -27,6 +42,9 @@ const client = new SapphireClient({
 	],
 	loadMessageCommandListeners: true,
 	baseUserDirectory: __dirname,
+	logger: {
+		level: logLevel
+	},
 	...(config.discord.guildId && {
 		defaultGuildId: config.discord.guildId
 	})

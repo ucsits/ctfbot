@@ -17,6 +17,7 @@ class CTFdClient {
 		this.apiToken = apiToken ? apiToken.trim() : null;
 		this._lastRequestTime = 0;
 		this._minRequestInterval = 200;
+		this.log = require('../logger').logger.child('CTFd');
 	}
 
 	async _rateLimit() {
@@ -49,7 +50,7 @@ class CTFdClient {
 			headers['Authorization'] = `Token ${this.apiToken}`;
 		}
 
-		console.log(`[CTFd] Request: ${method} ${url}`);
+		this.log.debug(`${method} ${url}`);
 
 		try {
 			const response = await fetch(url, {
@@ -58,11 +59,11 @@ class CTFdClient {
 				headers
 			});
 
-			console.log(`[CTFd] Response Status: ${response.status} ${response.statusText}`);
+			this.log.debug(`Response Status: ${response.status} ${response.statusText}`);
 
 			if (!response.ok) {
 				const text = await response.text();
-				console.error(`[CTFd] Error Response Body: ${text}`);
+				this.log.error(`Error Response Body: ${text}`);
 				throw new Error(`CTFd API error: ${response.status} ${response.statusText}`);
 			}
 
@@ -70,13 +71,13 @@ class CTFdClient {
 
 			// CTFd API returns data in { success: true, data: [...] } format
 			if (!data.success) {
-				console.error('[CTFd] API Logic Error:', data);
+				this.log.error('API Logic Error', data);
 				throw new Error(`CTFd API returned error: ${JSON.stringify(data)}`);
 			}
 
 			return data;
 		} catch (error) {
-			console.error(`[CTFd] Request Failed: ${method} ${url}`, error);
+			this.log.error(`Request Failed: ${method} ${url}`, error);
 			throw error;
 		}
 	}

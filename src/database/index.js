@@ -1,5 +1,7 @@
 const { getConnection } = require('./connection');
 const { runMigrations } = require('./migrations');
+const { logger } = require('../lib/logger');
+const dbLogger = logger.child('DB');
 const ctfOperations = require('./repositories/ctf.repository');
 const registrationOperations = require('./repositories/registration.repository');
 const challengeOperations = require('./repositories/challenge.repository');
@@ -81,17 +83,17 @@ function initDatabase() {
 		)
 	`);
 
-	console.log('Database initialized successfully');
+	dbLogger.info('Database initialized successfully');
 
 	const migrationsDir = require('path').join(process.cwd(), 'migrations');
 	const result = runMigrations(getConnection(), migrationsDir);
 
 	if (result.error) {
-		console.error('❌ Migration error:', result.error);
+		dbLogger.error('Migration error', result.error);
 	} else if (result.applied.length > 0) {
-		console.log(`✅ Applied ${result.applied.length} migration(s): ${result.applied.join(', ')}`);
+		dbLogger.info(`Applied ${result.applied.length} migration(s): ${result.applied.join(', ')}`);
 	} else {
-		console.log('✅ All migrations up to date');
+		dbLogger.info('All migrations up to date');
 	}
 }
 

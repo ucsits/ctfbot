@@ -5,6 +5,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { logger } = require('../logger');
 
 /**
  * Get idHints for a command from the stored command IDs
@@ -46,7 +47,7 @@ function saveCommandIds(commandIds) {
 		fs.writeFileSync(idHintsFile, JSON.stringify(commandIds, null, 2));
 		return true;
 	} catch (error) {
-		console.error('Failed to save command IDs:', error);
+		logger.error('Failed to save command IDs', error);
 		return false;
 	}
 }

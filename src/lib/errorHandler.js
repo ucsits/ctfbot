@@ -6,9 +6,9 @@ function formatError(error) {
 }
 
 async function handleCommandError(interaction, error, context = 'command') {
-	const logger = interaction?.client?.logger || console;
+	const log = require('./logger').logger.child('ErrorHandler');
 
-	logger.error(`Error in ${context}:`, error);
+	log.error(`Error in ${context}`, error);
 
 	const errorMessage = formatError(error);
 	const isReplied = interaction.replied || interaction.deferred;
@@ -19,7 +19,7 @@ async function handleCommandError(interaction, error, context = 'command') {
 		}
 		return await interaction.reply(errorMessage);
 	} catch (replyError) {
-		logger.error('Failed to reply to user:', replyError);
+		log.error('Failed to reply to user', replyError);
 	}
 }
 

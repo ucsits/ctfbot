@@ -329,6 +329,68 @@ pnpm test
 
 This project uses tabs for indentation. Please ensure your editor is configured accordingly.
 
+## Logging
+
+The bot includes a unified logging system built on top of the Sapphire framework's logger.
+
+### Log Levels
+
+Set the `LOG_LEVEL` environment variable to control verbosity:
+
+| Level   | Usage                                              |
+|---------|----------------------------------------------------|
+| `error` | Fatal errors and exceptions only                   |
+| `warn`  | Warnings + errors                                  |
+| `info`  | Normal operational messages (default)              |
+| `debug` | Detailed debugging information                     |
+| `trace` | Everything, including individual HTTP request logs |
+
+```env
+LOG_LEVEL=info
+```
+
+### Where Logs Go
+
+All logs are output to stdout (info/debug/trace) and stderr (error/warn).
+There is no file-based logging — use your process manager (e.g., systemd,
+Docker, PM2) to capture and rotate stdout/stderr.
+
+### Logger Architecture
+
+The logger (`src/lib/logger.js`) works in two modes:
+
+1. **Pre-init mode**: Before the bot has logged into Discord, the logger
+   falls back to raw `console` calls with ISO timestamps.
+2. **Post-init mode**: Once the SapphireClient is ready, the logger
+   delegates to Sapphire's structured logger for consistent formatting
+   across all commands and listeners.
+
+### Context Prefixes
+
+Child loggers with a context prefix are used throughout the codebase:
+
+| Prefix          | Module                            |
+|-----------------|-----------------------------------|
+| `[ErrorHandler]`| `src/lib/errorHandler.js`         |
+| `[CTFd]`        | `src/lib/ctfd/index.js`           |
+| `[DB]`          | `src/database/index.js`           |
+| `[Migration]`   | `src/database/migrations.js`      |
+| `[Luce]`        | `src/lib/luce/index.js`           |
+
+### Adding Logging to a New Module
+
+```js
+const { logger } = require('./lib/logger');
+const myLog = logger.child('MyModule');
+
+myLog.info('Operation completed successfully');
+myLog.error('Something went wrong', error);
+myLog.debug('Detailed info: %s', detail);
+```
+
+Logger methods follow the same signature as `console.log`:
+`logger.info(message, ...optionalArgs)`.
+
 ## Contributing
 
 Contributions are welcome! Please read our comprehensive guides:
