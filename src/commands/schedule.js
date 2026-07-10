@@ -1,6 +1,6 @@
 const { Command } = require('@sapphire/framework');
 const { PermissionFlagsBits, EmbedBuilder, ChannelType } = require('discord.js');
-const { getIdHints, parseLocalDateToUTC } = require('../lib/utils');
+const { getIdHints, parseLocalDateToUTC, formatDateInterpretation } = require('../lib/utils');
 const { checkPermissionReply } = require('../lib/middleware/ensurePermission');
 
 class ScheduleCommand extends Command {
@@ -117,10 +117,11 @@ class ScheduleCommand extends Command {
 				});
 			}
 
+			const interpretation = formatDateInterpretation(dateStr, timezone, eventDate);
 			const embed = new EmbedBuilder()
 				.setColor(0x00FF00)
 				.setTitle('✅ Event Scheduled')
-				.setDescription(`**${title}** has been scheduled!`)
+				.setDescription(`**${title}** has been scheduled!\n\n${interpretation}`)
 				.addFields(
 					{ name: '📅 Date & Time', value: `<t:${Math.floor(eventDate.getTime() / 1000)}:F>`, inline: false },
 					{ name: '📝 Description', value: description, inline: false }
