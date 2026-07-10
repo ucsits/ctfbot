@@ -5,6 +5,7 @@ const { getConnection } = require('../database/connection');
 const taskRepository = require('../database/repositories/task.repository');
 const luce = require('../lib/luce');
 const { sendErrorResponse, sendSuccessResponse } = require('../lib/utils/response');
+const { parseLocalDateToUTC, formatDateInterpretation } = require('../lib/utils');
 const { checkPermissionReply } = require('../lib/middleware/ensurePermission');
 const { ensureGovernanceChannelReply } = require('../lib/middleware/ensureGovernanceChannel');
 const constants = require('../lib/constants/config');
@@ -36,7 +37,10 @@ class TaskCommand extends Command {
 							opt.setName('assign_to').setDescription('Who to assign this task to').setRequired(true)
 						)
 						.addStringOption(opt =>
-							opt.setName('deadline').setDescription('Deadline in DD-MM-YYYY HH:MM (UTC)').setRequired(true)
+							opt.setName('deadline').setDescription('Deadline in DD-MM-YYYY HH:MM in your timezone').setRequired(true)
+						)
+						.addStringOption(opt =>
+							opt.setName('timezone').setDescription('Your timezone (e.g. Asia/Jakarta, Europe/London)').setRequired(true)
 						)
 						.addStringOption(opt =>
 							opt.setName('description').setDescription('Task description').setRequired(false)
@@ -107,18 +111,21 @@ class TaskCommand extends Command {
 		const assignTo = interaction.options.getUser('assign_to');
 		const deadlineStr = interaction.options.getString('deadline');
 
-		// Parse deadline as UTC DD-MM-YYYY HH:MM
-		const match = deadlineStr.match(/^(\d{2})-(\d{2})-(\d{4})\s+(\d{2}):(\d{2})$/);
-		if (!match) {
-			return interaction.editReply('❌ Invalid deadline format. Use: DD-MM-YYYY HH:MM (UTC, e.g. 31-12-2025 20:00)');
-		}
-		const [, day, month, year, hour, minute] = match;
-		const deadline = Date.UTC(+year, +month - 1, +day, +hour, +minute, 0);
-		const deadlineUnix = Math.floor(deadline / 1000);
+		const timezone = interaction.options.getString('timezone');
 
-		if (deadline <= Date.now()) {
+		// Parse deadline with timezone support
+		let deadlineDate;
+		try {
+			deadlineDate = parseLocalDateToUTC(deadlineStr, timezone);
+		} catch (error) {
+			return interaction.editReply(`❌ ${error.message}`);
+		}
+
+		if (deadlineDate <= new Date()) {
 			return interaction.editReply('❌ Deadline must be in the future.');
 		}
+
+		const deadlineUnix = Math.floor(deadlineDate.getTime() / 1000);
 
 		const taskId = randomUUID();
 
