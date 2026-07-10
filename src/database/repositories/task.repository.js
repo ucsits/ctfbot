@@ -29,6 +29,19 @@ function createReminder({ taskId, channelId, remindAt }) {
 }
 
 /**
+ * Cancel a task (soft delete — marks cancelled=1, keeps blockchain audit trail).
+ */
+function cancelTask({ taskId, cancelledBy }) {
+	const now = Math.floor(Date.now() / 1000);
+	db().prepare(`
+		UPDATE tasks SET cancelled = 1, completed_by = ?, completed_at = ?
+		WHERE task_id = ?
+	`).run(cancelledBy, now, taskId);
+	// Remove associated reminders
+	db().prepare('DELETE FROM task_reminders WHERE task_id = ?').run(taskId);
+}
+
+/**
  * Mark a task as done.
  */
 function completeTask({ taskId, completedBy }) {
@@ -50,7 +63,7 @@ function getTask(taskId) {
  * List pending tasks for a user, optionally filtered by deadline range.
  */
 function listPendingTasks({ assignedTo, deadlineAfter, deadlineBefore } = {}) {
-	let sql = 'SELECT * FROM tasks WHERE status = ?';
+	let sql = 'SELECT * FROM tasks WHERE status = ? AND cancelled = 0';
 	const params = ['pending'];
 
 	if (assignedTo) {
@@ -94,6 +107,7 @@ module.exports = {
 	createTask,
 	createReminder,
 	completeTask,
+	cancelTask,
 	getTask,
 	listPendingTasks,
 	getDueReminders,

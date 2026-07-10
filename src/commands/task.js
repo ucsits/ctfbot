@@ -78,23 +78,44 @@ class TaskCommand extends Command {
 						.addStringOption(opt =>
 							opt.setName('task_id').setDescription('The task UUID').setRequired(true)
 						)
+				)
+
+				// ── subcommand: cancel ──
+				.addSubcommand(sub =>
+					sub
+						.setName('cancel')
+						.setDescription('Cancel a pending task')
+						.addStringOption(opt =>
+							opt.setName('task_id').setDescription('The task UUID').setRequired(true)
+						)
 				),
-			{
-				idHints: require('../lib/utils/commandIds').getIdHints('task')
-			}
+		{
+			idHints: require('../lib/utils/commandIds').getIdHints('task')
+		}
 		);
 	}
 
 	async chatInputRun(interaction) {
 		// Restrict to governance channel categories
 		const cancelled = await ensureGovernanceChannelReply(interaction);
-		if (cancelled) return;
+		if (cancelled) {
+			return;
+		}
 
 		const sub = interaction.options.getSubcommand();
 
-		if (sub === 'add') return this._add(interaction);
-		if (sub === 'list') return this._list(interaction);
-		if (sub === 'done') return this._done(interaction);
+		if (sub === 'add') {
+			return this._add(interaction);
+		}
+		if (sub === 'list') {
+			return this._list(interaction);
+		}
+		if (sub === 'done') {
+			return this._done(interaction);
+		}
+		if (sub === 'cancel') {
+			return this._cancel(interaction);
+		}
 	}
 
 	// ──────────────────────────────────────────────
@@ -102,7 +123,9 @@ class TaskCommand extends Command {
 	// ──────────────────────────────────────────────
 	async _add(interaction) {
 		const cancelled = await checkPermissionReply(interaction, PermissionFlagsBits.ManageMessages, 'Manage Messages');
-		if (cancelled) return;
+		if (cancelled) {
+			return;
+		}
 
 		await interaction.deferReply();
 
@@ -247,7 +270,9 @@ class TaskCommand extends Command {
 	// ──────────────────────────────────────────────
 	async _done(interaction) {
 		const cancelled = await checkPermissionReply(interaction, PermissionFlagsBits.ManageMessages, 'Manage Messages');
-		if (cancelled) return;
+		if (cancelled) {
+			return;
+		}
 
 		await interaction.deferReply();
 
@@ -260,6 +285,9 @@ class TaskCommand extends Command {
 			}
 			if (existing.status === 'done') {
 				return interaction.editReply('❌ This task is already marked as done.');
+			}
+			if (existing.cancelled) {
+				return interaction.editReply('❌ This task has already been cancelled.');
 			}
 
 			// 1. Write completion to blockchain
@@ -287,6 +315,59 @@ class TaskCommand extends Command {
 		} catch (error) {
 			this.container.logger.error('Error completing task:', error);
 			return interaction.editReply('❌ Failed to complete task. Blockchain error: ' + error.message);
+		}
+	}
+
+	// ──────────────────────────────────────────────
+	//  /task cancel
+	// ──────────────────────────────────────────────
+	async _cancel(interaction) {
+		const cancelled = await checkPermissionReply(interaction, PermissionFlagsBits.ManageMessages, 'Manage Messages');
+		if (cancelled) {
+			return;
+		}
+
+		await interaction.deferReply();
+
+		const taskId = interaction.options.getString('task_id');
+
+		try {
+			const existing = taskRepository.getTask(taskId);
+			if (!existing) {
+				return interaction.editReply('❌ Task not found. Check the task ID.');
+			}
+			if (existing.status === 'done') {
+				return interaction.editReply('❌ Cannot cancel a task that is already done.');
+			}
+			if (existing.cancelled) {
+				return interaction.editReply('❌ This task has already been cancelled.');
+			}
+
+			// 1. Write cancellation to blockchain
+			const data = JSON.stringify({
+				type: 'task_cancel',
+				v: 1,
+				taskId,
+				cancelledBy: interaction.user.id
+			});
+
+			await luce.appendBlock({
+				author: interaction.user.id,
+				data
+			});
+
+			// 2. Update DB (marks cancelled, removes reminders)
+			taskRepository.cancelTask({
+				taskId,
+				cancelledBy: interaction.user.id
+			});
+
+			return interaction.editReply({
+				content: `🗑️ Task **${existing.title}** has been cancelled and removed from the pending list.`
+			});
+		} catch (error) {
+			this.container.logger.error('Error cancelling task:', error);
+			return interaction.editReply('❌ Failed to cancel task. Blockchain error: ' + error.message);
 		}
 	}
 
