@@ -113,6 +113,7 @@ function createLogger(context) {
 		// Fallback: formatted console output
 		const { formatted, extra } = formatMessage(level, context, message, args);
 		const ts = timestamp();
+		const levelTag = level.toUpperCase().padEnd(5);
 
 		switch (level) {
 			case 'error':
