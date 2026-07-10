@@ -10,8 +10,24 @@
 const LUCE_PORT = process.env.LUCE_PORT || '5500';
 const BASE_URL = `http://127.0.0.1:${LUCE_PORT}/api/v1`;
 
+const { EmbedBuilder } = require('discord.js');
 const { logger } = require('../logger');
+const { REMINDER_CHANNEL_ID } = require('../constants/config');
 const luceLog = logger.child('Luce');
+
+/** @type {import('discord.js').Client|null} */
+let _discordClient = null;
+
+/**
+ * Register the Discord client so block notifications can be sent.
+ * Called once during bot startup.
+ *
+ * @param {import('discord.js').Client} client
+ */
+function setDiscordClient(client) {
+	_discordClient = client;
+	luceLog.info('Discord client registered for block notifications');
+}
 
 /**
  * Append a new block to the blockchain.
@@ -38,6 +54,12 @@ async function appendBlock({ author, data }) {
 
 	const result = await res.json();
 	luceLog.info(`Block appended at height ${result.height}`);
+
+	// Fire-and-forget notification to the configured channel
+	_notifyBlock(result).catch(err => {
+		luceLog.error(`Block notification failed: ${err.message}`);
+	});
+
 	return result;
 }
 
@@ -101,7 +123,93 @@ async function validateChain() {
 	return body.valid;
 }
 
+/**
+ * Parse the block's data field and build a notification embed.
+ * @param {object} block - The block object returned from the API
+ */
+function _buildBlockEmbed(block) {
+	let parsed;
+	try {
+		parsed = JSON.parse(block.data);
+	} catch {
+		parsed = { type: 'unknown' };
+	}
+
+	const { type } = parsed;
+
+	switch (type) {
+		case 'rep': {
+			const amount = parsed.amount || 0;
+			const sign = amount > 0 ? '⬆️ +1' : '⬇️ -1';
+			return new EmbedBuilder()
+				.setColor(amount > 0 ? 0x00FF00 : 0xFF0000)
+				.setTitle(`${sign} Rep ${amount > 0 ? 'Upvote' : 'Downvote'}`)
+				.setDescription(
+					`<@${parsed.fromUser}> gave **${sign}** rep to <@${parsed.toUser}>`
+				)
+				.addFields({ name: 'Block', value: `#${block.height}`, inline: true })
+				.setTimestamp(new Date(block.timestamp || Date.now()));
+		}
+		case 'task':
+			return new EmbedBuilder()
+				.setColor(0x0099FF)
+				.setTitle('📋 Task Created')
+				.setDescription(parsed.title || 'Untitled task')
+				.addFields(
+					{ name: 'Created by', value: `<@${parsed.createdBy}>`, inline: true },
+					{ name: 'Assigned to', value: `<@${parsed.assignedTo}>`, inline: true },
+					{ name: 'Block', value: `#${block.height}`, inline: true }
+				)
+				.setTimestamp(new Date(block.timestamp || Date.now()));
+		case 'task_done':
+			return new EmbedBuilder()
+				.setColor(0x00FF00)
+				.setTitle('✅ Task Completed')
+				.setDescription(`Task \`${parsed.taskId}\` marked as done`)
+				.addFields(
+					{ name: 'Completed by', value: `<@${parsed.completedBy}>`, inline: true },
+					{ name: 'Block', value: `#${block.height}`, inline: true }
+				)
+				.setTimestamp(new Date(block.timestamp || Date.now()));
+		case 'document':
+			return new EmbedBuilder()
+				.setColor(0xFFAA00)
+				.setTitle('📄 Document Anchored')
+				.setDescription(parsed.title || 'Untitled document')
+				.addFields(
+					{ name: 'Author', value: `<@${parsed.author}>`, inline: true },
+					{ name: 'Block', value: `#${block.height}`, inline: true }
+				)
+				.setTimestamp(new Date(block.timestamp || Date.now()));
+		default:
+			return new EmbedBuilder()
+				.setColor(0x808080)
+				.setTitle('⛓️ New Block')
+				.setDescription(`Block **#${block.height}** appended to the chain`)
+				.addFields(
+					{ name: 'Author', value: `<@${block.author}>`, inline: true },
+					{ name: 'Type', value: type || 'unknown', inline: true }
+				)
+				.setTimestamp(new Date(block.timestamp || Date.now()));
+	}
+}
+
+/**
+ * Attempt to post a block notification embed to the configured channel.
+ * @param {object} block
+ */
+async function _notifyBlock(block) {
+	if (!_discordClient) return;
+
+	const channel = await _discordClient.channels.fetch(REMINDER_CHANNEL_ID).catch(() => null);
+	if (!channel?.isTextBased()) return;
+
+	const embed = _buildBlockEmbed(block);
+	await channel.send({ embeds: [embed] });
+}
+
 module.exports = {
+	setDiscordClient,
 	appendBlock,
 	listBlocks,
 	getBlock,

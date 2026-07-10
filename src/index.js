@@ -7,6 +7,7 @@ const { SapphireClient, LogLevel } = require('@sapphire/framework');
 const { GatewayIntentBits, Partials } = require('discord.js');
 const { initDatabase } = require('./database');
 const config = require('./config');
+const luce = require('./lib/luce');
 const { logger } = require('./lib/logger');
 
 config.validate();
@@ -49,5 +50,8 @@ const client = new SapphireClient({
 		defaultGuildId: config.discord.guildId
 	})
 });
+
+// Register the Discord client with luce for block notifications
+luce.setDiscordClient(client);
 
 client.login(config.discord.token);
