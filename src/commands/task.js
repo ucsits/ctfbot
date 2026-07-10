@@ -6,6 +6,7 @@ const taskRepository = require('../database/repositories/task.repository');
 const luce = require('../lib/luce');
 const { sendErrorResponse, sendSuccessResponse } = require('../lib/utils/response');
 const { parseLocalDateToUTC, formatDateInterpretation, computePeriodRange } = require('../lib/utils');
+const { DateTime } = require('luxon');
 const { checkPermissionReply } = require('../lib/middleware/ensurePermission');
 const { ensureGovernanceChannelReply } = require('../lib/middleware/ensureGovernanceChannel');
 const constants = require('../lib/constants/config');
@@ -188,6 +189,18 @@ class TaskCommand extends Command {
 					taskId,
 					channelId: constants.REMINDER_CHANNEL_ID,
 					remindAt
+				});
+			}
+
+			// 4. Create day-before reminder (9:00 AM Jakarta time, day before deadline)
+			const deadlineJakarta = DateTime.fromSeconds(deadlineUnix).setZone('Asia/Jakarta');
+			const dayBefore9am = deadlineJakarta.minus({ days: 1 }).set({ hour: 9, minute: 0, second: 0, millisecond: 0 });
+			const dayBeforeRemindAt = dayBefore9am.toUTC().toUnixInteger();
+			if (dayBeforeRemindAt > Math.floor(Date.now() / 1000)) {
+				taskRepository.createReminder({
+					taskId,
+					channelId: constants.REMINDER_CHANNEL_ID,
+					remindAt: dayBeforeRemindAt
 				});
 			}
 
