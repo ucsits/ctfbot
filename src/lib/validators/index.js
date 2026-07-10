@@ -4,6 +4,7 @@
  */
 
 const { ValidationError } = require('../errors');
+const { suggestTimezones } = require('../utils/timezones');
 
 /**
  * Validates a URL string
@@ -94,8 +95,12 @@ function validateTimezone(timezone) {
 		new Intl.DateTimeFormat('en-US', { timeZone: timezone });
 		return true;
 	} catch (error) {
+		const suggestions = suggestTimezones(timezone);
+		const suggestionStr = suggestions.length > 0
+			? ` Did you mean: ${suggestions.map(s => '\`' + s + '\`').join(', ')}?`
+			: ' Use `/timezones` to see common timezones.';
 		throw new ValidationError(
-			'❌ Invalid timezone. Please use a valid IANA timezone (e.g., Asia/Jakarta, Europe/London, America/New_York)'
+			`❌ Invalid timezone \`${timezone}\`.${suggestionStr}`
 		);
 	}
 }
