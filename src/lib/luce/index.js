@@ -208,7 +208,32 @@ async function _notifyBlock(block) {
 	if (!channel?.isTextBased()) return;
 
 	const embed = _buildBlockEmbed(block);
-	await channel.send({ embeds: [embed] });
+
+	// Parse block data to build a content string with real mentions
+	// (Discord only triggers notifications for mentions in message content,
+	// not inside embed fields)
+	let content = '';
+	try {
+		const parsed = JSON.parse(block.data);
+		switch (parsed.type) {
+			case 'task':
+				content = `<@${parsed.createdBy}> assigned a task to <@${parsed.assignedTo}>`;
+				break;
+			case 'task_done':
+				content = `<@${parsed.completedBy}> completed a task`;
+				break;
+			case 'rep':
+				content = `<@${parsed.fromUser}> gave rep to <@${parsed.toUser}>`;
+				break;
+			case 'document':
+				content = `<@${parsed.author}> anchored a document`;
+				break;
+		}
+	} catch {
+		// fall through — send embed-only if data can't be parsed
+	}
+
+	await channel.send({ content: content || undefined, embeds: [embed] });
 }
 
 module.exports = {
