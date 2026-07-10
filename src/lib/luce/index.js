@@ -124,6 +124,24 @@ async function validateChain() {
 }
 
 /**
+ * Format a byte count into a short human-readable string.
+ * @param {number} bytes
+ * @returns {string}
+ */
+function formatFileSizeShort(bytes) {
+	if (!bytes) {
+		return '0 B';
+	}
+	if (bytes < 1024) {
+		return `${bytes} B`;
+	}
+	if (bytes < 1024 * 1024) {
+		return `${(bytes / 1024).toFixed(1)} KB`;
+	}
+	return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+/**
  * Parse the block's data field and build a notification embed.
  * @param {object} block - The block object returned from the API
  */
@@ -141,59 +159,70 @@ function _buildBlockEmbed(block) {
 	const blockDate = new Date((block.timestamp || Math.floor(Date.now() / 1000)) * 1000);
 
 	switch (type) {
-		case 'rep': {
-			const amount = parsed.amount || 0;
-			const sign = amount > 0 ? '⬆️ +1' : '⬇️ -1';
-			return new EmbedBuilder()
-				.setColor(amount > 0 ? 0x00FF00 : 0xFF0000)
-				.setTitle(`${sign} Rep ${amount > 0 ? 'Upvote' : 'Downvote'}`)
-				.setDescription(
-					`<@${parsed.fromUser}> gave **${sign}** rep to <@${parsed.toUser}>`
-				)
-				.addFields({ name: 'Block', value: `#${block.height}`, inline: true })
-				.setTimestamp(blockDate);
+	case 'rep': {
+		const amount = parsed.amount || 0;
+		const sign = amount > 0 ? '⬆️ +1' : '⬇️ -1';
+		return new EmbedBuilder()
+			.setColor(amount > 0 ? 0x00FF00 : 0xFF0000)
+			.setTitle(`${sign} Rep ${amount > 0 ? 'Upvote' : 'Downvote'}`)
+			.setDescription(
+				`<@${parsed.fromUser}> gave **${sign}** rep to <@${parsed.toUser}>`
+			)
+			.addFields({ name: 'Block', value: `#${block.height}`, inline: true })
+			.setTimestamp(blockDate);
+	}
+	case 'task':
+		return new EmbedBuilder()
+			.setColor(0x0099FF)
+			.setTitle('📋 Task Created')
+			.setDescription(parsed.title || 'Untitled task')
+			.addFields(
+				{ name: 'Created by', value: `<@${parsed.createdBy}>`, inline: true },
+				{ name: 'Assigned to', value: `<@${parsed.assignedTo}>`, inline: true },
+				{ name: 'Block', value: `#${block.height}`, inline: true }
+			)
+			.setTimestamp(blockDate);
+	case 'task_done':
+		return new EmbedBuilder()
+			.setColor(0x00FF00)
+			.setTitle('✅ Task Completed')
+			.setDescription(`Task \`${parsed.taskId}\` marked as done`)
+			.addFields(
+				{ name: 'Completed by', value: `<@${parsed.completedBy}>`, inline: true },
+				{ name: 'Block', value: `#${block.height}`, inline: true }
+			)
+			.setTimestamp(blockDate);
+	case 'document': {
+		const isFile = parsed.filename && parsed.fileSize;
+		const embed = new EmbedBuilder()
+			.setColor(0xFFAA00)
+			.setTitle(isFile ? '📎 File Anchored' : '📄 Document Anchored')
+			.setDescription(parsed.title || 'Untitled document')
+			.addFields(
+				{ name: 'Author', value: `<@${parsed.author}>`, inline: true },
+				{ name: 'Block', value: `#${block.height}`, inline: true }
+			);
+
+		if (isFile) {
+			embed.addFields(
+				{ name: 'Filename', value: parsed.filename, inline: true },
+				{ name: 'Size', value: formatFileSizeShort(parsed.fileSize), inline: true }
+			);
 		}
-		case 'task':
-			return new EmbedBuilder()
-				.setColor(0x0099FF)
-				.setTitle('📋 Task Created')
-				.setDescription(parsed.title || 'Untitled task')
-				.addFields(
-					{ name: 'Created by', value: `<@${parsed.createdBy}>`, inline: true },
-					{ name: 'Assigned to', value: `<@${parsed.assignedTo}>`, inline: true },
-					{ name: 'Block', value: `#${block.height}`, inline: true }
-				)
-				.setTimestamp(blockDate);
-		case 'task_done':
-			return new EmbedBuilder()
-				.setColor(0x00FF00)
-				.setTitle('✅ Task Completed')
-				.setDescription(`Task \`${parsed.taskId}\` marked as done`)
-				.addFields(
-					{ name: 'Completed by', value: `<@${parsed.completedBy}>`, inline: true },
-					{ name: 'Block', value: `#${block.height}`, inline: true }
-				)
-				.setTimestamp(blockDate);
-		case 'document':
-			return new EmbedBuilder()
-				.setColor(0xFFAA00)
-				.setTitle('📄 Document Anchored')
-				.setDescription(parsed.title || 'Untitled document')
-				.addFields(
-					{ name: 'Author', value: `<@${parsed.author}>`, inline: true },
-					{ name: 'Block', value: `#${block.height}`, inline: true }
-				)
-				.setTimestamp(blockDate);
-		default:
-			return new EmbedBuilder()
-				.setColor(0x808080)
-				.setTitle('⛓️ New Block')
-				.setDescription(`Block **#${block.height}** appended to the chain`)
-				.addFields(
-					{ name: 'Author', value: `<@${block.author}>`, inline: true },
-					{ name: 'Type', value: type || 'unknown', inline: true }
-				)
-				.setTimestamp(blockDate);
+
+		embed.setTimestamp(blockDate);
+		return embed;
+	}
+	default:
+		return new EmbedBuilder()
+			.setColor(0x808080)
+			.setTitle('⛓️ New Block')
+			.setDescription(`Block **#${block.height}** appended to the chain`)
+			.addFields(
+				{ name: 'Author', value: `<@${block.author}>`, inline: true },
+				{ name: 'Type', value: type || 'unknown', inline: true }
+			)
+			.setTimestamp(blockDate);
 	}
 }
 
@@ -202,10 +231,14 @@ function _buildBlockEmbed(block) {
  * @param {object} block
  */
 async function _notifyBlock(block) {
-	if (!_discordClient) return;
+	if (!_discordClient) {
+		return;
+	}
 
 	const channel = await _discordClient.channels.fetch(REMINDER_CHANNEL_ID).catch(() => null);
-	if (!channel?.isTextBased()) return;
+	if (!channel?.isTextBased()) {
+		return;
+	}
 
 	const embed = _buildBlockEmbed(block);
 
@@ -216,18 +249,22 @@ async function _notifyBlock(block) {
 	try {
 		const parsed = JSON.parse(block.data);
 		switch (parsed.type) {
-			case 'task':
-				content = `<@${parsed.createdBy}> assigned a task to <@${parsed.assignedTo}>`;
-				break;
-			case 'task_done':
-				content = `<@${parsed.completedBy}> completed a task`;
-				break;
-			case 'rep':
-				content = `<@${parsed.fromUser}> gave rep to <@${parsed.toUser}>`;
-				break;
-			case 'document':
-				content = `<@${parsed.author}> anchored a document`;
-				break;
+		case 'task':
+			content = `<@${parsed.createdBy}> assigned a task to <@${parsed.assignedTo}>`;
+			break;
+		case 'task_done':
+			content = `<@${parsed.completedBy}> completed a task`;
+			break;
+		case 'rep':
+			content = `<@${parsed.fromUser}> gave rep to <@${parsed.toUser}>`;
+			break;
+		case 'document': {
+			const isFile = parsed.filename && parsed.fileSize;
+			content = isFile
+				? `<@${parsed.author}> anchored a file **${parsed.filename}**`
+				: `<@${parsed.author}> anchored a document`;
+			break;
+		}
 		}
 	} catch {
 		// fall through — send embed-only if data can't be parsed
