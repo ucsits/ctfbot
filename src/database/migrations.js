@@ -67,8 +67,19 @@ function runMigrations(
 			applied.push(name);
 			migrationLogger.info(`Applied migration: ${name}`);
 		} catch (error) {
-			migrationLogger.error(`Failed to apply migration ${name}`, error);
-			return { applied, skipped, error: error.message };
+			// Gracefully handle ALTER TABLE ADD COLUMN when the column already exists.
+			// SQLite does not support IF NOT EXISTS for ALTER TABLE, so the migration
+			// may encounter 'duplicate column name' on databases where the inline
+			// schema (CREATE TABLE IF NOT EXISTS in database/index.js) already includes
+			// the column. This is harmless — the target schema state is already achieved.
+			if (error.message && error.message.includes('duplicate column name')) {
+				migrationLogger.warn(`Migration ${name}: column already exists, marking as applied`);
+				db.prepare('INSERT OR IGNORE INTO migrations (name) VALUES (?)').run(name);
+				applied.push(name);
+			} else {
+				migrationLogger.error(`Failed to apply migration ${name}`, error);
+				return { applied, skipped, error: error.message };
+			}
 		}
 	}
 
@@ -99,14 +110,13 @@ function createMigration(name, migrationsDir = path.join(process.cwd(), 'migrati
 	const filepath = path.join(migrationsDir, filename);
 
 	// Create template
+	// Note: the migration runner automatically inserts the migration name into
+	// the migrations table after execution. Do NOT add another INSERT here.
 	const template = `-- Migration: ${paddedNumber}_${name}
 -- Description: [Add description here]
 -- Date: ${new Date().toISOString().split('T')[0]}
 
 -- Add your SQL statements here
-
--- Record this migration
-INSERT OR IGNORE INTO migrations (name) VALUES ('${paddedNumber}_${name}');
 `;
 
 	fs.writeFileSync(filepath, template);

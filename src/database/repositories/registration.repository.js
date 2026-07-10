@@ -4,10 +4,11 @@ const registrationOperations = {
 	registerUser: (data) => {
 		const db = getConnection();
 		const stmt = db.prepare(`
-			INSERT INTO ctf_registrations (ctf_id, user_id, username, ctfd_user_id, ctfd_team_name)
-			VALUES (@ctf_id, @user_id, @username, @ctfd_user_id, @ctfd_team_name)
+			INSERT INTO ctf_registrations (ctf_id, user_id, username, team_name, ctfd_user_id, ctfd_team_name)
+			VALUES (@ctf_id, @user_id, @username, @team_name, @ctfd_user_id, @ctfd_team_name)
 			ON CONFLICT(ctf_id, user_id) DO UPDATE SET
 				username = @username,
+				team_name = @team_name,
 				ctfd_user_id = @ctfd_user_id,
 				ctfd_team_name = @ctfd_team_name
 		`);

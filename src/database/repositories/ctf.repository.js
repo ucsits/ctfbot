@@ -4,8 +4,8 @@ const ctfOperations = {
 	createCTF: (data) => {
 		const db = getConnection();
 		const stmt = db.prepare(`
-			INSERT INTO ctfs (guild_id, channel_id, event_id, ctf_name, ctf_base_url, ctf_date, description, banner_url, api_token, created_by)
-			VALUES (@guild_id, @channel_id, @event_id, @ctf_name, @ctf_base_url, @ctf_date, @description, @banner_url, @api_token, @created_by)
+			INSERT INTO ctfs (guild_id, channel_id, event_id, ctf_name, ctf_base_url, ctf_date, description, banner_url, api_token, team_mode, created_by)
+			VALUES (@guild_id, @channel_id, @event_id, @ctf_name, @ctf_base_url, @ctf_date, @description, @banner_url, @api_token, @team_mode, @created_by)
 		`);
 		const result = stmt.run(data);
 		return result.lastInsertRowid;
@@ -54,8 +54,11 @@ const ctfOperations = {
 				r.user_id,
 				r.username,
 				r.team_name,
-				r.ctfd_team_name
+				r.ctfd_team_name,
+				p.name AS real_name,
+				p.nrp
 			FROM ctf_registrations r
+			LEFT JOIN pacts p ON r.user_id = p.user_id
 			WHERE r.ctf_id = ?
 		`).all(ctfId);
 
@@ -83,6 +86,8 @@ const ctfOperations = {
 				username: r.username,
 				team_name: r.team_name,
 				ctfd_team_name: r.ctfd_team_name,
+				real_name: r.real_name,
+				nrp: r.nrp,
 				solve_count: solveData.solve_count,
 				total_points: solveData.total_points
 			};

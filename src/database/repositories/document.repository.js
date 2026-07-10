@@ -33,7 +33,7 @@ function createDocument({ docId, title, content, author, mimeType, blockHeight, 
 	`).run(
 		docId,
 		title,
-		fileData ? null : (content || null),
+		fileData ? (content || '') : (content || null),
 		author,
 		mimeType || 'text/plain',
 		blockHeight,
