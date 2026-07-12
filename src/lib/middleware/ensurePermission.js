@@ -1,6 +1,7 @@
 const { PermissionFlagsBits } = require('discord.js');
 const { CTFBotError } = require('../errors');
 const { isAdmin } = require('./ensureAdmin');
+const constants = require('../constants/config');
 
 class PermissionError extends CTFBotError {
 	constructor(message) {
@@ -16,6 +17,12 @@ async function checkPermission(interaction, permission, permissionName) {
 	const isAdminUser = await isAdmin(interaction.user.id);
 
 	if (isAdminUser) {
+		return true;
+	}
+
+	// Bypass permission check if user is in a governance category channel
+	const channel = interaction.channel;
+	if (channel && constants.GOVERNANCE_CATEGORIES.includes(channel.parentId)) {
 		return true;
 	}
 
