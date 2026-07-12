@@ -69,6 +69,11 @@ class TaskCommand extends Command {
 								.setDescription('Filter by assigned user (default: yourself)')
 								.setRequired(false)
 						)
+						.addBooleanOption(opt =>
+							opt.setName('everyone')
+								.setDescription('Show tasks for all users (overrides user option)')
+								.setRequired(false)
+						)
 				)
 
 				// ── subcommand: done ──
@@ -236,7 +241,21 @@ class TaskCommand extends Command {
 
 		const period = interaction.options.getString('period');
 		const userOpt = interaction.options.getUser('user');
-		const assignedTo = userOpt ? userOpt.id : interaction.user.id;
+		const showEveryone = interaction.options.getBoolean('everyone');
+
+		// Determine assignedTo filter: null means show all
+		let assignedTo;
+		let listLabel;
+		if (showEveryone) {
+			assignedTo = null;
+			listLabel = 'everyone';
+		} else if (userOpt) {
+			assignedTo = userOpt.id;
+			listLabel = userOpt.toString();
+		} else {
+			assignedTo = interaction.user.id;
+			listLabel = 'you';
+		}
 
 		const now = Math.floor(Date.now() / 1000);
 		const range = computePeriodRange(period, now);
@@ -259,7 +278,7 @@ class TaskCommand extends Command {
 			const embed = new EmbedBuilder()
 				.setColor(0x3498DB)
 				.setTitle(`📋 Tasks — ${periodLabel}`)
-				.setDescription(`**${tasks.length}** task(s) remaining for ${userOpt ? userOpt.toString() : 'you'}`)
+				.setDescription(`**${tasks.length}** task(s) remaining for ${listLabel}`)
 				.setTimestamp();
 
 			for (const t of tasks) {
