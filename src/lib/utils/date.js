@@ -69,7 +69,7 @@ function parseFlexibleDateToUTC(dateStr, timezone) {
 	const trimmed = dateStr.trim();
 
 	// 1. Try Discord @time helper format: <t:UNIX_SECONDS> or <t:UNIX_SECONDS:LETTER>
-	const discordTimeMatch = trimmed.match(/^<t:(\d+)(?::[tTdDfFR])?>$/);
+	const discordTimeMatch = trimmed.match(/^<t:(\d+)(?::[a-zA-Z])?>$/);
 	if (discordTimeMatch) {
 		const unixSeconds = parseInt(discordTimeMatch[1], 10);
 		return new Date(unixSeconds * 1000);
