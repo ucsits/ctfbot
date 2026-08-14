@@ -10,6 +10,7 @@ const adminRepository = require('./repositories/admin.repository');
 const taskRepository = require('./repositories/task.repository');
 const reputationRepository = require('./repositories/reputation.repository');
 const documentRepository = require('./repositories/document.repository');
+const activityRepository = require('./repositories/activity.repository');
 
 function initDatabase() {
 	const db = getConnection();
@@ -107,5 +108,6 @@ module.exports = {
 	adminRepository,
 	taskRepository,
 	reputationRepository,
-	documentRepository
+	documentRepository,
+	activityRepository
 };

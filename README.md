@@ -18,6 +18,7 @@ powered by [Luce](https://github.com/ucsits/Luce).
 - ⛓️ **Blockchain-Backed Tasks** — Create and track tasks with immutable audit trail
 - 👍 **Reputation System** — Give +1/-1 rep via reactions, replies, or `/rep` command
 - 📄 **Document Anchoring** — Permanently store documents on the blockchain
+- 🎯 **Activity Points Economy** — Admin-granted points, a leaderboard, and a merchandise store (AP or Rp)
 - ⏰ **Automatic Reminders** — Task deadline reminders sent to a dedicated channel
 
 ## Commands
@@ -50,6 +51,14 @@ You can also give rep by:
 ### Document Commands
 - `/document add` — Anchor a document to the blockchain
 - `/document get` — Retrieve an anchored document
+
+### Activity Points Commands
+- `/activitypoints [user]` — View your (or another user's) activity points balance
+- `/activityleaderboard [limit]` — View the activity points leaderboard
+- `/giveap <user|role> <points>` — Grant activity points to a user or every member of a role (admin only)
+- `/giveapbulk <csv>` — Grant activity points to many users from a CSV with `discord_id` and `points` columns (admin only)
+- `/store` — Browse the merchandise store and buy items with AP or Rp
+- `/store confirm <purchase_id>` — Confirm a pending Rp purchase once offline payment arrives (admin only)
 
 ### Utility Commands
 - `/ping` — Check bot responsiveness
@@ -176,6 +185,10 @@ src/
 - `task_reminders` — Scheduled reminders for task deadlines
 - `reputations` — Reputation ledger (one entry per giver per day)
 - `documents` — Anchored documents with blockchain reference
+- `activity_ledger` — Append-only ledger of AP value movements (grants/spends)
+- `activity_balances` — Current AP balance per user
+- `store_items` — Merchandise catalog (Sticker, Shirt, Jacket)
+- `purchases` — Purchase records (AP completed, Rp pending→confirmed)
 
 ---
 
@@ -286,6 +299,102 @@ Created when a user runs `/document add`.
 | `content` | `string` | Document content (plain text; base64 for binary in future versions) |
 | `author`  | `string` | Discord user ID of author                 |
 | `mimeType`| `string` | MIME type (default: `"text/plain"`)       |
+
+### 🎯 Activity Points Grant (`type: "ap_grant"`)
+
+Created by `/giveap` (single user) and `/giveapbulk` / `/giveap <role>` (batch).
+
+Single grant (`v: 1`):
+
+```json
+{
+  "type": "ap_grant",
+  "v": 1,
+  "grantedTo": "123456789012345678",
+  "grantedBy": "987654321098765432",
+  "amount": 50
+}
+```
+
+Batch grant (`v: 2`) — one block for the whole batch, used by `/giveapbulk` and
+`/giveap <role>`:
+
+```json
+{
+  "type": "ap_grant",
+  "v": 2,
+  "grantedBy": "987654321098765432",
+  "entries": [
+    { "discord_id": "123456789012345678", "points": 50 },
+    { "discord_id": "876543210987654321", "points": 50 }
+  ],
+  "count": 2,
+  "total": 100
+}
+```
+
+| Field      | Type     | Description                              |
+|-----------|----------|------------------------------------------|
+| `type`    | `string` | Always `"ap_grant"`                      |
+| `v`       | `number` | `1` (single) or `2` (batch)              |
+| `grantedTo`| `string` | Discord user ID of recipient (v1 only)   |
+| `grantedBy`| `string` | Discord user ID of the granting admin    |
+| `amount`  | `number` | Points granted (v1 only)                 |
+| `entries` | `array`  | `{discord_id, points}` list (v2 only)    |
+| `count`   | `number` | Number of recipients (v2 only)          |
+| `total`   | `number` | Total points granted (v2 only)           |
+
+### 🛒 Store Purchase (`type: "ap_purchase"`)
+
+Created when a user buys an item from the store. AP purchases complete
+immediately; Rp purchases start `pending` and are confirmed later.
+
+```json
+{
+  "type": "ap_purchase",
+  "v": 1,
+  "user": "123456789012345678",
+  "itemName": "Shirt",
+  "paymentMethod": "ap",
+  "costAp": 200,
+  "status": "completed"
+}
+```
+
+| Field          | Type     | Description                              |
+|---------------|----------|------------------------------------------|
+| `type`        | `string` | Always `"ap_purchase"`                  |
+| `v`           | `number` | Schema version (currently `1`)           |
+| `user`        | `string` | Discord user ID of buyer                 |
+| `itemName`    | `string` | Name of the purchased item               |
+| `paymentMethod`| `string` | `"ap"` or `"rp"`                       |
+| `costAp`      | `number` | AP cost (when `paymentMethod` is `"ap"`) |
+| `costRp`      | `number` | Rp cost (when `paymentMethod` is `"rp"`) |
+| `status`      | `string` | `"completed"` (AP) or `"pending"` (Rp)  |
+
+### ✅ Purchase Confirmation (`type: "ap_confirm"`)
+
+Created when an admin confirms a pending Rp purchase via `/store confirm`.
+
+```json
+{
+  "type": "ap_confirm",
+  "v": 1,
+  "user": "123456789012345678",
+  "confirmedBy": "987654321098765432",
+  "itemName": "Shirt",
+  "paymentMethod": "rp"
+}
+```
+
+| Field          | Type     | Description                              |
+|---------------|----------|------------------------------------------|
+| `type`        | `string` | Always `"ap_confirm"`                    |
+| `v`           | `number` | Schema version (currently `1`)           |
+| `user`        | `string` | Discord user ID of buyer                 |
+| `confirmedBy` | `string` | Discord user ID of confirming admin      |
+| `itemName`    | `string` | Name of the purchased item               |
+| `paymentMethod`| `string` | `"rp"` (or `"ap"` for completeness)    |
 
 ### Schema Versioning
 

@@ -213,6 +213,47 @@ function _buildBlockEmbed(block) {
 		embed.setTimestamp(blockDate);
 		return embed;
 	}
+	case 'ap_grant': {
+		const amount = parsed.amount || 0;
+		return new EmbedBuilder()
+			.setColor(0x9B59B6)
+			.setTitle('🎯 Activity Points Granted')
+			.setDescription(
+				`<@${parsed.grantedTo}> was granted **${amount} AP**`
+			)
+			.addFields(
+				{ name: 'Granted by', value: `<@${parsed.grantedBy}>`, inline: true },
+				{ name: 'Block', value: `#${block.height}`, inline: true }
+			)
+			.setTimestamp(blockDate);
+	}
+	case 'ap_purchase': {
+		const itemName = parsed.itemName || 'an item';
+		return new EmbedBuilder()
+			.setColor(0x00E5FF)
+			.setTitle('🛒 Store Purchase')
+			.setDescription(
+				`<@${parsed.user}> purchased **${itemName}** (${parsed.paymentMethod === 'ap' ? `${parsed.costAp} AP` : `Rp ${parsed.costRp}`})`
+			)
+			.addFields(
+				{ name: 'Status', value: parsed.status ?? 'completed', inline: true },
+				{ name: 'Block', value: `#${block.height}`, inline: true }
+			)
+			.setTimestamp(blockDate);
+	}
+	case 'ap_confirm': {
+		return new EmbedBuilder()
+			.setColor(0x2ECC71)
+			.setTitle('✅ Purchase Confirmed')
+			.setDescription(
+				`<@${parsed.confirmedBy}> confirmed **${parsed.itemName || 'a purchase'}** for <@${parsed.user}>`
+			)
+			.addFields(
+				{ name: 'Method', value: parsed.paymentMethod === 'rp' ? 'Rp (offline payment)' : 'AP', inline: true },
+				{ name: 'Block', value: `#${block.height}`, inline: true }
+			)
+			.setTimestamp(blockDate);
+	}
 	default:
 		return new EmbedBuilder()
 			.setColor(0x808080)
@@ -263,6 +304,23 @@ async function _notifyBlock(block) {
 			content = isFile
 				? `<@${parsed.author}> anchored a file **${parsed.filename}**`
 				: `<@${parsed.author}> anchored a document`;
+			break;
+		}
+		case 'ap_grant': {
+			if (parsed.v === 2) {
+				content = `<@${parsed.grantedBy}> granted **${parsed.total} AP** to ${parsed.count} user(s)`;
+			} else {
+				content = `<@${parsed.grantedBy}> granted **${parsed.amount} AP** to <@${parsed.grantedTo}>`;
+			}
+			break;
+		}
+		case 'ap_purchase': {
+			const cost = parsed.paymentMethod === 'ap' ? `${parsed.costAp} AP` : `Rp ${parsed.costRp}`;
+			content = `<@${parsed.user}> purchased **${parsed.itemName}** for ${cost}`;
+			break;
+		}
+		case 'ap_confirm': {
+			content = `<@${parsed.confirmedBy}> confirmed **${parsed.itemName}** for <@${parsed.user}>`;
 			break;
 		}
 		}
