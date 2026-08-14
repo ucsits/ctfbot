@@ -19,6 +19,13 @@ class GiveApCommand extends Command {
 			builder
 				.setName(this.name)
 				.setDescription(this.description)
+				.addIntegerOption(opt =>
+					opt
+						.setName('points')
+						.setDescription('Number of activity points to grant')
+						.setRequired(true)
+						.setMinValue(1)
+				)
 				.addUserOption(opt =>
 					opt
 						.setName('user')
@@ -30,13 +37,6 @@ class GiveApCommand extends Command {
 						.setName('role')
 						.setDescription('Grant activity points to every member of this role')
 						.setRequired(false)
-				)
-				.addIntegerOption(opt =>
-					opt
-						.setName('points')
-						.setDescription('Number of activity points to grant')
-						.setRequired(true)
-						.setMinValue(1)
 				),
 		{
 			idHints: getIdHints(this.name)

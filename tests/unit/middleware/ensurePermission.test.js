@@ -1,19 +1,41 @@
-import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest';
-import { checkPermission, PermissionError, PermissionFlagsBits } from '../../../src/lib/middleware/ensurePermission.js';
+import { describe, it, expect, vi, beforeEach, beforeAll, afterAll } from 'vitest';
+import { mkdtempSync, rmSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import Database from 'better-sqlite3';
-import { runMigrations } from '../../../src/database/migrations.js';
+import { checkPermission, PermissionError, PermissionFlagsBits } from '../../../src/lib/middleware/ensurePermission.js';
 
-vi.mock('../../../src/lib/middleware/ensureAdmin.js', () => ({
-	isAdmin: vi.fn()
-}));
+/**
+ * ensurePermission calls isAdmin via a plain CommonJS `require('./ensureAdmin')`.
+ * Vitest's vi.mock only intercepts ESM imports / Vite-processed requires, NOT raw
+ * require() calls inside plain-CJS source files, so mocking the connection chain
+ * here never reaches the real isAdmin. Instead we point the real DB at a temp dir
+ * (same pattern as tests/integration/activity.repository.test.js) and seed a real
+ * admins row, letting the genuine isAdmin path run end-to-end.
+ */
+let tmpDir;
+let db;
 
-import { isAdmin } from '../../../src/lib/middleware/ensureAdmin.js';
+beforeAll(() => {
+	tmpDir = mkdtempSync(join(tmpdir(), 'ctfbot-perm-'));
+	process.chdir(tmpDir);
 
-const mockDb = new Database(':memory:');
+	db = new Database(join(tmpDir, 'ctfbot.db'));
+	db.exec(`
+		CREATE TABLE admins (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			user_id TEXT NOT NULL UNIQUE,
+			added_by TEXT NOT NULL,
+			added_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)
+	`);
+});
 
-vi.mock('../../../src/database/connection', () => ({
-	getConnection: () => mockDb
-}));
+afterAll(() => {
+	db.close();
+	process.chdir('/home/hanz/Documents/OpenSource/ctfbot');
+	rmSync(tmpDir, { recursive: true, force: true });
+});
 
 describe('Permission Middleware', () => {
 	const mockMember = {
@@ -31,25 +53,12 @@ describe('Permission Middleware', () => {
 
 	beforeEach(() => {
 		vi.clearAllMocks();
-		mockDb.exec('DROP TABLE IF EXISTS admins');
-		mockDb.exec(`
-			CREATE TABLE admins (
-				id INTEGER PRIMARY KEY AUTOINCREMENT,
-				user_id TEXT NOT NULL UNIQUE,
-				added_by TEXT NOT NULL,
-				added_at DATETIME DEFAULT CURRENT_TIMESTAMP
-			)
-		`);
-	});
-
-	afterAll(() => {
-		mockDb.close();
+		db.exec('DELETE FROM admins');
 	});
 
 	describe('checkPermission', () => {
 		it('should return true if member has permission', async () => {
 			mockMember.permissions.has.mockReturnValue(true);
-			isAdmin.mockResolvedValue(false);
 
 			const result = await checkPermission(mockInteraction, PermissionFlagsBits.ManageChannels, 'Manage Channels');
 			expect(result).toBe(true);
@@ -57,7 +66,9 @@ describe('Permission Middleware', () => {
 
 		it('should return true if user is admin', async () => {
 			mockMember.permissions.has.mockReturnValue(false);
-			isAdmin.mockResolvedValue(true);
+			// Seed a real admin row so the real isAdmin (require'd by ensurePermission)
+			// returns true.
+			db.prepare('INSERT INTO admins (user_id, added_by) VALUES (?, ?)').run('123456789', 'test');
 
 			const result = await checkPermission(mockInteraction, PermissionFlagsBits.ManageChannels, 'Manage Channels');
 			expect(result).toBe(true);
@@ -65,7 +76,6 @@ describe('Permission Middleware', () => {
 
 		it('should throw error if member does not have permission and is not admin', async () => {
 			mockMember.permissions.has.mockReturnValue(false);
-			isAdmin.mockResolvedValue(false);
 
 			await expect(checkPermission(mockInteraction, PermissionFlagsBits.ManageChannels, 'Manage Channels')).rejects.toThrow(
 				PermissionError
@@ -74,7 +84,6 @@ describe('Permission Middleware', () => {
 
 		it('should throw error with correct message when permission denied', async () => {
 			mockMember.permissions.has.mockReturnValue(false);
-			isAdmin.mockResolvedValue(false);
 
 			await expect(checkPermission(mockInteraction, PermissionFlagsBits.ManageChannels, 'Manage Channels')).rejects.toThrow(
 				'You need the "Manage Channels" permission to use this command.'

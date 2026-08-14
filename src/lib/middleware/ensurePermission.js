@@ -14,6 +14,10 @@ async function checkPermission(interaction, permission, permissionName) {
 		throw new PermissionError('This command can only be used in a guild.');
 	}
 
+	if (!interaction.user) {
+		throw new PermissionError('This command requires a user.');
+	}
+
 	const isAdminUser = await isAdmin(interaction.user.id);
 
 	if (isAdminUser) {
