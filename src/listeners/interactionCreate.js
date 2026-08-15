@@ -3,7 +3,22 @@ const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('
 const { randomUUID } = require('crypto');
 const { activityRepository } = require('../database');
 const luce = require('../lib/luce');
-const { STORE_IDS, getStoreHeroImage, getStoreGallery } = require('../commands/store');
+const { STORE_IDS } = require('../commands/store');
+const storeLayout = require('../lib/store');
+
+// Cache gallery posters per item slug so repeated buys don't re-compose.
+const galleryCache = new Map();
+
+async function galleryPosterFor(item) {
+	const key = item.slug;
+	if (galleryCache.has(key)) {
+		return galleryCache.get(key);
+	}
+	const photos = storeLayout.getStoreGallery(item.slug);
+	const poster = await storeLayout.renderGalleryPoster(item, photos);
+	galleryCache.set(key, poster);
+	return poster;
+}
 
 /**
  * Listen for store button interactions and drive the AP/Rp purchase flow.
@@ -62,7 +77,7 @@ class StoreInteractionListener extends Listener {
 		);
 
 		const embed = new EmbedBuilder()
-			.setColor(0x00E5FF)
+			.setColor(0x00e5ff)
 			.setTitle(`🛍️ Buy ${item.name}`)
 			.setDescription(`How would you like to pay for **${item.name}**?`)
 			.addFields(
@@ -70,16 +85,16 @@ class StoreInteractionListener extends Listener {
 				{ name: 'Rp (offline)', value: `**Rp ${item.rp_price.toLocaleString('id-ID')}**`, inline: true }
 			);
 
-		const hero = getStoreHeroImage(item.slug);
-		if (hero) {
-			embed.setImage('attachment://' + require('path').basename(hero));
-		}
+		// Show the composed gallery poster inside the payment-choice embed too,
+		// so the buyer sees the item before picking a payment method.
+		const hero = await galleryPosterFor(item);
+		embed.setImage('attachment://gallery.png');
 
 		return interaction.reply({
 			embeds: [embed],
 			components: [row],
 			ephemeral: true,
-			files: hero ? [{ name: require('path').basename(hero), attachment: hero }] : undefined
+			files: [{ name: 'gallery.png', attachment: hero }]
 		});
 	}
 
@@ -96,7 +111,9 @@ class StoreInteractionListener extends Listener {
 
 		const balance = activityRepository.getBalance(interaction.user.id);
 		if (balance < item.ap_price) {
-			return interaction.editReply(`❌ You need **${item.ap_price} AP** but you only have **${balance} AP**. Earn more activity points first!`);
+			return interaction.editReply(
+				`❌ You need **${item.ap_price} AP** but you only have **${balance} AP**. Earn more activity points first!`
+			);
 		}
 
 		try {
@@ -128,7 +145,7 @@ class StoreInteractionListener extends Listener {
 			}
 
 			const embed = new EmbedBuilder()
-				.setColor(0x00FF00)
+				.setColor(0x00ff00)
 				.setTitle('✅ Purchase Complete!')
 				.setDescription(`You bought **${item.name}** with **${item.ap_price} AP**!`)
 				.addFields(
@@ -140,13 +157,11 @@ class StoreInteractionListener extends Listener {
 				)
 				.setTimestamp();
 
-			const gallery = getStoreGallery(item.slug);
-			const galleryFiles = gallery.map(path => ({ name: require('path').basename(path), attachment: path }));
-			if (gallery.length > 0) {
-				embed.setImage('attachment://' + galleryFiles[0].name);
-			}
+			// Gallery poster composed from all photos of the item, inside the embed.
+			const poster = await galleryPosterFor(item);
+			embed.setImage('attachment://gallery.png');
 
-			return interaction.editReply({ embeds: [embed], files: galleryFiles });
+			return interaction.editReply({ embeds: [embed], files: [{ name: 'gallery.png', attachment: poster }] });
 		} catch (error) {
 			this.container.logger.error('Error buying with AP:', error);
 			return interaction.editReply('❌ Purchase failed. Blockchain error: ' + error.message);
@@ -193,7 +208,7 @@ class StoreInteractionListener extends Listener {
 			});
 
 			const embed = new EmbedBuilder()
-				.setColor(0xFFAA00)
+				.setColor(0xffaa00)
 				.setTitle('⏳ Purchase Requested')
 				.setDescription(`You requested **${item.name}** for **Rp ${item.rp_price.toLocaleString('id-ID')}**.`)
 				.addFields(
@@ -205,17 +220,20 @@ class StoreInteractionListener extends Listener {
 				)
 				.setTimestamp();
 
-			const gallery = getStoreGallery(item.slug);
-			const galleryFiles = gallery.map(path => ({ name: require('path').basename(path), attachment: path }));
-			if (gallery.length > 0) {
-				embed.setImage('attachment://' + galleryFiles[0].name);
-			}
+			// Gallery poster composed from all photos of the item, inside the embed.
+			const poster = await galleryPosterFor(item);
+			embed.setImage('attachment://gallery.png');
 
 			// Tell user to complete payment offline and share the ID with an admin.
 			return interaction.editReply({
-				content: 'Pay an admin **Rp ' + item.rp_price.toLocaleString('id-ID') + '** offline, then give them this **Purchase ID** to confirm: `' + purchaseId + '`',
+				content:
+					'Pay an admin **Rp ' +
+					item.rp_price.toLocaleString('id-ID') +
+					'** offline, then give them this **Purchase ID** to confirm: `' +
+					purchaseId +
+					'`',
 				embeds: [embed],
-				files: galleryFiles
+				files: [{ name: 'gallery.png', attachment: poster }]
 			});
 		} catch (error) {
 			this.container.logger.error('Error buying with Rp:', error);

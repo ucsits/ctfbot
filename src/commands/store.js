@@ -2,54 +2,23 @@ const { Command } = require('@sapphire/framework');
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const { activityRepository } = require('../database');
 const { getIdHints } = require('../lib/utils');
+const { renderCatalogImage } = require('../lib/store');
 
 // Custom ID namespaces used by the store's interactive buy flow.
 const STORE_IDS = {
-	buy: 'ap_store_buy',       // ap_store_buy:<slug>
-	payAp: 'ap_store_pay_ap',  // ap_store_pay_ap:<slug>
-	payRp: 'ap_store_pay_rp'   // ap_store_pay_rp:<slug>
+	buy: 'ap_store_buy', // ap_store_buy:<slug>
+	payAp: 'ap_store_pay_ap', // ap_store_pay_ap:<slug>
+	payRp: 'ap_store_pay_rp' // ap_store_pay_rp:<slug>
 };
 
 // Local product imagery served by the bot, keyed by store slug.
 // Each entry maps to a file under assets/store/<slug>/.
-const STORE_ASSET_DIR = require('path').join(__dirname, '..', '..', 'assets', 'store');
 const STORE_IMAGES = {
 	jacket: {
 		hero: 'Screenshot_20260815_093409.png',
-		gallery: [
-			'Screenshot_20260815_093409.png',
-			'Screenshot_20260815_093421.png',
-			'Screenshot_20260815_093429.png'
-		]
+		gallery: ['Screenshot_20260815_093409.png', 'Screenshot_20260815_093421.png', 'Screenshot_20260815_093429.png']
 	}
 };
-
-/**
- * Resolve the local file path for a store item's hero image.
- * @param {string} slug
- * @returns {string|undefined} absolute path, or undefined when the slug has none
- */
-function getStoreHeroImage(slug) {
-	const entry = STORE_IMAGES[slug];
-	if (!entry) {
-		return undefined;
-	}
-	return require('path').join(STORE_ASSET_DIR, slug, entry.hero);
-}
-
-/**
- * Resolve the local file paths for a store item's full gallery.
- * @param {string} slug
- * @returns {Array<string>} absolute paths (empty when the item has none)
- */
-function getStoreGallery(slug) {
-	const entry = STORE_IMAGES[slug];
-	if (!entry) {
-		return [];
-	}
-	return entry.gallery.map(file => require('path').join(STORE_ASSET_DIR, slug, file));
-}
-
 
 class StoreCommand extends Command {
 	constructor(context, options) {
@@ -61,23 +30,24 @@ class StoreCommand extends Command {
 	}
 
 	registerApplicationCommands(registry) {
-		registry.registerChatInputCommand((builder) =>
-			builder
-				.setName(this.name)
-				.setDescription(this.description)
-				// No subcommands: bare /store shows the catalog directly.
-				// The admin-only confirmation lives in its own /store-confirm command
-				// because Discord does not allow invoking a container command that
-				// has subcommands.
-				.addStringOption(opt =>
-					opt
-						.setName('action')
-						.setDescription('Browse the store')
-						.addChoices({ name: 'Browse', value: 'view' })
-				),
-		{
-			idHints: getIdHints(this.name)
-		}
+		registry.registerChatInputCommand(
+			builder =>
+				builder
+					.setName(this.name)
+					.setDescription(this.description)
+					// No subcommands: bare /store shows the catalog directly.
+					// The admin-only confirmation lives in its own /store-confirm command
+					// because Discord does not allow invoking a container command that
+					// has subcommands.
+					.addStringOption(opt =>
+						opt
+							.setName('action')
+							.setDescription('Browse the store')
+							.addChoices({ name: 'Browse', value: 'view' })
+					),
+			{
+				idHints: getIdHints(this.name)
+			}
 		);
 	}
 
@@ -96,26 +66,25 @@ class StoreCommand extends Command {
 		try {
 			const items = activityRepository.getStoreItems();
 
+			// Linear one-line-per-item listing: `1. Sticker (10 AP / Rp 1.000)`
+			const lines = items.map((item, i) => {
+				const price = `**${item.ap_price} AP** / **Rp ${item.rp_price.toLocaleString('id-ID')}**`;
+				return `**${i + 1}. ${item.name}** (${price})`;
+			});
+
 			const embed = new EmbedBuilder()
-				.setColor(0x00E5FF)
+				.setColor(0x00e5ff)
 				.setTitle('🛍️ Activity Merchandise Store')
+				.setDescription(
+					'Spend your activity points (AP) or pay with Rp.\nChoose an item below to buy it.\n\n' +
+						lines.join('\n')
+				)
 				.setTimestamp();
 
-			// Attach product imagery (hero thumbnails) so the listing is visual.
-			const imagePaths = items.map(item => getStoreHeroImage(item.slug)).filter(Boolean);
-			const heroAttachments = imagePaths.map(path => ({
-				name: require('path').basename(path),
-				attachment: path
-			}));
-
-			const lines = items.map((item, i) =>
-				`**${i + 1}. ${item.name}**\n` +
-				`💰 ${item.ap_price} AP · 💵 Rp ${item.rp_price.toLocaleString('id-ID')}\n`
-			);
-			embed.setDescription(
-				'Spend your activity points (AP) or pay with Rp.\nChoose an item below to buy it.\n\n' +
-				lines.join('\n')
-			);
+			// Compose a single combined image (silhouettes of every item, or a
+			// card grid fallback) and show it *inside* the embed.
+			const poster = await renderCatalogImage(items);
+			embed.setImage('attachment://catalog.png');
 
 			const row = new ActionRowBuilder().addComponents(
 				items.map(item =>
@@ -126,7 +95,11 @@ class StoreCommand extends Command {
 				)
 			);
 
-			return interaction.editReply({ embeds: [embed], components: [row], files: heroAttachments });
+			return interaction.editReply({
+				embeds: [embed],
+				components: [row],
+				files: [{ name: 'catalog.png', attachment: poster }]
+			});
 		} catch (error) {
 			this.container.logger.error('Error showing store:', error);
 			return interaction.editReply('❌ Failed to load the store.');
@@ -137,6 +110,5 @@ class StoreCommand extends Command {
 module.exports = {
 	StoreCommand,
 	STORE_IDS,
-	getStoreHeroImage,
-	getStoreGallery
+	STORE_IMAGES
 };

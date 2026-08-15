@@ -148,3 +148,7 @@ vite.config.ts.timestamp-*
 
 .pi-subagents/
 .pi/
+
+# Local render scratch dirs (store poster previews)
+.tmp-render/
+.tmp-fonttest/
