@@ -6,14 +6,17 @@
  * repository fonts via @font-face data URIs (see ./fonts.js) — layout is
  * reproducible on any machine.
  *
- * Three kinds of output:
- *   - silhouettes: one combined canvas stacking each item's hero image, used
- *     as the catalog embed thumbnail so the store listing is visual without
- *     sending a file per item.
- *   - gallery posters: one canvas per item showing all of its photos side by
- *     side, used inside the buy/purchase embeds.
- *   - catalog cards: per-item name + price chips, laid out in a grid, used as
- *     the embed thumbnail when an item has no real photos yet.
+ * IMPORTANT: Discord renders embed images at ~400px wide (it scales the whole
+ * image down). So the canvas is drawn at a modest width (800px ≈ 2x display)
+ * with large fonts, guaranteeing text stays readable after Discord shrinks it.
+ *
+ * Two kinds of output:
+ *   - catalog: one tall canvas, one section per item. Each section shows the
+ *     item name + price header, then all of its photos in a row (or a
+ *     "[no image]" placeholder). Every store item appears, in the same order
+ *     as the text listing.
+ *   - gallery poster: one canvas per item showing all photos for the
+ *     buy/purchase embeds.
  */
 
 const fs = require('fs');
@@ -23,17 +26,23 @@ const { buildFontStyle } = require('./fonts');
 
 const ASSET_DIR = path.join(__dirname, '..', '..', '..', 'assets', 'store');
 
-// Canvas geometry used by every poster — small enough to ship as one Discord
-// attachment, big enough to read at Discord's 160px thumbnail render.
-const CONTAINER_W = 1600;
-const CONTAINER_H = 900;
-const PAD = 60;
-const GAP = 30;
-// Silhouette canvas is square to fit a Discord embed thumbnail.
-const SILH_W = 1024;
-const SILH_H = 1024;
-const SILH_PAD = 48;
-const SILH_GAP = 24;
+// Canvas width ≈ 2x Discord's ~400px embed render, so nothing gets lost in
+// the downscale. Fonts are sized generously for the same reason.
+const CONTAINER_W = 800;
+
+const PAD = 36;
+const GAP = 14;
+// Layout metrics for a single catalog item section.
+const SECTION_H = 280; // per item: header line + photo row
+const PHOTO_H = 190;
+const HEADER_Y = 52; // item name baseline within the section
+const PRICE_Y = 88; // price baseline within the section
+const PHOTO_TOP = 108; // top of the photo row within the section
+
+// Placeholder colors — light enough to read on the dark canvas.
+const PANEL_FILL = '#2A2C44';
+const PANEL_STROKE = '#4A4E70';
+const PANEL_TEXT = '#9AA1BE';
 
 const FONT_FAMILY = 'DejaVu Sans';
 const FONT_REGULAR = `font-family='${FONT_FAMILY}'`;
@@ -81,14 +90,15 @@ function imageDataUri(file) {
 /**
  * Build the SVG document string for a composed canvas.
  * @param {string} inner - body of the <svg> element
+ * @param {number} height - canvas height
  * @returns {string}
  */
-function wrapSvg(inner) {
+function wrapSvg(inner, height) {
 	return (
 		'<svg xmlns="http://www.w3.org/2000/svg" width="' +
 		CONTAINER_W +
 		'" height="' +
-		CONTAINER_H +
+		height +
 		'">' +
 		buildFontStyle() +
 		inner +
@@ -97,8 +107,65 @@ function wrapSvg(inner) {
 }
 
 /**
- * Layout one item's gallery into a full-width poster canvas.
- * @param {object} item - store item row {name, ap_price, rp_price, slug, ...}
+ * Layout one item's section within the catalog canvas: a header line with the
+ * name + price, then a photo row containing every photo (or a placeholder).
+ * @param {object} item - store item row {name, ap_price, rp_price}
+ * @param {Array<string>} photos - absolute paths to the item's photos
+ * @param {number} y - top of this item's section
+ * @returns {string} SVG fragment for this section
+ */
+function catalogSectionSvg(item, photos, y) {
+	const name = xmlEscape(item.name);
+	const price = `${item.ap_price} AP · Rp ${item.rp_price.toLocaleString('id-ID')}`;
+
+	// Header: name (bold, left, larger) then price (regular, right).
+	const header =
+		`<text x='${PAD}' y='${y + HEADER_Y}' ${FONT_BOLD} font-size='36' fill='#FFFFFF'>${name}</text>` +
+		`<text x='${PAD + 4}' y='${y + PRICE_Y}' ${FONT_REGULAR} font-size='24' fill='#8A93A6'>${price}</text>`;
+
+	let row = '';
+	if (photos.length === 0) {
+		// "[no image]" placeholder — light panel so it reads on dark canvas.
+		row =
+			`<rect x='${PAD}' y='${y + PHOTO_TOP}' width='340' height='${PHOTO_H}' rx='16' fill='${PANEL_FILL}' stroke='${PANEL_STROKE}' stroke-width='3'/>` +
+			`<text x='${PAD + 170}' y='${y + PHOTO_TOP + PHOTO_H / 2 + 10}' text-anchor='middle' ${FONT_REGULAR} font-size='26' fill='${PANEL_TEXT}'>[no image]</text>`;
+	} else {
+		// Photos fill the row, exactly one row per item (up to the width).
+		const rowW = CONTAINER_W - PAD * 2;
+		const cellW = Math.floor((rowW - GAP * (photos.length - 1)) / photos.length);
+		photos.forEach((photo, i) => {
+			const x = PAD + i * (cellW + GAP);
+			row += `<image x='${x}' y='${y + PHOTO_TOP}' width='${cellW}' height='${PHOTO_H}' preserveAspectRatio='xMidYMid meet' href='${imageDataUri(photo)}'/>`;
+		});
+	}
+
+	return header + row;
+}
+
+/**
+ * Build the catalog canvas: one section per store item, in order.
+ * @param {Array<object>} items
+ * @returns {string} SVG markup
+ */
+function catalogSvg(items) {
+	const sections = items.map((item, i) => catalogSectionSvg(item, getStoreGallery(item.slug), i * SECTION_H));
+	return wrapSvg(sections.join(''), Math.max(SECTION_H * items.length, SECTION_H));
+}
+
+/**
+ * Render the catalog canvas to a PNG buffer.
+ * @param {Array<object>} items
+ * @returns {Promise<Buffer>}
+ */
+async function renderCatalogImage(items) {
+	return sharp(Buffer.from(catalogSvg(items)))
+		.png()
+		.toBuffer();
+}
+
+/**
+ * Layout one item's photos into a full-width poster canvas (buy/purchase embeds).
+ * @param {object} item - store item row {name, ap_price, rp_price, ...}
  * @param {Array<string>} photos - absolute paths to the item's photos
  * @returns {string} SVG markup
  */
@@ -106,41 +173,30 @@ function galleryPosterSvg(item, photos) {
 	const src = idx => imageDataUri(photos[idx]);
 
 	const n = photos.length || 1;
-	// Panels fill the full width; the last row may hold fewer photos and
-	// center them under the header.
 	const cellW = Math.floor((CONTAINER_W - PAD * 2 - GAP * (n - 1)) / n);
-	const cellH = CONTAINER_H - PAD * 2 - 150;
+	const cellH = 320;
+	const headerTop = PAD + cellH + 28;
 
 	let panels = '';
-	const rowBottom = PAD + cellH;
 	if (photos.length === 0) {
 		// No photos on disk for this item yet: centered placeholder panel.
 		panels =
-			`<rect x='${PAD}' y='${PAD}' width='${CONTAINER_W - PAD * 2}' height='${cellH}' rx='24' fill='#24253A'/>` +
-			`<text x='${CONTAINER_W / 2}' y='${PAD + cellH / 2}' text-anchor='middle' ${FONT_REGULAR} font-size='36' fill='#8A93A6'>No photos yet</text>`;
-	} else if (n === 1) {
-		panels += `<image x='${PAD}' y='${PAD}' width='${cellW}' height='${cellH}' preserveAspectRatio='xMidYMid meet' href='${src(0)}'/>`;
+			`<rect x='${PAD}' y='${PAD}' width='${CONTAINER_W - PAD * 2}' height='${cellH}' rx='20' fill='${PANEL_FILL}' stroke='${PANEL_STROKE}' stroke-width='3'/>` +
+			`<text x='${CONTAINER_W / 2}' y='${PAD + cellH / 2}' text-anchor='middle' ${FONT_REGULAR} font-size='30' fill='${PANEL_TEXT}'>[no image]</text>`;
 	} else {
-		const firstRow = Math.ceil(n / 2);
-		for (let i = 0; i < n; i++) {
-			const col = i % firstRow;
-			const row = Math.floor(i / firstRow);
-			const rowCount = row === 0 ? firstRow : n - firstRow;
-			const w = Math.floor((CONTAINER_W - PAD * 2 - GAP * (rowCount - 1)) / rowCount);
-			const x = PAD + col * (w + GAP);
-			const y = PAD + row * (cellH / 2 + GAP * 0.5);
-			panels += `<image x='${x}' y='${y}' width='${w}' height='${cellH / 2}' preserveAspectRatio='xMidYMid meet' href='${src(i)}'/>`;
-		}
+		// All photos in one row; each gets an equal slice of the width.
+		photos.forEach((photo, i) => {
+			const x = PAD + i * (cellW + GAP);
+			panels += `<image x='${x}' y='${PAD}' width='${cellW}' height='${cellH}' preserveAspectRatio='xMidYMid meet' href='${src(i)}'/>`;
+		});
 	}
 
-	const titleY = rowBottom + 40;
-	const priceY = rowBottom + 96;
 	const header =
-		`<text x='${PAD}' y='${titleY}' ${FONT_BOLD} font-size='44' fill='#FFFFFF'>${xmlEscape(item.name)}</text>` +
-		`<text x='${PAD}' y='${priceY}' ${FONT_REGULAR} font-size='32' fill='#B8C0CC'>` +
+		`<text x='${PAD}' y='${headerTop}' ${FONT_BOLD} font-size='36' fill='#FFFFFF'>${xmlEscape(item.name)}</text>` +
+		`<text x='${PAD}' y='${headerTop + 42}' ${FONT_REGULAR} font-size='24' fill='#8A93A6'>` +
 		`${item.ap_price} AP · Rp ${item.rp_price.toLocaleString('id-ID')}</text>`;
 
-	return wrapSvg(panels + header);
+	return wrapSvg(panels + header, headerTop + 80);
 }
 
 /**
@@ -155,89 +211,12 @@ async function renderGalleryPoster(item, photos) {
 		.toBuffer();
 }
 
-/**
- * PNG buffer for the catalog silhouette (all items' hero images stacked),
- * or a card grid fallback when an item has no photos.
- * @param {Array<object>} items
- * @returns {Promise<Buffer>}
- */
-async function renderCatalogImage(items) {
-	if (items.length === 0) {
-		// Empty catalog: draw a neutral placeholder canvas so the embed still
-		// has a visual thumb rather than a broken attachment.
-		return sharp(Buffer.from(silhouetteSvg([])))
-			.png()
-			.toBuffer();
-	}
-	const withPhotos = items.filter(item => getStoreGallery(item.slug).length > 0);
-	if (withPhotos.length > 0) {
-		return sharp(Buffer.from(silhouetteSvg(withPhotos)))
-			.png()
-			.toBuffer();
-	}
-	return sharp(Buffer.from(cardGridSvg(items)))
-		.png()
-		.toBuffer();
-}
-
-/**
- * Build the silhouette canvas SVG for the given items with photos.
- * @param {Array<object>} items
- * @returns {string}
- */
-function silhouetteSvg(items) {
-	const n = items.length;
-	const cellW = Math.floor((SILH_W - SILH_PAD * 2 - SILH_GAP * (n - 1)) / n);
-	const cellH = SILH_H - SILH_PAD * 2;
-
-	let inner = '';
-	items.forEach((item, i) => {
-		const photos = getStoreGallery(item.slug);
-		const img = photos.length > 0 ? photos[0] : null;
-		const x = SILH_PAD + i * (cellW + SILH_GAP);
-		if (img) {
-			inner += `<image x='${x}' y='${SILH_PAD}' width='${cellW}' height='${cellH}' preserveAspectRatio='xMidYMid meet' href='${imageDataUri(img)}'/>`;
-		} else {
-			// No photo for this item yet: neutral panel with the item name.
-			inner += `<rect x='${x}' y='${SILH_PAD}' width='${cellW}' height='${cellH}' fill='#24253A' rx='16'/>`;
-		}
-	});
-
-	return wrapSvg(inner);
-}
-
-/**
- * Build the card-grid SVG fallback (used when no item has photos) — one card
- * per item with name and price chip.
- * @param {Array<object>} items
- * @returns {string}
- */
-function cardGridSvg(items) {
-	const COLS = 2;
-	const rows = Math.ceil(items.length / COLS);
-	const cardW = (CONTAINER_W - PAD * 2 - GAP * (COLS - 1)) / COLS;
-	const cardH = (CONTAINER_H - PAD * 2 - GAP * (rows - 1)) / rows;
-
-	let inner = '';
-	items.forEach((item, i) => {
-		const col = i % COLS;
-		const row = Math.floor(i / COLS);
-		const x = PAD + col * (cardW + GAP);
-		const y = PAD + row * (cardH + GAP);
-		inner +=
-			`<rect x='${x}' y='${y}' width='${cardW}' height='${cardH}' rx='24' fill='#24253A'/>` +
-			`<text x='${x + 40}' y='${y + cardH / 2 - 12}' ${FONT_BOLD} font-size='42' fill='#FFFFFF'>${xmlEscape(item.name)}</text>` +
-			`<text x='${x + 40}' y='${y + cardH / 2 + 40}' ${FONT_REGULAR} font-size='30' fill='#B8C0CC'>${item.ap_price} AP · Rp ${item.rp_price.toLocaleString('id-ID')}</text>`;
-	});
-	return wrapSvg(inner);
-}
-
 module.exports = {
 	renderCatalogImage,
 	renderGalleryPoster,
 	getStoreGallery,
+	catalogSvg,
+	catalogSectionSvg,
 	galleryPosterSvg,
-	silhouetteSvg,
-	cardGridSvg,
 	wrapSvg
 };

@@ -66,11 +66,12 @@ class StoreCommand extends Command {
 		try {
 			const items = activityRepository.getStoreItems();
 
-			// Linear one-line-per-item listing: `1. Sticker (10 AP / Rp 1.000)`
-			const lines = items.map((item, i) => {
-				const price = `**${item.ap_price} AP** / **Rp ${item.rp_price.toLocaleString('id-ID')}**`;
-				return `**${i + 1}. ${item.name}** (${price})`;
-			});
+			// Linear one-line-per-item listing, emojis kept:
+			// `1. Sticker (💰 10 AP / 💵 Rp 1.000)`
+			const lines = items.map(
+				(item, i) =>
+					`**${i + 1}. ${item.name}** (💰 ${item.ap_price} AP / 💵 Rp ${item.rp_price.toLocaleString('id-ID')})`
+			);
 
 			const embed = new EmbedBuilder()
 				.setColor(0x00e5ff)
