@@ -32,12 +32,11 @@ const CONTAINER_W = 800;
 
 const PAD = 36;
 const GAP = 14;
-// Layout metrics for a single catalog item section.
-const SECTION_H = 280; // per item: header line + photo row
+// Layout metrics for a single catalog grid cell.
 const PHOTO_H = 190;
-const HEADER_Y = 52; // item name baseline within the section
-const PRICE_Y = 88; // price baseline within the section
-const PHOTO_TOP = 108; // top of the photo row within the section
+const HEADER_Y = 52; // item name baseline within the cell
+const PRICE_Y = 88; // price baseline within the cell
+const PHOTO_TOP = 108; // top of the photo row within the cell
 
 // Placeholder colors — light enough to read on the dark canvas.
 const PANEL_FILL = '#2A2C44';
@@ -107,35 +106,39 @@ function wrapSvg(inner, height) {
 }
 
 /**
- * Layout one item's section within the catalog canvas: a header line with the
+ * Layout one item's cell within the catalog canvas: a header line with the
  * name + price, then a photo row containing every photo (or a placeholder).
  * @param {object} item - store item row {name, ap_price, rp_price}
  * @param {Array<string>} photos - absolute paths to the item's photos
- * @param {number} y - top of this item's section
- * @returns {string} SVG fragment for this section
+ * @param {number} x - left of this item's cell
+ * @param {number} y - top of this item's cell
+ * @param {number} w - cell width
+ * @returns {string} SVG fragment for this cell
  */
-function catalogSectionSvg(item, photos, y) {
+function catalogCellSvg(item, photos, x, y, w) {
 	const name = xmlEscape(item.name);
 	const price = `${item.ap_price} AP · Rp ${item.rp_price.toLocaleString('id-ID')}`;
 
+	const photoW = w - GAP * (photos.length - 1);
+	const cellW = Math.floor(photoW / Math.max(photos.length, 1));
+	const rowW = w;
+
 	// Header: name (bold, left, larger) then price (regular, right).
 	const header =
-		`<text x='${PAD}' y='${y + HEADER_Y}' ${FONT_BOLD} font-size='36' fill='#FFFFFF'>${name}</text>` +
-		`<text x='${PAD + 4}' y='${y + PRICE_Y}' ${FONT_REGULAR} font-size='24' fill='#8A93A6'>${price}</text>`;
+		`<text x='${x}' y='${y + HEADER_Y}' ${FONT_BOLD} font-size='34' fill='#FFFFFF'>${name}</text>` +
+		`<text x='${x + 4}' y='${y + PRICE_Y}' ${FONT_REGULAR} font-size='22' fill='#8A93A6'>${price}</text>`;
 
 	let row = '';
 	if (photos.length === 0) {
 		// "[no image]" placeholder — light panel so it reads on dark canvas.
 		row =
-			`<rect x='${PAD}' y='${y + PHOTO_TOP}' width='340' height='${PHOTO_H}' rx='16' fill='${PANEL_FILL}' stroke='${PANEL_STROKE}' stroke-width='3'/>` +
-			`<text x='${PAD + 170}' y='${y + PHOTO_TOP + PHOTO_H / 2 + 10}' text-anchor='middle' ${FONT_REGULAR} font-size='26' fill='${PANEL_TEXT}'>[no image]</text>`;
+			`<rect x='${x}' y='${y + PHOTO_TOP}' width='${rowW}' height='${PHOTO_H}' rx='16' fill='${PANEL_FILL}' stroke='${PANEL_STROKE}' stroke-width='3'/>` +
+			`<text x='${x + rowW / 2}' y='${y + PHOTO_TOP + PHOTO_H / 2 + 10}' text-anchor='middle' ${FONT_REGULAR} font-size='26' fill='${PANEL_TEXT}'>[no image]</text>`;
 	} else {
-		// Photos fill the row, exactly one row per item (up to the width).
-		const rowW = CONTAINER_W - PAD * 2;
-		const cellW = Math.floor((rowW - GAP * (photos.length - 1)) / photos.length);
+		// Photos fill the cell, exactly one row per item (up to the width).
 		photos.forEach((photo, i) => {
-			const x = PAD + i * (cellW + GAP);
-			row += `<image x='${x}' y='${y + PHOTO_TOP}' width='${cellW}' height='${PHOTO_H}' preserveAspectRatio='xMidYMid meet' href='${imageDataUri(photo)}'/>`;
+			const px = x + i * (cellW + GAP);
+			row += `<image x='${px}' y='${y + PHOTO_TOP}' width='${cellW}' height='${PHOTO_H}' preserveAspectRatio='xMidYMid meet' href='${imageDataUri(photo)}'/>`;
 		});
 	}
 
@@ -143,13 +146,34 @@ function catalogSectionSvg(item, photos, y) {
 }
 
 /**
- * Build the catalog canvas: one section per store item, in order.
+ * Build the catalog canvas: a landscape 2-column grid of item cells, one per
+ * store item. Highest-priced items sit in the first row (Jacket, Shirt),
+ * cheaper ones below (Sticker, Keychain) — the classic merch poster layout.
  * @param {Array<object>} items
  * @returns {string} SVG markup
  */
-function catalogSvg(items) {
-	const sections = items.map((item, i) => catalogSectionSvg(item, getStoreGallery(item.slug), i * SECTION_H));
-	return wrapSvg(sections.join(''), Math.max(SECTION_H * items.length, SECTION_H));
+function catalogGridSvg(items) {
+	const cols = 2;
+	const cellW = (CONTAINER_W - PAD * 2 - GAP * (cols - 1)) / cols;
+	const rowH = 250;
+	const rows = Math.ceil(items.length / cols);
+	// PAD on top + PAD under the last row + a little breathing room so the
+	// bottom cell never touches the canvas edge.
+	const height = rows * rowH + PAD * 2 + 20;
+
+	// Order the grid by price descending (Jacket, Shirt on top; Sticker,
+	// Keychain below). The text listing keeps its own order.
+	const ordered = [...items].sort((a, b) => b.rp_price - a.rp_price);
+
+	const cells = ordered.map((item, i) => {
+		const col = i % cols;
+		const row = Math.floor(i / cols);
+		const x = PAD + col * (cellW + GAP);
+		const y = PAD + row * rowH;
+		return catalogCellSvg(item, getStoreGallery(item.slug), x, y, cellW);
+	});
+
+	return wrapSvg(cells.join(''), height);
 }
 
 /**
@@ -158,7 +182,7 @@ function catalogSvg(items) {
  * @returns {Promise<Buffer>}
  */
 async function renderCatalogImage(items) {
-	return sharp(Buffer.from(catalogSvg(items)))
+	return sharp(Buffer.from(catalogGridSvg(items)))
 		.png()
 		.toBuffer();
 }
@@ -215,8 +239,8 @@ module.exports = {
 	renderCatalogImage,
 	renderGalleryPoster,
 	getStoreGallery,
-	catalogSvg,
-	catalogSectionSvg,
+	catalogGridSvg,
+	catalogCellSvg,
 	galleryPosterSvg,
 	wrapSvg
 };
