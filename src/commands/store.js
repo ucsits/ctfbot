@@ -10,6 +10,47 @@ const STORE_IDS = {
 	payRp: 'ap_store_pay_rp'   // ap_store_pay_rp:<slug>
 };
 
+// Local product imagery served by the bot, keyed by store slug.
+// Each entry maps to a file under assets/store/<slug>/.
+const STORE_ASSET_DIR = require('path').join(__dirname, '..', '..', 'assets', 'store');
+const STORE_IMAGES = {
+	jacket: {
+		hero: 'Screenshot_20260815_093409.png',
+		gallery: [
+			'Screenshot_20260815_093409.png',
+			'Screenshot_20260815_093421.png',
+			'Screenshot_20260815_093429.png'
+		]
+	}
+};
+
+/**
+ * Resolve the local file path for a store item's hero image.
+ * @param {string} slug
+ * @returns {string|undefined} absolute path, or undefined when the slug has none
+ */
+function getStoreHeroImage(slug) {
+	const entry = STORE_IMAGES[slug];
+	if (!entry) {
+		return undefined;
+	}
+	return require('path').join(STORE_ASSET_DIR, slug, entry.hero);
+}
+
+/**
+ * Resolve the local file paths for a store item's full gallery.
+ * @param {string} slug
+ * @returns {Array<string>} absolute paths (empty when the item has none)
+ */
+function getStoreGallery(slug) {
+	const entry = STORE_IMAGES[slug];
+	if (!entry) {
+		return [];
+	}
+	return entry.gallery.map(file => require('path').join(STORE_ASSET_DIR, slug, file));
+}
+
+
 class StoreCommand extends Command {
 	constructor(context, options) {
 		super(context, {
@@ -24,21 +65,15 @@ class StoreCommand extends Command {
 			builder
 				.setName(this.name)
 				.setDescription(this.description)
-				.addSubcommand(sub =>
-					sub
-						.setName('view')
+				// No subcommands: bare /store shows the catalog directly.
+				// The admin-only confirmation lives in its own /store-confirm command
+				// because Discord does not allow invoking a container command that
+				// has subcommands.
+				.addStringOption(opt =>
+					opt
+						.setName('action')
 						.setDescription('Browse the store')
-				)
-				.addSubcommand(sub =>
-					sub
-						.setName('confirm')
-						.setDescription('Confirm a pending RP purchase (admin only)')
-						.addStringOption(opt =>
-							opt
-								.setName('purchase_id')
-								.setDescription('The purchase ID to confirm')
-								.setRequired(true)
-						)
+						.addChoices({ name: 'Browse', value: 'view' })
 				),
 		{
 			idHints: getIdHints(this.name)
@@ -47,9 +82,10 @@ class StoreCommand extends Command {
 	}
 
 	async chatInputRun(interaction) {
-		const sub = interaction.options.getSubcommand();
-		if (sub === 'confirm') {
-			return this._confirm(interaction);
+		const action = interaction.options.getString('action');
+		// Bare /store (no option) = view. Also accept explicit "view".
+		if (!action || action === 'view') {
+			return this._view(interaction);
 		}
 		return this._view(interaction);
 	}
@@ -64,6 +100,13 @@ class StoreCommand extends Command {
 				.setColor(0x00E5FF)
 				.setTitle('🛍️ Activity Merchandise Store')
 				.setTimestamp();
+
+			// Attach product imagery (hero thumbnails) so the listing is visual.
+			const imagePaths = items.map(item => getStoreHeroImage(item.slug)).filter(Boolean);
+			const heroAttachments = imagePaths.map(path => ({
+				name: require('path').basename(path),
+				attachment: path
+			}));
 
 			const lines = items.map((item, i) =>
 				`**${i + 1}. ${item.name}**\n` +
@@ -83,76 +126,17 @@ class StoreCommand extends Command {
 				)
 			);
 
-			return interaction.editReply({ embeds: [embed], components: [row] });
+			return interaction.editReply({ embeds: [embed], components: [row], files: heroAttachments });
 		} catch (error) {
 			this.container.logger.error('Error showing store:', error);
 			return interaction.editReply('❌ Failed to load the store.');
-		}
-	}
-
-	async _confirm(interaction) {
-		const { ensureAdminReply } = require('../lib/middleware/ensureAdmin');
-		const cancelled = await ensureAdminReply(interaction);
-		if (cancelled) {
-			return;
-		}
-
-		await interaction.deferReply();
-
-		const purchaseId = interaction.options.getString('purchase_id');
-		const purchase = activityRepository.getPurchase(purchaseId);
-
-		if (!purchase) {
-			return interaction.editReply('❌ Purchase not found.');
-		}
-		if (purchase.status === 'completed') {
-			return interaction.editReply('❌ That purchase is already confirmed.');
-		}
-		if (purchase.status !== 'pending') {
-			return interaction.editReply('❌ That purchase cannot be confirmed.');
-		}
-
-		try {
-			const luce = require('../lib/luce');
-			// 1. Blockchain
-			const data = JSON.stringify({
-				type: 'ap_confirm',
-				v: 1,
-				user: purchase.user_id,
-				confirmedBy: interaction.user.id,
-				itemName: purchase.item_name,
-				paymentMethod: 'rp'
-			});
-			const block = await luce.appendBlock({ author: interaction.user.id, data });
-
-			// 2. DB
-			activityRepository.confirmPurchase({
-				id: purchaseId,
-				confirmedBy: interaction.user.id,
-				blockHeight: block.height
-			});
-
-			const embed = new EmbedBuilder()
-				.setColor(0x2ECC71)
-				.setTitle('✅ Purchase Confirmed')
-				.setDescription(`**${purchase.item_name}** confirmed for <@${purchase.user_id}>`)
-				.addFields(
-					{ name: 'Purchase ID', value: `\`${purchaseId}\``, inline: true },
-					{ name: 'Paid', value: `Rp ${purchase.cost_rp.toLocaleString('id-ID')}`, inline: true },
-					{ name: 'Block Height', value: `#${block.height}`, inline: true },
-					{ name: 'Confirmed by', value: interaction.user.toString(), inline: true }
-				)
-				.setTimestamp();
-
-			return interaction.editReply({ embeds: [embed] });
-		} catch (error) {
-			this.container.logger.error('Error confirming purchase:', error);
-			return interaction.editReply('❌ Failed to confirm purchase. Blockchain error: ' + error.message);
 		}
 	}
 }
 
 module.exports = {
 	StoreCommand,
-	STORE_IDS
+	STORE_IDS,
+	getStoreHeroImage,
+	getStoreGallery
 };

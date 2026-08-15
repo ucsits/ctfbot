@@ -57,8 +57,8 @@ You can also give rep by:
 - `/activityleaderboard [limit]` — View the activity points leaderboard
 - `/giveap <user|role> <points>` — Grant activity points to a user or every member of a role (admin only)
 - `/giveapbulk <csv>` — Grant activity points to many users from a CSV with `discord_id` and `points` columns (admin only)
-- `/store` — Browse the merchandise store and buy items with AP or Rp
-- `/store confirm <purchase_id>` — Confirm a pending Rp purchase once offline payment arrives (admin only)
+- `/store` — Browse and buy the merchandise store with AP or Rp (no subcommand)
+- `/store-confirm <purchase_id>` — Confirm a pending Rp purchase once offline payment arrives (admin only)
 
 ### Utility Commands
 - `/ping` — Check bot responsiveness
@@ -187,7 +187,7 @@ src/
 - `documents` — Anchored documents with blockchain reference
 - `activity_ledger` — Append-only ledger of AP value movements (grants/spends)
 - `activity_balances` — Current AP balance per user
-- `store_items` — Merchandise catalog (Sticker, Shirt, Jacket)
+- `store_items` — Merchandise catalog (Sticker, Keychain, Shirt, Jacket)
 - `purchases` — Purchase records (AP completed, Rp pending→confirmed)
 
 ---
@@ -374,7 +374,7 @@ immediately; Rp purchases start `pending` and are confirmed later.
 
 ### ✅ Purchase Confirmation (`type: "ap_confirm"`)
 
-Created when an admin confirms a pending Rp purchase via `/store confirm`.
+Created when an admin confirms a pending Rp purchase via `/store-confirm`.
 
 ```json
 {

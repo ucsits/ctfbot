@@ -3,7 +3,7 @@ const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('
 const { randomUUID } = require('crypto');
 const { activityRepository } = require('../database');
 const luce = require('../lib/luce');
-const { STORE_IDS } = require('../commands/store');
+const { STORE_IDS, getStoreHeroImage, getStoreGallery } = require('../commands/store');
 
 /**
  * Listen for store button interactions and drive the AP/Rp purchase flow.
@@ -70,7 +70,17 @@ class StoreInteractionListener extends Listener {
 				{ name: 'Rp (offline)', value: `**Rp ${item.rp_price.toLocaleString('id-ID')}**`, inline: true }
 			);
 
-		return interaction.reply({ embeds: [embed], components: [row], ephemeral: true });
+		const hero = getStoreHeroImage(item.slug);
+		if (hero) {
+			embed.setImage('attachment://' + require('path').basename(hero));
+		}
+
+		return interaction.reply({
+			embeds: [embed],
+			components: [row],
+			ephemeral: true,
+			files: hero ? [{ name: require('path').basename(hero), attachment: hero }] : undefined
+		});
 	}
 
 	/**
@@ -130,7 +140,13 @@ class StoreInteractionListener extends Listener {
 				)
 				.setTimestamp();
 
-			return interaction.editReply({ embeds: [embed] });
+			const gallery = getStoreGallery(item.slug);
+			const galleryFiles = gallery.map(path => ({ name: require('path').basename(path), attachment: path }));
+			if (gallery.length > 0) {
+				embed.setImage('attachment://' + galleryFiles[0].name);
+			}
+
+			return interaction.editReply({ embeds: [embed], files: galleryFiles });
 		} catch (error) {
 			this.container.logger.error('Error buying with AP:', error);
 			return interaction.editReply('❌ Purchase failed. Blockchain error: ' + error.message);
@@ -139,7 +155,7 @@ class StoreInteractionListener extends Listener {
 
 	/**
 	 * Pay with Rp: create a pending purchase (payment is offline), anchor a block.
-	 * An admin later runs /store confirm to finalize it.
+	 * An admin later runs /store-confirm to finalize it.
 	 */
 	async _buyWithRp(interaction, slug) {
 		await interaction.deferReply({ ephemeral: true });
@@ -189,10 +205,17 @@ class StoreInteractionListener extends Listener {
 				)
 				.setTimestamp();
 
+			const gallery = getStoreGallery(item.slug);
+			const galleryFiles = gallery.map(path => ({ name: require('path').basename(path), attachment: path }));
+			if (gallery.length > 0) {
+				embed.setImage('attachment://' + galleryFiles[0].name);
+			}
+
 			// Tell user to complete payment offline and share the ID with an admin.
 			return interaction.editReply({
 				content: 'Pay an admin **Rp ' + item.rp_price.toLocaleString('id-ID') + '** offline, then give them this **Purchase ID** to confirm: `' + purchaseId + '`',
-				embeds: [embed]
+				embeds: [embed],
+				files: galleryFiles
 			});
 		} catch (error) {
 			this.container.logger.error('Error buying with Rp:', error);

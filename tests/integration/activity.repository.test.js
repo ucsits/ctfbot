@@ -99,9 +99,11 @@ describe('Activity Repository', () => {
 
 	it('lists store items with the seeded catalog', () => {
 		const items = activityRepository.getStoreItems();
-		expect(items.map(i => i.slug)).toEqual(['sticker', 'shirt', 'jacket']);
+		expect(items.map(i => i.slug)).toEqual(['sticker', 'keychain', 'shirt', 'jacket']);
 		expect(activityRepository.getStoreItemBySlug('sticker').ap_price).toBe(10);
-		expect(activityRepository.getStoreItemBySlug('sticker').rp_price).toBe(25000);
+		expect(activityRepository.getStoreItemBySlug('sticker').rp_price).toBe(1000);
+		expect(activityRepository.getStoreItemBySlug('keychain').ap_price).toBe(50);
+		expect(activityRepository.getStoreItemBySlug('keychain').rp_price).toBe(10000);
 	});
 
 	it('creates a pending Rp purchase and lets an admin confirm it', () => {
@@ -112,7 +114,7 @@ describe('Activity Repository', () => {
 			paymentMethod: 'rp',
 			status: 'pending',
 			costAp: 0,
-			costRp: 250000,
+			costRp: 200000,
 			blockHeight: 110
 		});
 
