@@ -32,6 +32,8 @@ const CONTAINER_W = 800;
 
 const PAD = 36;
 const GAP = 14;
+// Gap between grid cells (rows and columns) — generous so the tiles breathe.
+const CELL_GAP = 32;
 // Layout metrics for a single catalog grid cell.
 const PHOTO_H = 190;
 const HEADER_Y = 52; // item name baseline within the cell
@@ -123,17 +125,15 @@ function catalogCellSvg(item, photos, x, y, w) {
 	const cellW = Math.floor(photoW / Math.max(photos.length, 1));
 	const rowW = w;
 
-	// Header: name (bold, left, larger) then price (regular, right).
+	// Header: name (bold, left, smaller) then price (regular, right).
 	const header =
-		`<text x='${x}' y='${y + HEADER_Y}' ${FONT_BOLD} font-size='34' fill='#FFFFFF'>${name}</text>` +
+		`<text x='${x}' y='${y + HEADER_Y}' ${FONT_BOLD} font-size='28' fill='#FFFFFF'>${name}</text>` +
 		`<text x='${x + 4}' y='${y + PRICE_Y}' ${FONT_REGULAR} font-size='22' fill='#8A93A6'>${price}</text>`;
 
 	let row = '';
 	if (photos.length === 0) {
-		// "[no image]" placeholder — light panel so it reads on dark canvas.
-		row =
-			`<rect x='${x}' y='${y + PHOTO_TOP}' width='${rowW}' height='${PHOTO_H}' rx='16' fill='${PANEL_FILL}' stroke='${PANEL_STROKE}' stroke-width='3'/>` +
-			`<text x='${x + rowW / 2}' y='${y + PHOTO_TOP + PHOTO_H / 2 + 10}' text-anchor='middle' ${FONT_REGULAR} font-size='26' fill='${PANEL_TEXT}'>[no image]</text>`;
+		// "[no image]" text only — no box, centered in the photo area.
+		row = `<text x='${x + rowW / 2}' y='${y + PHOTO_TOP + PHOTO_H / 2 + 10}' text-anchor='middle' ${FONT_REGULAR} font-size='26' fill='${PANEL_TEXT}'>[no image]</text>`;
 	} else {
 		// Photos fill the cell, exactly one row per item (up to the width).
 		photos.forEach((photo, i) => {
@@ -154,12 +154,12 @@ function catalogCellSvg(item, photos, x, y, w) {
  */
 function catalogGridSvg(items) {
 	const cols = 2;
-	const cellW = (CONTAINER_W - PAD * 2 - GAP * (cols - 1)) / cols;
+	const cellW = (CONTAINER_W - PAD * 2 - CELL_GAP * (cols - 1)) / cols;
 	const rowH = 250;
 	const rows = Math.ceil(items.length / cols);
 	// PAD on top + PAD under the last row + a little breathing room so the
 	// bottom cell never touches the canvas edge.
-	const height = rows * rowH + PAD * 2 + 20;
+	const height = rows * (rowH + CELL_GAP) + PAD * 2 + 20 - CELL_GAP;
 
 	// Order the grid by price descending (Jacket, Shirt on top; Sticker,
 	// Keychain below). The text listing keeps its own order.
@@ -168,8 +168,8 @@ function catalogGridSvg(items) {
 	const cells = ordered.map((item, i) => {
 		const col = i % cols;
 		const row = Math.floor(i / cols);
-		const x = PAD + col * (cellW + GAP);
-		const y = PAD + row * rowH;
+		const x = PAD + col * (cellW + CELL_GAP);
+		const y = PAD + row * (rowH + CELL_GAP);
 		return catalogCellSvg(item, getStoreGallery(item.slug), x, y, cellW);
 	});
 
