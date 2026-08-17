@@ -119,22 +119,155 @@ async function pollReminders() {
 //  Weekly task digest (every Monday ≥5AM JKT)
 // ──────────────────────────────────────────────
 
+const FIELD_VALUE_LIMIT = 1024;
+const MESSAGE_CONTENT_LIMIT = 2000;
+const MAX_FIELDS_PER_EMBED = 25;
+const MAX_EMBED_TOTAL = 6000;
+
 /**
- * Format a list of tasks into a compact string for the digest embed.
- * If the list is empty, returns "✅ No pending tasks."
+ * Group tasks so each group's formatted text fits within Discord's 1024-character
+ * embed field value limit. Every task is preserved; none are silently dropped.
+ * Returns an array of task arrays (one per field chunk).
+ *
+ * @param {Array<object>} tasks
+ * @returns {Array<Array<object>>}
  */
-function _formatTaskList(tasks) {
-	if (tasks.length === 0) {
+function _groupTasksForFields(tasks) {
+	const groups = [];
+	let current = [];
+	let currentLen = 0;
+
+	for (const t of tasks) {
+		const line = `• **${t.title}** - <@${t.assigned_to}> - <t:${t.deadline}:R>`;
+		const extra = (current.length > 0 ? 1 : 0) + line.length; // +1 for newline
+		if (current.length > 0 && currentLen + extra > FIELD_VALUE_LIMIT) {
+			groups.push(current);
+			current = [t];
+			currentLen = line.length;
+		} else {
+			current.push(t);
+			currentLen += extra;
+		}
+	}
+	if (current.length > 0) {
+		groups.push(current);
+	}
+	return groups;
+}
+
+/**
+ * Format a single group of tasks into the text for one embed field.
+ *
+ * @param {Array<object>} group
+ * @returns {string}
+ */
+function _formatTaskGroup(group) {
+	if (group.length === 0) {
 		return '✅ No pending tasks.';
 	}
+	return group
+		.map(t => `• **${t.title}** - <@${t.assigned_to}> - <t:${t.deadline}:R>`)
+		.join('\n');
+}
 
-	return tasks
-		.slice(0, 15) // cap at 15 to avoid embed field limits
-		.map(t => {
-			const deadline = `<t:${t.deadline}:R>`;
-			return `• **${t.title}** - <@${t.assigned_to}> - ${deadline}`;
-		})
-		.join('\n') + (tasks.length > 15 ? `\n… and ${tasks.length - 15} more` : '');
+/**
+ * Estimate the length of the deduplicated mention string for a set of tasks,
+ * matching the format produced by `_buildMentions`/`_buildMentionContent`.
+ *
+ * @param {Array<object>} tasks
+ * @returns {number}
+ */
+function _estimateMentionsLength(tasks) {
+	const seen = new Set();
+	let len = 0;
+	for (const t of tasks) {
+		const mention = `<@${t.assigned_to}> `;
+		if (!seen.has(mention)) {
+			seen.add(mention);
+			len += mention.length;
+		}
+	}
+	return len;
+}
+
+/**
+ * Send a task digest as one or more Discord messages.
+ *
+ * Each message carries an embed whose fields list a batch of tasks, and its
+ * leading content @mentions ONLY the people whose tasks appear in that message.
+ * Tasks are split across fields (<=1024 chars each) and across messages
+ * (<=25 fields, <=6000 chars total, <=2000 chars of mentions) so the digest
+ * never hits Discord's embed limits and never pings people outside the batch
+ * shown in that message.
+ *
+ * @param {import('discord.js').TextBasedChannel} channel
+ * @param {object} opts
+ * @param {string} opts.title
+ * @param {number} opts.color
+ * @param {string} opts.description
+ * @param {string} opts.footer
+ * @param {string} opts.mentionLabel
+ * @param {Array<{heading: string, tasks: Array<object>}>} opts.sections
+ */
+async function _sendDigest(channel, { title, color, description, footer, mentionLabel, sections }) {
+	// Flatten sections into field groups, labelling chunks when a section splits.
+	const fieldGroups = [];
+	for (const section of sections) {
+		const groups = _groupTasksForFields(section.tasks);
+		groups.forEach((group, i) => {
+			fieldGroups.push({
+				heading: groups.length > 1
+					? `${section.heading} (${i + 1}/${groups.length})`
+					: section.heading,
+				tasks: group
+			});
+		});
+	}
+
+	// Pack field groups into messages, respecting Discord's per-message limits.
+	const messages = [];
+	let current = null;
+	for (const fg of fieldGroups) {
+		const value = _formatTaskGroup(fg.tasks);
+		const fieldLen = fg.heading.length + value.length;
+		const mentionsLen = _estimateMentionsLength(fg.tasks);
+
+		const overflow =
+			!current ||
+			current.fields.length >= MAX_FIELDS_PER_EMBED ||
+			current.totalLen + fieldLen > MAX_EMBED_TOTAL ||
+			current.mentionsLen + mentionsLen + 64 > MESSAGE_CONTENT_LIMIT;
+
+		if (overflow) {
+			current = { fields: [], tasks: [], totalLen: 0, mentionsLen: 0 };
+			messages.push(current);
+		}
+		current.fields.push({ name: fg.heading, value, inline: false });
+		current.tasks.push(...fg.tasks);
+		current.totalLen += fieldLen;
+		current.mentionsLen += mentionsLen;
+	}
+
+	const total = messages.length;
+
+	for (const [idx, m] of messages.entries()) {
+		const embed = new EmbedBuilder().setColor(color);
+		if (idx === 0) {
+			embed.setTitle(title).setDescription(description);
+		} else {
+			embed.setTitle(total > 1 ? `${title} (part ${idx + 1}/${total})` : title);
+		}
+		embed.addFields(m.fields);
+		if (idx === total - 1) {
+			embed.setFooter({ text: footer }).setTimestamp();
+		}
+
+		const mentions = _buildMentions(m.tasks);
+		const label = total > 1 ? `${mentionLabel} (part ${idx + 1}/${total})` : mentionLabel;
+		const content = _buildMentionContent(label, mentions);
+
+		await channel.send({ content, embeds: [embed] });
+	}
 }
 
 /**
@@ -225,28 +358,18 @@ async function pollWeeklyDigest() {
 			deadlineBefore: monthRange.end
 		});
 
-		const weekText = _formatTaskList(weekTasks);
-		const monthText = _formatTaskList(monthTasks);
-
-		const embed = new EmbedBuilder()
-			.setColor(0x9B59B6)
-			.setTitle(`📋 Weekly Task Digest - Week ${currentWeek}`)
-			.setDescription('Good morning! Here is an overview of pending tasks.')
-			.addFields(
-				{ name: `🗓️ This Week (${weekTasks.length} tasks)`, value: weekText, inline: false },
-				{ name: `📅 This Month (${monthTasks.length} tasks)`, value: monthText, inline: false }
-			)
-			.setFooter({ text: `Sent Monday ${nowJakarta.toLocaleString(DateTime.DATE_HUGE)} at 5AM Jakarta time` })
-			.setTimestamp();
-
 		const channel = await clientRef.channels.fetch(constants.REMINDER_CHANNEL_ID);
 		if (channel?.isTextBased()) {
-			const mentions = _buildMentions([...weekTasks, ...monthTasks]);
-			const mentionContent = _buildMentionContent('📋 **Weekly Task Digest**', mentions);
-
-			await channel.send({
-				content: mentionContent,
-				embeds: [embed]
+			await _sendDigest(channel, {
+				title: `📋 Weekly Task Digest - Week ${currentWeek}`,
+				color: 0x9B59B6,
+				description: 'Good morning! Here is an overview of pending tasks.',
+				footer: `Sent Monday ${nowJakarta.toLocaleString(DateTime.DATE_HUGE)} at 5AM Jakarta time`,
+				mentionLabel: '📋 **Weekly Task Digest**',
+				sections: [
+					{ heading: `🗓️ This Week (${weekTasks.length} tasks)`, tasks: weekTasks },
+					{ heading: `📅 This Month (${monthTasks.length} tasks)`, tasks: monthTasks }
+				]
 			});
 			container.logger.info(`Weekly digest sent (week ${currentWeek})`);
 		}
@@ -292,22 +415,17 @@ async function pollDailyDigest() {
 			deadlineBefore: endOfWeek
 		});
 
-		const embed = new EmbedBuilder()
-			.setColor(0x3498DB)
-			.setTitle(`📅 Daily Task Digest - ${nowJakarta.toISODate()}`)
-			.setDescription('Good morning! Here are the tasks for today until the end of this week.')
-			.addFields({ name: `🗓️ Today → End of Week (${tasks.length} tasks)`, value: _formatTaskList(tasks), inline: false })
-			.setFooter({ text: `Sent ${nowJakarta.toLocaleString(DateTime.DATE_HUGE)} at 4AM Jakarta time` })
-			.setTimestamp();
-
 		const channel = await clientRef.channels.fetch(constants.REMINDER_CHANNEL_ID);
 		if (channel?.isTextBased()) {
-			const mentions = _buildMentions(tasks);
-			const mentionContent = _buildMentionContent('📅 **Daily Task Digest**', mentions);
-
-			await channel.send({
-				content: mentionContent,
-				embeds: [embed]
+			await _sendDigest(channel, {
+				title: `📅 Daily Task Digest - ${nowJakarta.toISODate()}`,
+				color: 0x3498DB,
+				description: 'Good morning! Here are the tasks for today until the end of this week.',
+				footer: `Sent ${nowJakarta.toLocaleString(DateTime.DATE_HUGE)} at 4AM Jakarta time`,
+				mentionLabel: '📅 **Daily Task Digest**',
+				sections: [
+					{ heading: `🗓️ Today → End of Week (${tasks.length} tasks)`, tasks }
+				]
 			});
 			container.logger.info(`Daily digest sent (${lastDigestDate})`);
 		}
