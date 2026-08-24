@@ -50,6 +50,8 @@ function completeTask({ taskId, completedBy }) {
 		UPDATE tasks SET status = 'done', completed_by = ?, completed_at = ?
 		WHERE task_id = ?
 	`).run(completedBy, now, taskId);
+	// Remove associated reminders so they don't fire after completion
+	db().prepare('DELETE FROM task_reminders WHERE task_id = ?').run(taskId);
 }
 
 /**
@@ -92,6 +94,7 @@ function getDueReminders(now) {
 		FROM task_reminders r
 		JOIN tasks t ON t.task_id = r.task_id
 		WHERE r.sent = 0 AND r.remind_at <= ?
+		AND t.status = 'pending' AND t.cancelled = 0
 		ORDER BY r.remind_at ASC
 	`).all(now);
 }
