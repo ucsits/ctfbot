@@ -38,10 +38,12 @@ powered by [Luce](https://github.com/ucsits/Luce).
 ### Task Commands
 - `/task add` — Create a new task (title, description, assignee, deadline, optional timezone)
 - `/task list [period]` — View remaining tasks for this week/month/quarter/year
-- `/task done` — Mark a task as completed
-- `/task cancel` — Confirm and cancel a pending task, removing its reminders
+- `/task done <task_id | task>` — Mark a task as completed (by UUID or fuzzy title search)
+- `/task cancel <task_id | task>` — Confirm and cancel a pending task (by UUID or fuzzy title search), removing its reminders
 
-Task reports use Asia/Jakarta calendar boundaries. Large lists are split into multiple responses, and cancellation requires `confirm: True`.
+Task reports use Asia/Jakarta calendar boundaries. Large lists are split into multiple responses.
+
+**Completing/cancelling by title:** Personnel no longer need to copy the UUID — pass the task title (or a distinctive part of it, even its description) as the `task` option and the bot fuzzy-searches all pending tasks. Because a fuzzy match can be wrong, **every title-based completion/cancellation requires an ephemeral confirmation** (Confirm / Deny buttons) before anything is recorded; nothing is written to the blockchain or the database until you confirm. If several tasks match closely, a picker shows one button per candidate — pick the one you meant. UUID-based completion and cancellation also ask for confirmation for consistency. Cancellation additionally removes the task's reminders.
 
 ### Reputation Commands
 - `/rep [downvote]` — Give +1 or -1 rep (must reply to someone's message; response is ephemeral)

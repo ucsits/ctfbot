@@ -22,8 +22,12 @@ beforeAll(async () => {
 	const migration = runMigrations(db, join(originalCwd, 'migrations'));
 	expect(migration.error).toBeNull();
 	repo = await import('../../src/database/repositories/task.repository.js');
-	db.prepare('INSERT INTO tasks (task_id, title, assigned_to, created_by, deadline, block_height, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run('task-1', 'Test task', 'assignee', 'creator', 2000000000, 1, 1);
-	db.prepare('INSERT INTO tasks (task_id, title, assigned_to, created_by, deadline, block_height, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run('task-2', 'Second task', 'assignee2', 'creator', 2000000001, 1, 1);
+	db.prepare(
+		'INSERT INTO tasks (task_id, title, assigned_to, created_by, deadline, block_height, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+	).run('task-1', 'Test task', 'assignee', 'creator', 2000000000, 1, 1);
+	db.prepare(
+		'INSERT INTO tasks (task_id, title, assigned_to, created_by, deadline, block_height, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+	).run('task-2', 'Second task', 'assignee2', 'creator', 2000000001, 1, 1);
 });
 
 afterAll(() => {
@@ -37,10 +41,12 @@ afterAll(() => {
 });
 
 function insertReminder(taskId, remindAt, overrides = {}) {
-	db.prepare(`
+	db.prepare(
+		`
 		INSERT INTO task_reminders (task_id, channel_id, remind_at, sent, processing_until, attempts, last_error, failed_permanently)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-	`).run(
+	`
+	).run(
 		taskId,
 		overrides.channelId ?? 'ch-1',
 		remindAt,
@@ -72,23 +78,32 @@ describe('task repository lifecycle', () => {
 
 	it('expired transition claims are recoverable', () => {
 		// Insert a fresh task, claim with a lease in the past, then verify a new actor can claim
-		db.prepare('INSERT INTO tasks (task_id, title, assigned_to, created_by, deadline, block_height, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run('task-3', 'Recoverable', 'a', 'c', 2000000002, 1, 1);
+		db.prepare(
+			'INSERT INTO tasks (task_id, title, assigned_to, created_by, deadline, block_height, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+		).run('task-3', 'Recoverable', 'a', 'c', 2000000002, 1, 1);
 		expect(repo.claimTaskTransition({ taskId: 'task-3', actorId: 'old' })).toBe(true);
 		// Force the lease to expire
-		db.prepare('UPDATE tasks SET transition_until = ? WHERE task_id = ?').run(Math.floor(Date.now() / 1000) - 10, 'task-3');
+		db.prepare('UPDATE tasks SET transition_until = ? WHERE task_id = ?').run(
+			Math.floor(Date.now() / 1000) - 10,
+			'task-3'
+		);
 		expect(repo.claimTaskTransition({ taskId: 'task-3', actorId: 'new' })).toBe(true);
 	});
 
 	it('releases transition claims explicitly', () => {
-		db.prepare('INSERT INTO tasks (task_id, title, assigned_to, created_by, deadline, block_height, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run('task-5', 'Releasable', 'a', 'c', 2000000004, 1, 1);
+		db.prepare(
+			'INSERT INTO tasks (task_id, title, assigned_to, created_by, deadline, block_height, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+		).run('task-5', 'Releasable', 'a', 'c', 2000000004, 1, 1);
 		expect(repo.claimTaskTransition({ taskId: 'task-5', actorId: 'a' })).toBe(true);
 		repo.releaseTaskTransition({ taskId: 'task-5', actorId: 'a' });
 		// Another actor can now claim immediately (no lease expiry wait)
 		expect(repo.claimTaskTransition({ taskId: 'task-5', actorId: 'b' })).toBe(true);
 	});
 
-	it('does not release another actor\'s transition claim', () => {
-		db.prepare('INSERT INTO tasks (task_id, title, assigned_to, created_by, deadline, block_height, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run('task-6', 'Owned', 'a', 'c', 2000000005, 1, 1);
+	it("does not release another actor's transition claim", () => {
+		db.prepare(
+			'INSERT INTO tasks (task_id, title, assigned_to, created_by, deadline, block_height, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+		).run('task-6', 'Owned', 'a', 'c', 2000000005, 1, 1);
 		expect(repo.claimTaskTransition({ taskId: 'task-6', actorId: 'a' })).toBe(true);
 		repo.releaseTaskTransition({ taskId: 'task-6', actorId: 'z' });
 		// Still claimed by 'a' — z's release was a no-op
@@ -96,7 +111,9 @@ describe('task repository lifecycle', () => {
 	});
 
 	it('removes reminders when a task is completed', () => {
-		db.prepare('INSERT INTO tasks (task_id, title, assigned_to, created_by, deadline, block_height, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run('task-4', 'Cleanup', 'a', 'c', 2000000003, 1, 1);
+		db.prepare(
+			'INSERT INTO tasks (task_id, title, assigned_to, created_by, deadline, block_height, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+		).run('task-4', 'Cleanup', 'a', 'c', 2000000003, 1, 1);
 		insertReminder('task-4', 1000);
 		expect(repo.claimTaskTransition({ taskId: 'task-4', actorId: 'a' })).toBe(true);
 		expect(repo.completeTask({ taskId: 'task-4', completedBy: 'a' })).toBe(true);
@@ -164,7 +181,10 @@ describe('digest delivery persistence', () => {
 
 	it('expired digest part claims are recoverable', () => {
 		expect(repo.claimDigestPart('daily:2026-08-30:part:1')).toBe(true);
-		db.prepare('UPDATE task_digest_deliveries SET processing_until = ? WHERE digest_key = ?').run(Math.floor(Date.now() / 1000) - 10, 'daily:2026-08-30:part:1');
+		db.prepare('UPDATE task_digest_deliveries SET processing_until = ? WHERE digest_key = ?').run(
+			Math.floor(Date.now() / 1000) - 10,
+			'daily:2026-08-30:part:1'
+		);
 		expect(repo.claimDigestPart('daily:2026-08-30:part:1')).toBe(true);
 	});
 
@@ -177,15 +197,66 @@ describe('digest delivery persistence', () => {
 	});
 });
 
+describe('searchTasksByQuery (fuzzy search candidate pool)', () => {
+	it('returns all pending non-cancelled tasks with the fields needed for fuzzy matching', () => {
+		db.prepare(
+			'INSERT INTO tasks (task_id, title, description, assigned_to, created_by, deadline, block_height, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+		).run('search-1', 'Fuzzy candidate', 'Has a description to match', 'assignee', 'creator', 2000000010, 1, 1);
+		const rows = repo.searchTasksByQuery();
+		expect(rows.length).toBeGreaterThanOrEqual(1);
+		const found = rows.find(r => r.task_id === 'search-1');
+		expect(found).toBeTruthy();
+		expect(found.title).toBe('Fuzzy candidate');
+		expect(found.description).toBe('Has a description to match');
+		expect(found.assigned_to).toBe('assignee');
+		expect(found.created_by).toBe('creator');
+		expect(found.deadline).toBe(2000000010);
+		expect(found.status).toBe('pending');
+		expect(found.cancelled).toBe(0);
+	});
+
+	it('excludes done and cancelled tasks', () => {
+		db.prepare(
+			'INSERT INTO tasks (task_id, title, assigned_to, created_by, deadline, block_height, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+		).run('search-done', 'Done task', 'a', 'c', 2000000011, 1, 1);
+		db.prepare(
+			'INSERT INTO tasks (task_id, title, assigned_to, created_by, deadline, block_height, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+		).run('search-cancelled', 'Cancelled task', 'a', 'c', 2000000012, 1, 1);
+		db.prepare('UPDATE tasks SET status = ? WHERE task_id = ?').run('done', 'search-done');
+		db.prepare('UPDATE tasks SET cancelled = 1 WHERE task_id = ?').run('search-cancelled');
+
+		const rows = repo.searchTasksByQuery();
+		const ids = rows.map(r => r.task_id);
+		expect(ids).not.toContain('search-done');
+		expect(ids).not.toContain('search-cancelled');
+		expect(ids).toContain('search-1');
+	});
+
+	it('is empty when no pending tasks exist', () => {
+		db.prepare('UPDATE tasks SET status = ?').run('done');
+		expect(repo.searchTasksByQuery()).toEqual([]);
+	});
+});
+
 describe('migration upgrades', () => {
 	it('migration 017 and 018 produce expected schema', () => {
-		const reminderCols = db.prepare('PRAGMA table_info(task_reminders)').all().map(c => c.name);
-		expect(reminderCols).toEqual(expect.arrayContaining(['processing_until', 'attempts', 'last_error', 'failed_permanently']));
+		const reminderCols = db
+			.prepare('PRAGMA table_info(task_reminders)')
+			.all()
+			.map(c => c.name);
+		expect(reminderCols).toEqual(
+			expect.arrayContaining(['processing_until', 'attempts', 'last_error', 'failed_permanently'])
+		);
 
-		const taskCols = db.prepare('PRAGMA table_info(tasks)').all().map(c => c.name);
+		const taskCols = db
+			.prepare('PRAGMA table_info(tasks)')
+			.all()
+			.map(c => c.name);
 		expect(taskCols).toEqual(expect.arrayContaining(['transition_by', 'transition_until']));
 
-		const digestTable = db.prepare('SELECT name FROM sqlite_master WHERE type = \'table\' AND name = ?').get('task_digest_deliveries');
+		const digestTable = db
+			.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
+			.get('task_digest_deliveries');
 		expect(digestTable).toBeTruthy();
 	});
 

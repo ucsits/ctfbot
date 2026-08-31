@@ -12,20 +12,28 @@ const db = () => getConnection();
  */
 function createTask({ taskId, title, description, assignedTo, createdBy, deadline, blockHeight }) {
 	const now = Math.floor(Date.now() / 1000);
-	db().prepare(`
+	db()
+		.prepare(
+			`
 		INSERT INTO tasks (task_id, title, description, assigned_to, created_by, deadline, block_height, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-	`).run(taskId, title, description || null, assignedTo, createdBy, deadline, blockHeight, now);
+	`
+		)
+		.run(taskId, title, description || null, assignedTo, createdBy, deadline, blockHeight, now);
 }
 
 /**
  * Schedule a reminder for a task (e.g. 1 hour before deadline).
  */
 function createReminder({ taskId, channelId, remindAt }) {
-	db().prepare(`
+	db()
+		.prepare(
+			`
 		INSERT INTO task_reminders (task_id, channel_id, remind_at)
 		VALUES (?, ?, ?)
-	`).run(taskId, channelId, remindAt);
+	`
+		)
+		.run(taskId, channelId, remindAt);
 }
 
 /**
@@ -33,25 +41,36 @@ function createReminder({ taskId, channelId, remindAt }) {
  */
 function claimTaskTransition({ taskId, actorId, leaseSeconds = 120 }) {
 	const now = Math.floor(Date.now() / 1000);
-	const result = db().prepare(`
+	const result = db()
+		.prepare(
+			`
 		UPDATE tasks SET transition_by = ?, transition_until = ?
 		WHERE task_id = ? AND status = 'pending' AND cancelled = 0
 		AND (transition_until IS NULL OR transition_until < ?)
-	`).run(actorId, now + leaseSeconds, taskId, now);
+	`
+		)
+		.run(actorId, now + leaseSeconds, taskId, now);
 	return result.changes > 0;
 }
 
 function releaseTaskTransition({ taskId, actorId }) {
-	db().prepare('UPDATE tasks SET transition_by = NULL, transition_until = NULL WHERE task_id = ? AND transition_by = ?')
+	db()
+		.prepare(
+			'UPDATE tasks SET transition_by = NULL, transition_until = NULL WHERE task_id = ? AND transition_by = ?'
+		)
 		.run(taskId, actorId);
 }
 
 function cancelTask({ taskId, cancelledBy }) {
 	const now = Math.floor(Date.now() / 1000);
-	const result = db().prepare(`
+	const result = db()
+		.prepare(
+			`
 		UPDATE tasks SET cancelled = 1, completed_by = ?, completed_at = ?, transition_by = NULL, transition_until = NULL
 		WHERE task_id = ? AND status = 'pending' AND cancelled = 0 AND transition_by = ?
-	`).run(cancelledBy, now, taskId, cancelledBy);
+	`
+		)
+		.run(cancelledBy, now, taskId, cancelledBy);
 	if (result.changes === 0) {
 		return false;
 	}
@@ -65,10 +84,14 @@ function cancelTask({ taskId, cancelledBy }) {
  */
 function completeTask({ taskId, completedBy }) {
 	const now = Math.floor(Date.now() / 1000);
-	const result = db().prepare(`
+	const result = db()
+		.prepare(
+			`
 		UPDATE tasks SET status = 'done', completed_by = ?, completed_at = ?, transition_by = NULL, transition_until = NULL
 		WHERE task_id = ? AND status = 'pending' AND cancelled = 0 AND transition_by = ?
-	`).run(completedBy, now, taskId, completedBy);
+	`
+		)
+		.run(completedBy, now, taskId, completedBy);
 	if (result.changes === 0) {
 		return false;
 	}
@@ -105,28 +128,54 @@ function listPendingTasks({ assignedTo, deadlineAfter, deadlineBefore } = {}) {
 	}
 
 	sql += ' ORDER BY deadline ASC';
-	return db().prepare(sql).all(...params);
+	return db()
+		.prepare(sql)
+		.all(...params);
+}
+
+/**
+ * All pending, non-cancelled tasks — used as the candidate pool for fuzzy
+ * title/description search (see lib/utils/fuzzyMatch.js). Returns the fields
+ * needed to render a confirmation embed and run the transition.
+ */
+function searchTasksByQuery() {
+	return db()
+		.prepare(
+			`
+		SELECT task_id, title, description, assigned_to, created_by, deadline, status, cancelled
+		FROM tasks
+		WHERE status = 'pending' AND cancelled = 0
+		ORDER BY deadline ASC
+	`
+		)
+		.all();
 }
 
 /**
  * Get all unsent reminders that are due.
  */
 function getDueReminders(now) {
-	return db().prepare(`
+	return db()
+		.prepare(
+			`
 		SELECT r.*, t.title, t.description, t.assigned_to, t.deadline
 		FROM task_reminders r
 		JOIN tasks t ON t.task_id = r.task_id
 		WHERE r.sent = 0 AND r.remind_at <= ?
 		AND t.status = 'pending' AND t.cancelled = 0
 		ORDER BY r.remind_at ASC
-	`).all(now);
+	`
+		)
+		.all(now);
 }
 
 /**
  * Mark a reminder as sent.
  */
 function claimDueReminders(now, leaseSeconds = 120) {
-	const due = db().prepare(`
+	const due = db()
+		.prepare(
+			`
 		SELECT r.*, t.title, t.description, t.assigned_to, t.deadline
 		FROM task_reminders r
 		JOIN tasks t ON t.task_id = r.task_id
@@ -134,7 +183,9 @@ function claimDueReminders(now, leaseSeconds = 120) {
 		AND (r.processing_until IS NULL OR r.processing_until < ?)
 		AND t.status = 'pending' AND t.cancelled = 0
 		ORDER BY r.remind_at ASC
-	`).all(now, now);
+	`
+		)
+		.all(now, now);
 	const claim = db().prepare(`
 		UPDATE task_reminders
 		SET processing_until = ?, attempts = attempts + 1
@@ -152,37 +203,50 @@ function claimDueReminders(now, leaseSeconds = 120) {
 }
 
 function markReminderSent(reminderId) {
-	db().prepare('UPDATE task_reminders SET sent = 1, processing_until = NULL, last_error = NULL WHERE id = ?').run(reminderId);
+	db()
+		.prepare('UPDATE task_reminders SET sent = 1, processing_until = NULL, last_error = NULL WHERE id = ?')
+		.run(reminderId);
 }
 
 function releaseReminder(reminderId, error, permanent = false) {
-	db().prepare('UPDATE task_reminders SET processing_until = NULL, last_error = ?, failed_permanently = ? WHERE id = ? AND sent = 0')
+	db()
+		.prepare(
+			'UPDATE task_reminders SET processing_until = NULL, last_error = ?, failed_permanently = ? WHERE id = ? AND sent = 0'
+		)
 		.run(String(error || 'delivery failed').slice(0, 500), permanent ? 1 : 0, reminderId);
 }
 
 function hasDigestBeenSent(digestKey) {
-	return Boolean(db().prepare('SELECT 1 FROM task_digest_deliveries WHERE digest_key = ? AND delivered_at > 0').get(digestKey));
+	return Boolean(
+		db().prepare('SELECT 1 FROM task_digest_deliveries WHERE digest_key = ? AND delivered_at > 0').get(digestKey)
+	);
 }
 
 function markDigestSent(digestKey) {
-	db().prepare('INSERT OR IGNORE INTO task_digest_deliveries (digest_key, delivered_at) VALUES (?, ?)')
+	db()
+		.prepare('INSERT OR IGNORE INTO task_digest_deliveries (digest_key, delivered_at) VALUES (?, ?)')
 		.run(digestKey, Math.floor(Date.now() / 1000));
 }
 
 function claimDigestPart(digestKey, leaseSeconds = 120) {
 	const now = Math.floor(Date.now() / 1000);
-	const result = db().prepare(`
+	const result = db()
+		.prepare(
+			`
 		INSERT INTO task_digest_deliveries (digest_key, delivered_at, processing_until)
 		VALUES (?, 0, ?)
 		ON CONFLICT(digest_key) DO UPDATE SET processing_until = excluded.processing_until
 		WHERE task_digest_deliveries.delivered_at = 0
 		AND (task_digest_deliveries.processing_until IS NULL OR task_digest_deliveries.processing_until < ?)
-	`).run(digestKey, now + leaseSeconds, now);
+	`
+		)
+		.run(digestKey, now + leaseSeconds, now);
 	return result.changes > 0;
 }
 
 function markDigestPartSent(digestKey) {
-	db().prepare('UPDATE task_digest_deliveries SET delivered_at = ?, processing_until = NULL WHERE digest_key = ?')
+	db()
+		.prepare('UPDATE task_digest_deliveries SET delivered_at = ?, processing_until = NULL WHERE digest_key = ?')
 		.run(Math.floor(Date.now() / 1000), digestKey);
 }
 
@@ -193,6 +257,7 @@ module.exports = {
 	cancelTask,
 	getTask,
 	listPendingTasks,
+	searchTasksByQuery,
 	getDueReminders,
 	claimDueReminders,
 	claimTaskTransition,

@@ -1,5 +1,5 @@
 const { Command } = require('@sapphire/framework');
-const { PermissionFlagsBits, EmbedBuilder } = require('discord.js');
+const { PermissionFlagsBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const { randomUUID } = require('crypto');
 const taskRepository = require('../database/repositories/task.repository');
 const luce = require('../lib/luce');
@@ -7,7 +7,21 @@ const { parseLocalDateToUTC, formatDateInterpretation, computePeriodRange } = re
 const { DateTime } = require('luxon');
 const { checkPermissionReply } = require('../lib/middleware/ensurePermission');
 const { ensureGovernanceChannelReply } = require('../lib/middleware/ensureGovernanceChannel');
+const { resolveTaskCandidates, MIN_FUZZY_SCORE } = require('../lib/utils/fuzzyMatch');
 const constants = require('../lib/constants/config');
+
+// Custom ID namespaces for the task confirmation buttons handled by
+// src/listeners/interactionCreate.js. Format: <namespace>:<taskId>[:<score>]
+const TASK_DONE_IDS = {
+	confirm: 'task_done_confirm',
+	candidate: 'task_done_candidate',
+	deny: 'task_done_deny'
+};
+const TASK_CANCEL_IDS = {
+	confirm: 'task_cancel_confirm',
+	candidate: 'task_cancel_candidate',
+	deny: 'task_cancel_deny'
+};
 
 class TaskCommand extends Command {
 	constructor(context, options) {
@@ -19,86 +33,121 @@ class TaskCommand extends Command {
 	}
 
 	registerApplicationCommands(registry) {
-		registry.registerChatInputCommand((builder) =>
-			builder
-				.setName(this.name)
-				.setDescription(this.description)
+		registry.registerChatInputCommand(
+			builder =>
+				builder
+					.setName(this.name)
+					.setDescription(this.description)
 
-				// ── subcommand: add ──
-				.addSubcommand(sub =>
-					sub
-						.setName('add')
-						.setDescription('Create a new task')
-						.addStringOption(opt =>
-							opt.setName('title').setDescription('Task title').setMaxLength(100).setRequired(true)
-						)
-						.addUserOption(opt =>
-							opt.setName('assign_to').setDescription('Who to assign this task to').setRequired(true)
-						)
-						.addStringOption(opt =>
-							opt.setName('deadline').setDescription('Deadline — DD-MM-YYYY HH:MM or Unix timestamp (@time compatible)').setMaxLength(64).setRequired(true)
-						)
-						.addStringOption(opt =>
-							opt.setName('timezone').setDescription('Your timezone (default: Asia/Jakarta)').setMaxLength(64).setRequired(false)
-						)
-						.addStringOption(opt =>
-							opt.setName('description').setDescription('Task description').setMaxLength(4000).setRequired(false)
-						)
-				)
+					// ── subcommand: add ──
+					.addSubcommand(sub =>
+						sub
+							.setName('add')
+							.setDescription('Create a new task')
+							.addStringOption(opt =>
+								opt.setName('title').setDescription('Task title').setMaxLength(100).setRequired(true)
+							)
+							.addUserOption(opt =>
+								opt.setName('assign_to').setDescription('Who to assign this task to').setRequired(true)
+							)
+							.addStringOption(opt =>
+								opt
+									.setName('deadline')
+									.setDescription('Deadline — DD-MM-YYYY HH:MM or Unix timestamp (@time compatible)')
+									.setMaxLength(64)
+									.setRequired(true)
+							)
+							.addStringOption(opt =>
+								opt
+									.setName('timezone')
+									.setDescription('Your timezone (default: Asia/Jakarta)')
+									.setMaxLength(64)
+									.setRequired(false)
+							)
+							.addStringOption(opt =>
+								opt
+									.setName('description')
+									.setDescription('Task description')
+									.setMaxLength(4000)
+									.setRequired(false)
+							)
+					)
 
-				// ── subcommand: list ──
-				.addSubcommand(sub =>
-					sub
-						.setName('list')
-						.setDescription('View remaining tasks for a period')
-						.addStringOption(opt =>
-							opt.setName('period')
-								.setDescription('Time period')
-								.setRequired(true)
-								.addChoices(
-									{ name: 'This Week', value: 'week' },
-									{ name: 'This Month', value: 'month' },
-									{ name: 'This Quarter', value: 'quarter' },
-									{ name: 'This Year', value: 'year' }
-								)
-						)
-						.addUserOption(opt =>
-							opt.setName('user')
-								.setDescription('Filter by assigned user (default: yourself)')
-								.setRequired(false)
-						)
-						.addBooleanOption(opt =>
-							opt.setName('everyone')
-								.setDescription('Show tasks for all users (overrides user option)')
-								.setRequired(false)
-						)
-				)
+					// ── subcommand: list ──
+					.addSubcommand(sub =>
+						sub
+							.setName('list')
+							.setDescription('View remaining tasks for a period')
+							.addStringOption(opt =>
+								opt
+									.setName('period')
+									.setDescription('Time period')
+									.setRequired(true)
+									.addChoices(
+										{ name: 'This Week', value: 'week' },
+										{ name: 'This Month', value: 'month' },
+										{ name: 'This Quarter', value: 'quarter' },
+										{ name: 'This Year', value: 'year' }
+									)
+							)
+							.addUserOption(opt =>
+								opt
+									.setName('user')
+									.setDescription('Filter by assigned user (default: yourself)')
+									.setRequired(false)
+							)
+							.addBooleanOption(opt =>
+								opt
+									.setName('everyone')
+									.setDescription('Show tasks for all users (overrides user option)')
+									.setRequired(false)
+							)
+					)
 
-				// ── subcommand: done ──
-				.addSubcommand(sub =>
-					sub
-						.setName('done')
-						.setDescription('Mark a task as completed')
-						.addStringOption(opt =>
-							opt.setName('task_id').setDescription('The task UUID').setMaxLength(36).setRequired(true)
-						)
-				)
+					// ── subcommand: done ──
+					.addSubcommand(sub =>
+						sub
+							.setName('done')
+							.setDescription('Mark a task as completed (by ID or fuzzy title search)')
+							.addStringOption(opt =>
+								opt
+									.setName('task_id')
+									.setDescription('The task UUID')
+									.setMaxLength(36)
+									.setRequired(false)
+							)
+							.addStringOption(opt =>
+								opt
+									.setName('task')
+									.setDescription('Task title (fuzzy search) — requires confirmation')
+									.setMaxLength(100)
+									.setRequired(false)
+							)
+					)
 
-				// ── subcommand: cancel ──
-				.addSubcommand(sub =>
-					sub
-						.setName('cancel')
-						.setDescription('Cancel a pending task')
-						.addStringOption(opt =>
-							opt.setName('task_id').setDescription('The task UUID').setMaxLength(36).setRequired(true)
-						)
-						.addBooleanOption(opt =>
-							opt.setName('confirm').setDescription('Confirm cancelling this task').setRequired(true)
-						)
-				),
-		{
-			idHints: require('../lib/utils/commandIds').getIdHints('task')
-		}
+					// ── subcommand: cancel ──
+					.addSubcommand(sub =>
+						sub
+							.setName('cancel')
+							.setDescription('Cancel a pending task (by ID or fuzzy title search)')
+							.addStringOption(opt =>
+								opt
+									.setName('task_id')
+									.setDescription('The task UUID')
+									.setMaxLength(36)
+									.setRequired(false)
+							)
+							.addStringOption(opt =>
+								opt
+									.setName('task')
+									.setDescription('Task title (fuzzy search) — requires confirmation')
+									.setMaxLength(100)
+									.setRequired(false)
+							)
+					),
+			{
+				idHints: require('../lib/utils/commandIds').getIdHints('task')
+			}
 		);
 	}
 
@@ -129,7 +178,11 @@ class TaskCommand extends Command {
 	//  /task add
 	// ──────────────────────────────────────────────
 	async _add(interaction) {
-		const cancelled = await checkPermissionReply(interaction, PermissionFlagsBits.ManageMessages, 'Manage Messages');
+		const cancelled = await checkPermissionReply(
+			interaction,
+			PermissionFlagsBits.ManageMessages,
+			'Manage Messages'
+		);
 		if (cancelled) {
 			return;
 		}
@@ -207,7 +260,9 @@ class TaskCommand extends Command {
 
 			// 4. Create day-before reminder (9:00 AM Jakarta time, day before deadline)
 			const deadlineJakarta = DateTime.fromSeconds(deadlineUnix).setZone('Asia/Jakarta');
-			const dayBefore9am = deadlineJakarta.minus({ days: 1 }).set({ hour: 9, minute: 0, second: 0, millisecond: 0 });
+			const dayBefore9am = deadlineJakarta
+				.minus({ days: 1 })
+				.set({ hour: 9, minute: 0, second: 0, millisecond: 0 });
 			const dayBeforeRemindAt = dayBefore9am.toUTC().toUnixInteger();
 			if (dayBeforeRemindAt > Math.floor(Date.now() / 1000)) {
 				reminderTimes.add(dayBeforeRemindAt);
@@ -221,7 +276,7 @@ class TaskCommand extends Command {
 			}
 
 			const embed = new EmbedBuilder()
-				.setColor(0x00FF00)
+				.setColor(0x00ff00)
 				.setTitle('✅ Task Created')
 				.setDescription(`**${title}** has been created on the blockchain.`)
 				.addFields(
@@ -243,7 +298,9 @@ class TaskCommand extends Command {
 			if (error.message?.includes('Blockchain')) {
 				return interaction.editReply('❌ Could not anchor the task on the blockchain. No task was created.');
 			}
-			return interaction.editReply(`⚠️ The task was anchored, but the confirmation could not be completed. Task ID: \`${taskId}\`. Please use /task list to verify it.`);
+			return interaction.editReply(
+				`⚠️ The task was anchored, but the confirmation could not be completed. Task ID: \`${taskId}\`. Please use /task list to verify it.`
+			);
 		}
 	}
 
@@ -281,7 +338,9 @@ class TaskCommand extends Command {
 				deadlineBefore: range.end
 			});
 
-			const periodLabel = { week: 'this week', month: 'this month', quarter: 'this quarter', year: 'this year' }[period];
+			const periodLabel = { week: 'this week', month: 'this month', quarter: 'this quarter', year: 'this year' }[
+				period
+			];
 
 			if (tasks.length === 0) {
 				return interaction.editReply({
@@ -298,9 +357,13 @@ class TaskCommand extends Command {
 
 			for (const [index, pageTasks] of pages.entries()) {
 				const embed = new EmbedBuilder()
-					.setColor(0x3498DB)
-					.setTitle(`📋 Tasks — ${periodLabel}${pages.length > 1 ? ` (page ${index + 1}/${pages.length})` : ''}`)
-					.setDescription(`**${tasks.length}** task(s) remaining for ${listLabel}\nReporting timezone: **Asia/Jakarta**`)
+					.setColor(0x3498db)
+					.setTitle(
+						`📋 Tasks — ${periodLabel}${pages.length > 1 ? ` (page ${index + 1}/${pages.length})` : ''}`
+					)
+					.setDescription(
+						`**${tasks.length}** task(s) remaining for ${listLabel}\nReporting timezone: **Asia/Jakarta**`
+					)
 					.setTimestamp();
 
 				for (const t of pageTasks) {
@@ -326,45 +389,167 @@ class TaskCommand extends Command {
 	}
 
 	// ──────────────────────────────────────────────
-	//  /task done
+	//  /task done & /task cancel — shared input resolution
 	// ──────────────────────────────────────────────
-	async _done(interaction) {
-		const cancelled = await checkPermissionReply(interaction, PermissionFlagsBits.ManageMessages, 'Manage Messages');
-		if (cancelled) {
-			return;
-		}
-
-		await interaction.deferReply();
-
+	/**
+	 * Resolve the task targeted by a done/cancel invocation.
+	 *
+	 * Inputs:
+	 *   - task_id (UUID)     → exact lookup (existing behavior)
+	 *   - task (title query) → fuzzy search over pending tasks (title +
+	 *     description). Multiple close candidates are returned so the caller
+	 *     can offer a picker; the transition is NEVER executed directly.
+	 *
+	 * @returns {Object} { task, candidates, query, viaFuzzy }
+	 *   task       — resolved task or null
+	 *   candidates — fuzzy candidates (length > 1 = ambiguous)
+	 *   query      — the raw title query used (null for UUID path)
+	 */
+	async _resolveTaskInput(interaction) {
 		const taskId = interaction.options.getString('task_id')?.trim();
-		if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(taskId)) {
-			return interaction.editReply('❌ Task ID must be a valid UUID.');
+		const query = interaction.options.getString('task')?.trim();
+
+		if (!taskId && !query) {
+			return { error: '❌ Provide either `task_id` (the task UUID) or `task` (task title to fuzzy search).' };
 		}
 
-		let existing;
+		// ── UUID path (exact) ──
+		if (taskId) {
+			if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(taskId)) {
+				return { error: '❌ Task ID must be a valid UUID.' };
+			}
+			const task = taskRepository.getTask(taskId);
+			if (!task) {
+				return { error: '❌ Task not found. Check the task ID.' };
+			}
+			return { task, candidates: [], query: null, viaFuzzy: false };
+		}
+
+		// ── Fuzzy title path ──
+		const candidates = resolveTaskCandidates({
+			query,
+			tasks: taskRepository.searchTasksByQuery()
+		});
+		if (candidates.length === 0) {
+			return {
+				error: `❌ No task found matching **${query}** (minimum confidence ${Math.round(MIN_FUZZY_SCORE * 100)}%). Try a task ID or a more specific title.`
+			};
+		}
+		return {
+			task: candidates[0],
+			candidates,
+			query,
+			viaFuzzy: true
+		};
+	}
+
+	/**
+	 * Render the task summary used in confirmation embeds.
+	 */
+	_taskSummaryFields(task, extra = {}) {
+		const fields = [
+			{ name: 'Assigned To', value: `<@${task.assigned_to}>`, inline: true },
+			{ name: 'Deadline', value: `<t:${task.deadline}:F>`, inline: true }
+		];
+		if (extra.score !== undefined) {
+			fields.push({ name: 'Match Confidence', value: `${Math.round(extra.score * 100)}%`, inline: true });
+		}
+		if (task.description) {
+			fields.push({ name: 'Description', value: task.description.slice(0, 1024), inline: false });
+		}
+		return fields;
+	}
+
+	/**
+	 * Build the ephemeral confirmation reply for a single resolved task.
+	 * Nothing is claimed or written until the user presses Confirm.
+	 */
+	_taskConfirmReply({ interaction, ids, verb, emoji, color, task, score, extraTitle }) {
+		const embed = new EmbedBuilder()
+			.setColor(color)
+			.setTitle(`${emoji} Confirm ${verb}?`)
+			.setDescription(
+				`**${task.title}**\nThis will ${verb.toLowerCase()} the task and record it on the blockchain.` +
+					(extraTitle ? `\n${extraTitle}` : '')
+			)
+			.addFields(this._taskSummaryFields(task, { score }))
+			.setTimestamp();
+
+		// The initiator id is embedded in every button customId so the listener
+		// can verify the clicker is the user who ran the command.
+		const initiatorId = interaction.user.id;
+		const row = new ActionRowBuilder().addComponents(
+			new ButtonBuilder()
+				.setCustomId(`${ids.confirm}:${task.task_id}:${score ?? ''}:${initiatorId}`)
+				.setLabel(`Confirm ${verb}`)
+				.setStyle(ButtonStyle.Success),
+			new ButtonBuilder()
+				.setCustomId(`${ids.deny}:${task.task_id}::${initiatorId}`)
+				.setLabel('Deny')
+				.setStyle(ButtonStyle.Danger)
+		);
+
+		return interaction.editReply({
+			content: '⚠️ **Action requires confirmation.** Nothing has been recorded yet.',
+			embeds: [embed],
+			components: [row],
+			ephemeral: true
+		});
+	}
+
+	/**
+	 * Build the candidate-picker reply when several tasks match the query.
+	 */
+	_taskPickerReply({ interaction, ids, _verb, emoji, color, candidates, query }) {
+		const embed = new EmbedBuilder()
+			.setColor(color)
+			.setTitle(`${emoji} Multiple tasks match "${query}"`)
+			.setDescription('Pick the task you meant. Nothing has been recorded yet.')
+			.setTimestamp();
+
+		// The initiator id is embedded in every picker button customId so the
+		// listener can verify the clicker is the user who ran the command.
+		const initiatorId = interaction.user.id;
+		const rows = [];
+		for (let i = 0; i < candidates.length; i += 5) {
+			rows.push(
+				new ActionRowBuilder().addComponents(
+					candidates.slice(i, i + 5).map(c =>
+						new ButtonBuilder()
+							.setCustomId(`${ids.candidate}:${c.task_id}:${c.score}:${initiatorId}`)
+							.setLabel(`${i + 1}. ${c.title.slice(0, 80)}`)
+							.setStyle(ButtonStyle.Primary)
+					)
+				)
+			);
+		}
+
+		return interaction.editReply({
+			content: `⚠️ **${candidates.length} tasks match "${query}".** Pick one to continue. Nothing has been recorded yet.`,
+			embeds: [embed],
+			components: rows,
+			ephemeral: true
+		});
+	}
+
+	/**
+	 * Execute the claimed done transition for an already-confirmed task.
+	 * Shared by /task done and the confirm button handler so there is exactly
+	 * one code path that writes to the blockchain and the database.
+	 */
+	async _executeDone(task, interaction) {
+		if (!taskRepository.claimTaskTransition({ taskId: task.task_id, actorId: interaction.user.id })) {
+			return '⚠️ This task is already being updated by another action. Please try again.';
+		}
+
 		try {
-			existing = taskRepository.getTask(taskId);
-			if (!existing) {
-				return interaction.editReply('❌ Task not found. Check the task ID.');
-			}
-			if (existing.status === 'done') {
-				return interaction.editReply('❌ This task is already marked as done.');
-			}
-			if (existing.cancelled) {
-				return interaction.editReply('❌ This task has already been cancelled.');
-			}
-
-			if (!taskRepository.claimTaskTransition({ taskId, actorId: interaction.user.id })) {
-				return interaction.editReply('⚠️ This task is already being updated by another action. Please try again.');
-			}
-
 			// 1. Write completion to blockchain
 			const data = JSON.stringify({
 				type: 'task_done',
 				v: 1,
-				taskId,
-				title: existing.title,
-				assignedTo: existing.assigned_to,
+				taskId: task.task_id,
+				title: task.title,
+				assignedTo: task.assigned_to,
 				completedBy: interaction.user.id
 			});
 
@@ -374,78 +559,42 @@ class TaskCommand extends Command {
 			});
 
 			// 2. Update DB. A concurrent done/cancel action may have won the race.
-			if (!taskRepository.completeTask({
-				taskId,
-				completedBy: interaction.user.id
-			})) {
-				return interaction.editReply('⚠️ This task was already updated by another action; no completion was recorded.');
+			if (
+				!taskRepository.completeTask({
+					taskId: task.task_id,
+					completedBy: interaction.user.id
+				})
+			) {
+				return '⚠️ This task was already updated by another action; no completion was recorded.';
 			}
+
+			return { content: `✅ Task **${task.title}** marked as done!` };
 		} catch (error) {
 			this.container.logger.error('Error completing task:', error);
 			// Release the transition claim so the task is not blocked until the
 			// lease expires; the user can immediately retry.
-			taskRepository.releaseTaskTransition({ taskId, actorId: interaction.user.id });
-			return interaction.editReply(`⚠️ Could not complete task **${taskId}**. No completion was recorded; please try again.`);
-		}
-
-		// Response is separate from persistence so a reply failure does not
-		// produce a misleading "no completion recorded" error.
-		try {
-			return interaction.editReply({
-				content: `✅ Task **${existing.title}** marked as done!`
-			});
-		} catch (replyError) {
-			this.container.logger.error('Task done reply failed (task was already completed):', replyError);
-			return;
+			taskRepository.releaseTaskTransition({ taskId: task.task_id, actorId: interaction.user.id });
+			return `⚠️ Could not complete task **${task.title}**. No completion was recorded; please try again.`;
 		}
 	}
 
-	// ──────────────────────────────────────────────
-	//  /task cancel
-	// ──────────────────────────────────────────────
-	async _cancel(interaction) {
-		const cancelled = await checkPermissionReply(interaction, PermissionFlagsBits.ManageMessages, 'Manage Messages');
-		if (cancelled) {
-			return;
+	/**
+	 * Execute the claimed cancel transition for an already-confirmed task.
+	 * Shared by /task cancel and the confirm button handler.
+	 */
+	async _executeCancel(task, interaction) {
+		if (!taskRepository.claimTaskTransition({ taskId: task.task_id, actorId: interaction.user.id })) {
+			return '⚠️ This task is already being updated by another action. Please try again.';
 		}
 
-		await interaction.deferReply();
-
-		const taskId = interaction.options.getString('task_id')?.trim();
-		const confirm = interaction.options.getBoolean('confirm');
-		if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(taskId)) {
-			return interaction.editReply('❌ Task ID must be a valid UUID.');
-		}
-
-		let existing;
 		try {
-			existing = taskRepository.getTask(taskId);
-			if (!existing) {
-				return interaction.editReply('❌ Task not found. Check the task ID.');
-			}
-			if (existing.status === 'done') {
-				return interaction.editReply('❌ Cannot cancel a task that is already done.');
-			}
-			if (existing.cancelled) {
-				return interaction.editReply('❌ This task has already been cancelled.');
-			}
-			if (!confirm) {
-				return interaction.editReply(
-					`⚠️ Cancellation not confirmed. This will remove reminders for **${existing.title}** (deadline <t:${existing.deadline}:F>). Run the command again with **confirm: True** to continue.`
-				);
-			}
-
-			if (!taskRepository.claimTaskTransition({ taskId, actorId: interaction.user.id })) {
-				return interaction.editReply('⚠️ This task is already being updated by another action. Please try again.');
-			}
-
 			// 1. Write cancellation to blockchain
 			const data = JSON.stringify({
 				type: 'task_cancel',
 				v: 1,
-				taskId,
-				title: existing.title,
-				assignedTo: existing.assigned_to,
+				taskId: task.task_id,
+				title: task.title,
+				assignedTo: task.assigned_to,
 				cancelledBy: interaction.user.id
 			});
 
@@ -455,32 +604,154 @@ class TaskCommand extends Command {
 			});
 
 			// 2. Update DB (marks cancelled, removes reminders)
-			if (!taskRepository.cancelTask({
-				taskId,
-				cancelledBy: interaction.user.id
-			})) {
-				return interaction.editReply('⚠️ This task was already updated by another action; no cancellation was recorded.');
+			if (
+				!taskRepository.cancelTask({
+					taskId: task.task_id,
+					cancelledBy: interaction.user.id
+				})
+			) {
+				return '⚠️ This task was already updated by another action; no cancellation was recorded.';
 			}
+
+			return { content: `🗑️ Task **${task.title}** has been cancelled and removed from the pending list.` };
 		} catch (error) {
 			this.container.logger.error('Error cancelling task:', error);
 			// Release the transition claim so the task is not blocked until the
 			// lease expires; the user can immediately retry.
-			taskRepository.releaseTaskTransition({ taskId, actorId: interaction.user.id });
-			return interaction.editReply(`⚠️ Could not cancel task **${taskId}**. No cancellation was recorded; please try again.`);
-		}
-
-		// Response is separate from persistence so a reply failure does not
-		// produce a misleading "no cancellation recorded" error.
-		try {
-			return interaction.editReply({
-				content: `🗑️ Task **${existing.title}** has been cancelled and removed from the pending list.`
-			});
-		} catch (replyError) {
-			this.container.logger.error('Task cancel reply failed (task was already cancelled):', replyError);
-			return;
+			taskRepository.releaseTaskTransition({ taskId: task.task_id, actorId: interaction.user.id });
+			return `⚠️ Could not cancel task **${task.title}**. No cancellation was recorded; please try again.`;
 		}
 	}
 
+	// ──────────────────────────────────────────────
+	//  /task done
+	// ──────────────────────────────────────────────
+	async _done(interaction) {
+		const cancelled = await checkPermissionReply(
+			interaction,
+			PermissionFlagsBits.ManageMessages,
+			'Manage Messages'
+		);
+		if (cancelled) {
+			return;
+		}
+
+		await interaction.deferReply({ ephemeral: true });
+
+		const resolved = await this._resolveTaskInput(interaction);
+		if (resolved.error) {
+			return interaction.editReply({ content: resolved.error, ephemeral: true });
+		}
+
+		// Title-based (fuzzy) matches ALWAYS require confirmation so a
+		// low-confidence title/description match is never marked done silently.
+		if (resolved.viaFuzzy) {
+			if (resolved.candidates.length > 1) {
+				return this._taskPickerReply({
+					interaction,
+					ids: TASK_DONE_IDS,
+					verb: 'Done',
+					emoji: '✅',
+					color: 0x00ff00,
+					candidates: resolved.candidates,
+					query: resolved.query
+				});
+			}
+			return this._taskConfirmReply({
+				interaction,
+				ids: TASK_DONE_IDS,
+				verb: 'Done',
+				emoji: '✅',
+				color: 0x00ff00,
+				task: resolved.task,
+				score: resolved.task.score,
+				extraTitle: `Matched by title search for **${resolved.query}**.`
+			});
+		}
+
+		// UUID path — verify current state before asking for confirmation.
+		const existing = resolved.task;
+		if (existing.status === 'done') {
+			return interaction.editReply({ content: '❌ This task is already marked as done.', ephemeral: true });
+		}
+		if (existing.cancelled) {
+			return interaction.editReply({ content: '❌ This task has already been cancelled.', ephemeral: true });
+		}
+
+		return this._taskConfirmReply({
+			interaction,
+			ids: TASK_DONE_IDS,
+			verb: 'Done',
+			emoji: '✅',
+			color: 0x00ff00,
+			task: existing
+		});
+	}
+
+	// ──────────────────────────────────────────────
+	//  /task cancel
+	// ──────────────────────────────────────────────
+	async _cancel(interaction) {
+		const cancelled = await checkPermissionReply(
+			interaction,
+			PermissionFlagsBits.ManageMessages,
+			'Manage Messages'
+		);
+		if (cancelled) {
+			return;
+		}
+
+		await interaction.deferReply({ ephemeral: true });
+
+		const resolved = await this._resolveTaskInput(interaction);
+		if (resolved.error) {
+			return interaction.editReply({ content: resolved.error, ephemeral: true });
+		}
+
+		// Title-based (fuzzy) matches ALWAYS require confirmation so a
+		// low-confidence title/description match is never cancelled silently.
+		if (resolved.viaFuzzy) {
+			if (resolved.candidates.length > 1) {
+				return this._taskPickerReply({
+					interaction,
+					ids: TASK_CANCEL_IDS,
+					verb: 'Cancellation',
+					emoji: '🗑️',
+					color: 0xe74c3c,
+					candidates: resolved.candidates,
+					query: resolved.query
+				});
+			}
+			return this._taskConfirmReply({
+				interaction,
+				ids: TASK_CANCEL_IDS,
+				verb: 'Cancellation',
+				emoji: '🗑️',
+				color: 0xe74c3c,
+				task: resolved.task,
+				score: resolved.task.score,
+				extraTitle: `Matched by title search for **${resolved.query}**.`
+			});
+		}
+
+		// UUID path — verify current state before asking for confirmation.
+		const existing = resolved.task;
+		if (existing.status === 'done') {
+			return interaction.editReply({ content: '❌ Cannot cancel a task that is already done.', ephemeral: true });
+		}
+		if (existing.cancelled) {
+			return interaction.editReply({ content: '❌ This task has already been cancelled.', ephemeral: true });
+		}
+
+		return this._taskConfirmReply({
+			interaction,
+			ids: TASK_CANCEL_IDS,
+			verb: 'Cancellation',
+			emoji: '🗑️',
+			color: 0xe74c3c,
+			task: existing
+		});
+	}
 }
 
-module.exports = { TaskCommand };
+module.exports = { TaskCommand, TASK_DONE_IDS, TASK_CANCEL_IDS };

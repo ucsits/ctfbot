@@ -21,6 +21,7 @@ const root = process.cwd();
 const taskCommand = readFileSync(join(root, 'src/commands/task.js'), 'utf8');
 const reminderService = readFileSync(join(root, 'src/services/reminder.js'), 'utf8');
 const luce = readFileSync(join(root, 'src/lib/luce/index.js'), 'utf8');
+const interactionCreate = readFileSync(join(root, 'src/listeners/interactionCreate.js'), 'utf8');
 
 // ── /task add ──────────────────────────────────────────────────────────
 describe('/task add input hardening', () => {
@@ -40,7 +41,7 @@ describe('/task add input hardening', () => {
 	});
 
 	it('defaults timezone to Asia/Jakarta', () => {
-		expect(taskCommand).toContain('|| \'Asia/Jakarta\'');
+		expect(taskCommand).toContain("|| 'Asia/Jakarta'");
 	});
 
 	it('rejects past deadlines with a clear message', () => {
@@ -94,21 +95,61 @@ describe('task lifecycle transitions', () => {
 		expect(taskCommand).toContain('[89ab][0-9a-f]{3}');
 	});
 
+	it('requires either a task_id or a title query', () => {
+		expect(taskCommand).toContain(
+			'Provide either `task_id` (the task UUID) or `task` (task title to fuzzy search).'
+		);
+	});
+
 	it('guards against already done / already cancelled / contested tasks', () => {
 		expect(taskCommand).toContain('This task is already marked as done');
 		expect(taskCommand).toContain('This task has already been cancelled');
 		expect(taskCommand).toContain('already being updated by another action');
 	});
 
-	it('claims the transition before writing to the blockchain', () => {
-		const doneMethod = taskCommand.slice(taskCommand.indexOf('async _done'), taskCommand.indexOf('async _cancel'));
+	it('fuzzy-searches title AND description with a confidence threshold', () => {
+		expect(taskCommand).toContain('resolveTaskCandidates');
+		expect(taskCommand).toContain('searchTasksByQuery');
+		expect(taskCommand).toContain('MIN_FUZZY_SCORE');
+		expect(taskCommand).toContain('minimum confidence');
+	});
+
+	it('always requires an ephemeral confirmation before any transition for title matches', () => {
+		// The fuzzy path must render a confirm/picker reply, never execute
+		expect(taskCommand).toContain('_taskConfirmReply');
+		expect(taskCommand).toContain('_taskPickerReply');
+		expect(taskCommand).toContain('ephemeral: true');
+		expect(taskCommand).toContain('Action requires confirmation.');
+		expect(taskCommand).toContain('Nothing has been recorded yet');
+	});
+
+	it('executes the transition only inside the shared _execute* methods', () => {
+		// The claim → blockchain → DB ordering lives in _executeDone/_executeCancel,
+		// which are shared by the slash command AND the confirm button listener.
+		expect(taskCommand).toContain('async _executeDone(task, interaction)');
+		expect(taskCommand).toContain('async _executeCancel(task, interaction)');
+		const doneMethod = taskCommand.slice(
+			taskCommand.indexOf('async _executeDone'),
+			taskCommand.indexOf('async _executeCancel')
+		);
 		expect(doneMethod.indexOf('claimTaskTransition')).toBeLessThan(doneMethod.indexOf('luce.appendBlock'));
+		expect(doneMethod.indexOf('luce.appendBlock')).toBeLessThan(doneMethod.indexOf('completeTask'));
+		const cancelMethod = taskCommand.slice(
+			taskCommand.indexOf('async _executeCancel'),
+			taskCommand.indexOf('async _done')
+		);
+		expect(cancelMethod.indexOf('claimTaskTransition')).toBeLessThan(cancelMethod.indexOf('luce.appendBlock'));
+		expect(cancelMethod.indexOf('luce.appendBlock')).toBeLessThan(cancelMethod.indexOf('cancelTask'));
 	});
 
 	it('releases the transition claim on error so retries are not blocked', () => {
-		const doneMethod = taskCommand.slice(taskCommand.indexOf('async _done'), taskCommand.indexOf('async _cancel'));
+		expect(taskCommand).toContain('releaseTaskTransition');
+		const doneMethod = taskCommand.slice(
+			taskCommand.indexOf('async _executeDone'),
+			taskCommand.indexOf('async _executeCancel')
+		);
 		expect(doneMethod).toContain('releaseTaskTransition');
-		const cancelMethod = taskCommand.slice(taskCommand.indexOf('async _cancel'));
+		const cancelMethod = taskCommand.slice(taskCommand.indexOf('async _executeCancel'));
 		expect(cancelMethod).toContain('releaseTaskTransition');
 	});
 
@@ -118,19 +159,57 @@ describe('task lifecycle transitions', () => {
 	});
 
 	it('separates persistence from reply so reply failures do not lie', () => {
-		// The final success reply is wrapped in its own try/catch, after DB write
-		const doneMethod = taskCommand.slice(taskCommand.indexOf('async _done'), taskCommand.indexOf('async _cancel'));
+		// Persistence happens inside _execute*; the final success/failure content
+		// is returned to the caller (button listener) after the DB write.
+		const doneMethod = taskCommand.slice(
+			taskCommand.indexOf('async _executeDone'),
+			taskCommand.indexOf('async _executeCancel')
+		);
 		expect(doneMethod.indexOf('completeTask')).toBeLessThan(doneMethod.indexOf('marked as done!'));
-		expect(doneMethod).toContain('Task done reply failed (task was already completed)');
+		expect(doneMethod).toContain('No completion was recorded; please try again');
 
-		const cancelMethod = taskCommand.slice(taskCommand.indexOf('async _cancel'));
+		const cancelMethod = taskCommand.slice(taskCommand.indexOf('async _executeCancel'));
 		expect(cancelMethod.indexOf('cancelTask')).toBeLessThan(cancelMethod.indexOf('has been cancelled'));
-		expect(cancelMethod).toContain('Task cancel reply failed (task was already cancelled)');
+		expect(cancelMethod).toContain('No cancellation was recorded; please try again');
 	});
 
-	it('requires explicit confirmation for cancellation', () => {
-		expect(taskCommand).toContain('Cancellation not confirmed');
-		expect(taskCommand).toContain('confirm: True');
+	it('exposes button namespaces and deny/picker no-op behavior', () => {
+		expect(taskCommand).toContain('task_done_confirm');
+		expect(taskCommand).toContain('task_done_candidate');
+		expect(taskCommand).toContain('task_done_deny');
+		expect(taskCommand).toContain('task_cancel_confirm');
+		expect(taskCommand).toContain('task_cancel_candidate');
+		expect(taskCommand).toContain('task_cancel_deny');
+		expect(taskCommand).toContain("setLabel('Deny')");
+	});
+});
+
+// ── Task confirmation button listener ─────────────────────────────────
+describe('task confirm button listener', () => {
+	it('routes done/cancel confirm+deny+candidate buttons to the shared transition methods', () => {
+		expect(interactionCreate).toContain('_handleTaskConfirm');
+		expect(interactionCreate).toContain('TASK_DONE_IDS');
+		expect(interactionCreate).toContain('TASK_CANCEL_IDS');
+		expect(interactionCreate).toContain('_executeDone');
+		expect(interactionCreate).toContain('_executeCancel');
+		expect(interactionCreate).toContain('TASK_DONE_IDS.candidate');
+		expect(interactionCreate).toContain('TASK_CANCEL_IDS.candidate');
+	});
+
+	it('verifies the button clicker is the user who initiated the prompt', () => {
+		expect(interactionCreate).toContain('initiatorId');
+		expect(interactionCreate).toContain('initiatorId !== interaction.user.id');
+		expect(interactionCreate).toContain('belongs to someone else');
+	});
+
+	it('deny buttons close the prompt without recording anything', () => {
+		expect(interactionCreate).toContain('nothing was recorded');
+		expect(interactionCreate).toContain('components: []');
+	});
+
+	it('re-checks task state before executing a confirmed transition', () => {
+		expect(interactionCreate).toContain('This task is already marked as done');
+		expect(interactionCreate).toContain('This task has already been cancelled');
 	});
 });
 
@@ -168,12 +247,12 @@ describe('reminder and digest lifecycle', () => {
 // ── Blockchain audit notifications ─────────────────────────────────────
 describe('Luce audit notification rendering', () => {
 	it('renders task_done events safely', () => {
-		expect(luce).toContain('case \'task_done\'');
+		expect(luce).toContain("case 'task_done'");
 		expect(luce).toContain('marked as done');
 	});
 
 	it('renders task_cancel events safely', () => {
-		expect(luce).toContain('case \'task_cancel\'');
+		expect(luce).toContain("case 'task_cancel'");
 		expect(luce).toContain('cancelled');
 	});
 
@@ -189,7 +268,7 @@ describe('regression guards for prior fixes', () => {
 	it('does not mention users with raw <@id> syntax in embed fields', () => {
 		// Clean mention syntax: display names instead of raw snowflakes in
 		// audit embeds (the fix from the audit notifications pass)
-		expect(luce).not.toContain('content: `✅ Task **${\'${taskId}\'}** marked as done!`');
+		expect(luce).not.toContain("content: `✅ Task **${'${taskId}'}** marked as done!`");
 	});
 
 	it('keeps Asia/Jakarta as the canonical reporting timezone everywhere', () => {

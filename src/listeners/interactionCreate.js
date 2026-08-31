@@ -5,6 +5,8 @@ const { activityRepository } = require('../database');
 const luce = require('../lib/luce');
 const { STORE_IDS } = require('../commands/store');
 const storeLayout = require('../lib/store');
+const { TASK_DONE_IDS, TASK_CANCEL_IDS } = require('../commands/task');
+const taskRepository = require('../database/repositories/task.repository');
 
 // Cache gallery posters per item slug so repeated buys don't re-compose.
 const galleryCache = new Map();
@@ -39,6 +41,25 @@ class StoreInteractionListener extends Listener {
 			return;
 		}
 
+		// Task confirmation buttons (/task done & /task cancel):
+		//   task_done_confirm:<taskId>[:score]     task_done_deny:<taskId>
+		//   task_done_candidate:<taskId>:<score>  (picker re-render)
+		//   task_cancel_confirm:<taskId>[:score]   task_cancel_deny:<taskId>
+		//   task_cancel_candidate:<taskId>:<score>
+		// Handled here so the confirm flow can run the same transition code
+		// (_executeDone / _executeCancel) that the slash command uses.
+		const taskIds = new Set([
+			TASK_DONE_IDS.confirm,
+			TASK_DONE_IDS.candidate,
+			TASK_DONE_IDS.deny,
+			TASK_CANCEL_IDS.confirm,
+			TASK_CANCEL_IDS.candidate,
+			TASK_CANCEL_IDS.deny
+		]);
+		if (taskIds.has(interaction.customId.split(':')[0])) {
+			return this._handleTaskConfirm(interaction);
+		}
+
 		const [namespace, slug] = interaction.customId.split(':');
 
 		if (!slug) {
@@ -54,6 +75,143 @@ class StoreInteractionListener extends Listener {
 		if (namespace === STORE_IDS.payRp) {
 			return this._buyWithRp(interaction, slug);
 		}
+	}
+
+	/**
+	 * Route /task done & /task cancel confirm/deny/candidate buttons.
+	 *
+	 * The original prompt is an ephemeral message (only the invoker can see
+	 * it), but buttons on other components could in theory be re-used, so we
+	 * verify the clicker is the same user who ran the command before acting.
+	 * The button customId carries the initiating user id:
+	 *   <namespace>:<taskId>[:<score>]:<userId>
+	 */
+	async _handleTaskConfirm(interaction) {
+		const parts = interaction.customId.split(':');
+		const namespace = parts[0];
+		const taskId = parts[1];
+		const score = parts[2] ? Number(parts[2]) : undefined;
+		const initiatorId = parts[3];
+
+		// Only the user who ran /task done|cancel may answer its prompt.
+		if (!initiatorId || initiatorId !== interaction.user.id) {
+			return interaction.reply({
+				content:
+					'❌ This confirmation belongs to someone else. Run `/task done` or `/task cancel` yourself to act on a task.',
+				ephemeral: true
+			});
+		}
+
+		// The button's customId encodes which TaskCommand instance produced it.
+		// Find it via the Sapphire store so the shared transition methods run
+		// on the same class instance as the slash command.
+		const taskCommand = this.container.stores.get('commands').get('task');
+		if (!taskCommand) {
+			return interaction.reply({
+				content: '❌ Task command is not loaded.',
+				ephemeral: true
+			});
+		}
+
+		let task;
+		try {
+			task = taskRepository.getTask(taskId);
+		} catch (error) {
+			this.container.logger.error('Task confirm: failed to load task:', error);
+			return interaction.reply({ content: '❌ Failed to load the task.', ephemeral: true });
+		}
+
+		if (!task) {
+			return interaction.reply({
+				content: '❌ Task not found. It may have been removed.',
+				ephemeral: true
+			});
+		}
+
+		// ── Candidate picker: re-render a single-task confirmation for the
+		// picked task. Nothing has been recorded yet. ──
+		if (namespace === TASK_DONE_IDS.candidate || namespace === TASK_CANCEL_IDS.candidate) {
+			const ids = namespace === TASK_DONE_IDS.candidate ? TASK_DONE_IDS : TASK_CANCEL_IDS;
+			const verb = namespace === TASK_DONE_IDS.candidate ? 'Done' : 'Cancellation';
+			const emoji = namespace === TASK_DONE_IDS.candidate ? '✅' : '🗑️';
+			const color = namespace === TASK_DONE_IDS.candidate ? 0x00ff00 : 0xe74c3c;
+
+			const embed = new EmbedBuilder()
+				.setColor(color)
+				.setTitle(`${emoji} Confirm ${verb}?`)
+				.setDescription(
+					`**${task.title}**\nThis will ${verb === 'Done' ? 'mark the task done' : 'cancel the task'} and record it on the blockchain.`
+				)
+				.addFields(
+					{ name: 'Assigned To', value: `<@${task.assigned_to}>`, inline: true },
+					{ name: 'Deadline', value: `<t:${task.deadline}:F>`, inline: true },
+					...(typeof score === 'number' && !Number.isNaN(score)
+						? [{ name: 'Match Confidence', value: `${Math.round(score * 100)}%`, inline: true }]
+						: [])
+				)
+				.setTimestamp();
+			if (task.description) {
+				embed.addFields({ name: 'Description', value: task.description.slice(0, 1024), inline: false });
+			}
+
+			const row = new ActionRowBuilder().addComponents(
+				new ButtonBuilder()
+					.setCustomId(`${ids.confirm}:${task.task_id}:${score ?? ''}:${initiatorId}`)
+					.setLabel(`Confirm ${verb}`)
+					.setStyle(ButtonStyle.Success),
+				new ButtonBuilder()
+					.setCustomId(`${ids.deny}:${task.task_id}::${initiatorId}`)
+					.setLabel('Deny')
+					.setStyle(ButtonStyle.Danger)
+			);
+
+			return interaction.update({
+				content: '⚠️ **Action requires confirmation.** Nothing has been recorded yet.',
+				embeds: [embed],
+				components: [row]
+			});
+		}
+
+		// ── Deny: just close the prompt. Nothing was recorded. ──
+		if (namespace === TASK_DONE_IDS.deny || namespace === TASK_CANCEL_IDS.deny) {
+			return interaction.update({
+				content: '✅ Action cancelled — nothing was recorded.',
+				embeds: [],
+				components: []
+			});
+		}
+
+		// ── Confirm: execute the shared transition path. ──
+		const isCancel = namespace === TASK_CANCEL_IDS.confirm;
+
+		// Guard: never act on a task whose state changed since the prompt.
+		if (task.status === 'done') {
+			return interaction.update({
+				content: '❌ This task is already marked as done.',
+				embeds: [],
+				components: []
+			});
+		}
+		if (task.cancelled) {
+			return interaction.update({
+				content: '❌ This task has already been cancelled.',
+				embeds: [],
+				components: []
+			});
+		}
+
+		const result = isCancel
+			? await taskCommand._executeCancel(task, interaction)
+			: await taskCommand._executeDone(task, interaction);
+
+		// _execute* returns { content } on success or a plain string on failure.
+		const content = typeof result === 'object' ? result.content : result;
+
+		return interaction.update({
+			content,
+			embeds: [],
+			components: []
+		});
 	}
 
 	/**
