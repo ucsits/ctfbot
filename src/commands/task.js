@@ -1,10 +1,8 @@
 const { Command } = require('@sapphire/framework');
 const { PermissionFlagsBits, EmbedBuilder } = require('discord.js');
 const { randomUUID } = require('crypto');
-const { getConnection } = require('../database/connection');
 const taskRepository = require('../database/repositories/task.repository');
 const luce = require('../lib/luce');
-const { sendErrorResponse, sendSuccessResponse } = require('../lib/utils/response');
 const { parseLocalDateToUTC, formatDateInterpretation, computePeriodRange } = require('../lib/utils');
 const { DateTime } = require('luxon');
 const { checkPermissionReply } = require('../lib/middleware/ensurePermission');
@@ -32,19 +30,19 @@ class TaskCommand extends Command {
 						.setName('add')
 						.setDescription('Create a new task')
 						.addStringOption(opt =>
-							opt.setName('title').setDescription('Task title').setRequired(true)
+							opt.setName('title').setDescription('Task title').setMaxLength(100).setRequired(true)
 						)
 						.addUserOption(opt =>
 							opt.setName('assign_to').setDescription('Who to assign this task to').setRequired(true)
 						)
 						.addStringOption(opt =>
-							opt.setName('deadline').setDescription('Deadline — DD-MM-YYYY HH:MM or Unix timestamp (@time compatible)').setRequired(true)
+							opt.setName('deadline').setDescription('Deadline — DD-MM-YYYY HH:MM or Unix timestamp (@time compatible)').setMaxLength(64).setRequired(true)
 						)
 						.addStringOption(opt =>
-							opt.setName('timezone').setDescription('Your timezone (default: Asia/Jakarta)').setRequired(false)
+							opt.setName('timezone').setDescription('Your timezone (default: Asia/Jakarta)').setMaxLength(64).setRequired(false)
 						)
 						.addStringOption(opt =>
-							opt.setName('description').setDescription('Task description').setRequired(false)
+							opt.setName('description').setDescription('Task description').setMaxLength(4000).setRequired(false)
 						)
 				)
 
@@ -82,7 +80,7 @@ class TaskCommand extends Command {
 						.setName('done')
 						.setDescription('Mark a task as completed')
 						.addStringOption(opt =>
-							opt.setName('task_id').setDescription('The task UUID').setRequired(true)
+							opt.setName('task_id').setDescription('The task UUID').setMaxLength(36).setRequired(true)
 						)
 				)
 
@@ -92,7 +90,10 @@ class TaskCommand extends Command {
 						.setName('cancel')
 						.setDescription('Cancel a pending task')
 						.addStringOption(opt =>
-							opt.setName('task_id').setDescription('The task UUID').setRequired(true)
+							opt.setName('task_id').setDescription('The task UUID').setMaxLength(36).setRequired(true)
+						)
+						.addBooleanOption(opt =>
+							opt.setName('confirm').setDescription('Confirm cancelling this task').setRequired(true)
 						)
 				),
 		{
@@ -135,12 +136,21 @@ class TaskCommand extends Command {
 
 		await interaction.deferReply();
 
-		const title = interaction.options.getString('title');
-		const description = interaction.options.getString('description');
+		const title = interaction.options.getString('title')?.trim();
+		const description = interaction.options.getString('description')?.trim() || null;
+		if (!title || title.length > 100) {
+			return interaction.editReply('❌ Task title must be between 1 and 100 characters.');
+		}
+		if (description && description.length > 4000) {
+			return interaction.editReply('❌ Task description cannot exceed 4000 characters.');
+		}
 		const assignTo = interaction.options.getUser('assign_to');
 		const deadlineStr = interaction.options.getString('deadline');
 
-		const timezone = interaction.options.getString('timezone') || 'Asia/Jakarta';
+		const timezone = interaction.options.getString('timezone')?.trim() || 'Asia/Jakarta';
+		if (timezone.length > 64) {
+			return interaction.editReply('❌ Timezone is too long. Use a valid IANA timezone.');
+		}
 
 		// Parse deadline with timezone support
 		let deadlineDate;
@@ -187,14 +197,12 @@ class TaskCommand extends Command {
 				blockHeight: block.height
 			});
 
-			// 3. Create reminder (1 hour before deadline)
+			// 3. Create reminders. Keep timestamps unique so short deadlines do not
+			// create duplicate notifications.
+			const reminderTimes = new Set();
 			const remindAt = deadlineUnix - 3600;
 			if (remindAt > Math.floor(Date.now() / 1000)) {
-				taskRepository.createReminder({
-					taskId,
-					channelId: constants.REMINDER_CHANNEL_ID,
-					remindAt
-				});
+				reminderTimes.add(remindAt);
 			}
 
 			// 4. Create day-before reminder (9:00 AM Jakarta time, day before deadline)
@@ -202,10 +210,13 @@ class TaskCommand extends Command {
 			const dayBefore9am = deadlineJakarta.minus({ days: 1 }).set({ hour: 9, minute: 0, second: 0, millisecond: 0 });
 			const dayBeforeRemindAt = dayBefore9am.toUTC().toUnixInteger();
 			if (dayBeforeRemindAt > Math.floor(Date.now() / 1000)) {
+				reminderTimes.add(dayBeforeRemindAt);
+			}
+			for (const remindAt of reminderTimes) {
 				taskRepository.createReminder({
 					taskId,
 					channelId: constants.REMINDER_CHANNEL_ID,
-					remindAt: dayBeforeRemindAt
+					remindAt
 				});
 			}
 
@@ -222,14 +233,17 @@ class TaskCommand extends Command {
 				.setTimestamp();
 
 			if (description) {
-				embed.addFields({ name: 'Description', value: description, inline: false });
+				embed.addFields({ name: 'Description', value: description.slice(0, 1024), inline: false });
 			}
 
 			const interpretation = formatDateInterpretation(deadlineStr, timezone, deadlineDate);
 			return interaction.editReply({ content: interpretation, embeds: [embed] });
 		} catch (error) {
 			this.container.logger.error('Error creating task:', error);
-			return interaction.editReply('❌ Failed to create task. Blockchain error: ' + error.message);
+			if (error.message?.includes('Blockchain')) {
+				return interaction.editReply('❌ Could not anchor the task on the blockchain. No task was created.');
+			}
+			return interaction.editReply(`⚠️ The task was anchored, but the confirmation could not be completed. Task ID: \`${taskId}\`. Please use /task list to verify it.`);
 		}
 	}
 
@@ -258,7 +272,7 @@ class TaskCommand extends Command {
 		}
 
 		const now = Math.floor(Date.now() / 1000);
-		const range = computePeriodRange(period, now);
+		const range = computePeriodRange(period, now, 'Asia/Jakarta');
 
 		try {
 			const tasks = taskRepository.listPendingTasks({
@@ -275,22 +289,36 @@ class TaskCommand extends Command {
 				});
 			}
 
-			const embed = new EmbedBuilder()
-				.setColor(0x3498DB)
-				.setTitle(`📋 Tasks — ${periodLabel}`)
-				.setDescription(`**${tasks.length}** task(s) remaining for ${listLabel}`)
-				.setTimestamp();
-
-			for (const t of tasks) {
-				const deadlineStr = `<t:${t.deadline}:R>`;
-				embed.addFields({
-					name: `${t.title}`,
-					value: `Deadline: ${deadlineStr}\nID: \`${t.task_id}\``,
-					inline: false
-				});
+			// Discord permits at most 25 embed fields. Send navigable-sized pages as
+			// follow-ups rather than failing the entire list for large result sets.
+			const pages = [];
+			for (let i = 0; i < tasks.length; i += 20) {
+				pages.push(tasks.slice(i, i + 20));
 			}
 
-			return interaction.editReply({ embeds: [embed] });
+			for (const [index, pageTasks] of pages.entries()) {
+				const embed = new EmbedBuilder()
+					.setColor(0x3498DB)
+					.setTitle(`📋 Tasks — ${periodLabel}${pages.length > 1 ? ` (page ${index + 1}/${pages.length})` : ''}`)
+					.setDescription(`**${tasks.length}** task(s) remaining for ${listLabel}\nReporting timezone: **Asia/Jakarta**`)
+					.setTimestamp();
+
+				for (const t of pageTasks) {
+					const deadlineStr = `<t:${t.deadline}:R>`;
+					embed.addFields({
+						name: `${t.title}`,
+						value: `Assigned to: <@${t.assigned_to}>\nDeadline: ${deadlineStr}\nID: \`${t.task_id}\``,
+						inline: false
+					});
+				}
+
+				if (index === 0) {
+					await interaction.editReply({ embeds: [embed] });
+				} else {
+					await interaction.followUp({ embeds: [embed] });
+				}
+			}
+			return;
 		} catch (error) {
 			this.container.logger.error('Error listing tasks:', error);
 			return interaction.editReply('❌ Failed to list tasks.');
@@ -308,10 +336,14 @@ class TaskCommand extends Command {
 
 		await interaction.deferReply();
 
-		const taskId = interaction.options.getString('task_id');
+		const taskId = interaction.options.getString('task_id')?.trim();
+		if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(taskId)) {
+			return interaction.editReply('❌ Task ID must be a valid UUID.');
+		}
 
+		let existing;
 		try {
-			const existing = taskRepository.getTask(taskId);
+			existing = taskRepository.getTask(taskId);
 			if (!existing) {
 				return interaction.editReply('❌ Task not found. Check the task ID.');
 			}
@@ -322,11 +354,17 @@ class TaskCommand extends Command {
 				return interaction.editReply('❌ This task has already been cancelled.');
 			}
 
+			if (!taskRepository.claimTaskTransition({ taskId, actorId: interaction.user.id })) {
+				return interaction.editReply('⚠️ This task is already being updated by another action. Please try again.');
+			}
+
 			// 1. Write completion to blockchain
 			const data = JSON.stringify({
 				type: 'task_done',
 				v: 1,
 				taskId,
+				title: existing.title,
+				assignedTo: existing.assigned_to,
 				completedBy: interaction.user.id
 			});
 
@@ -335,18 +373,30 @@ class TaskCommand extends Command {
 				data
 			});
 
-			// 2. Update DB
-			taskRepository.completeTask({
+			// 2. Update DB. A concurrent done/cancel action may have won the race.
+			if (!taskRepository.completeTask({
 				taskId,
 				completedBy: interaction.user.id
-			});
+			})) {
+				return interaction.editReply('⚠️ This task was already updated by another action; no completion was recorded.');
+			}
+		} catch (error) {
+			this.container.logger.error('Error completing task:', error);
+			// Release the transition claim so the task is not blocked until the
+			// lease expires; the user can immediately retry.
+			taskRepository.releaseTaskTransition({ taskId, actorId: interaction.user.id });
+			return interaction.editReply(`⚠️ Could not complete task **${taskId}**. No completion was recorded; please try again.`);
+		}
 
+		// Response is separate from persistence so a reply failure does not
+		// produce a misleading "no completion recorded" error.
+		try {
 			return interaction.editReply({
 				content: `✅ Task **${existing.title}** marked as done!`
 			});
-		} catch (error) {
-			this.container.logger.error('Error completing task:', error);
-			return interaction.editReply('❌ Failed to complete task. Blockchain error: ' + error.message);
+		} catch (replyError) {
+			this.container.logger.error('Task done reply failed (task was already completed):', replyError);
+			return;
 		}
 	}
 
@@ -361,10 +411,15 @@ class TaskCommand extends Command {
 
 		await interaction.deferReply();
 
-		const taskId = interaction.options.getString('task_id');
+		const taskId = interaction.options.getString('task_id')?.trim();
+		const confirm = interaction.options.getBoolean('confirm');
+		if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(taskId)) {
+			return interaction.editReply('❌ Task ID must be a valid UUID.');
+		}
 
+		let existing;
 		try {
-			const existing = taskRepository.getTask(taskId);
+			existing = taskRepository.getTask(taskId);
 			if (!existing) {
 				return interaction.editReply('❌ Task not found. Check the task ID.');
 			}
@@ -374,12 +429,23 @@ class TaskCommand extends Command {
 			if (existing.cancelled) {
 				return interaction.editReply('❌ This task has already been cancelled.');
 			}
+			if (!confirm) {
+				return interaction.editReply(
+					`⚠️ Cancellation not confirmed. This will remove reminders for **${existing.title}** (deadline <t:${existing.deadline}:F>). Run the command again with **confirm: True** to continue.`
+				);
+			}
+
+			if (!taskRepository.claimTaskTransition({ taskId, actorId: interaction.user.id })) {
+				return interaction.editReply('⚠️ This task is already being updated by another action. Please try again.');
+			}
 
 			// 1. Write cancellation to blockchain
 			const data = JSON.stringify({
 				type: 'task_cancel',
 				v: 1,
 				taskId,
+				title: existing.title,
+				assignedTo: existing.assigned_to,
 				cancelledBy: interaction.user.id
 			});
 
@@ -389,17 +455,29 @@ class TaskCommand extends Command {
 			});
 
 			// 2. Update DB (marks cancelled, removes reminders)
-			taskRepository.cancelTask({
+			if (!taskRepository.cancelTask({
 				taskId,
 				cancelledBy: interaction.user.id
-			});
+			})) {
+				return interaction.editReply('⚠️ This task was already updated by another action; no cancellation was recorded.');
+			}
+		} catch (error) {
+			this.container.logger.error('Error cancelling task:', error);
+			// Release the transition claim so the task is not blocked until the
+			// lease expires; the user can immediately retry.
+			taskRepository.releaseTaskTransition({ taskId, actorId: interaction.user.id });
+			return interaction.editReply(`⚠️ Could not cancel task **${taskId}**. No cancellation was recorded; please try again.`);
+		}
 
+		// Response is separate from persistence so a reply failure does not
+		// produce a misleading "no cancellation recorded" error.
+		try {
 			return interaction.editReply({
 				content: `🗑️ Task **${existing.title}** has been cancelled and removed from the pending list.`
 			});
-		} catch (error) {
-			this.container.logger.error('Error cancelling task:', error);
-			return interaction.editReply('❌ Failed to cancel task. Blockchain error: ' + error.message);
+		} catch (replyError) {
+			this.container.logger.error('Task cancel reply failed (task was already cancelled):', replyError);
+			return;
 		}
 	}
 

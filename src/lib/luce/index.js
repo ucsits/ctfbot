@@ -13,6 +13,7 @@ const BASE_URL = `http://127.0.0.1:${LUCE_PORT}/api/v1`;
 const { EmbedBuilder } = require('discord.js');
 const { logger } = require('../logger');
 const { REMINDER_CHANNEL_ID } = require('../constants/config');
+const taskRepository = require('../../database/repositories/task.repository');
 const luceLog = logger.child('Luce');
 
 /** @type {import('discord.js').Client|null} */
@@ -182,16 +183,36 @@ function _buildBlockEmbed(block) {
 				{ name: 'Block', value: `#${block.height}`, inline: true }
 			)
 			.setTimestamp(blockDate);
-	case 'task_done':
+	case 'task_done': {
+		const task = parsed.taskId ? taskRepository.getTask(parsed.taskId) : null;
+		const title = parsed.title || task?.title || `Task \`${parsed.taskId || 'unknown'}\` marked as done`;
 		return new EmbedBuilder()
 			.setColor(0x00FF00)
 			.setTitle('✅ Task Completed')
-			.setDescription(`Task \`${parsed.taskId}\` marked as done`)
+			.setDescription(title)
 			.addFields(
-				{ name: 'Completed by', value: `<@${parsed.completedBy}>`, inline: true },
+				{ name: 'Completed by', value: parsed.completedBy ? `<@${parsed.completedBy}>` : 'Unknown', inline: true },
+				{ name: 'Assigned to', value: parsed.assignedTo || task?.assigned_to ? `<@${parsed.assignedTo || task.assigned_to}>` : 'Unknown', inline: true },
+				{ name: 'Task ID', value: `\`${parsed.taskId || 'unknown'}\``, inline: false },
 				{ name: 'Block', value: `#${block.height}`, inline: true }
 			)
 			.setTimestamp(blockDate);
+	}
+	case 'task_cancel': {
+		const task = parsed.taskId ? taskRepository.getTask(parsed.taskId) : null;
+		const title = parsed.title || task?.title || `Task \`${parsed.taskId || 'unknown'}\` was cancelled`;
+		return new EmbedBuilder()
+			.setColor(0xE74C3C)
+			.setTitle('🗑️ Task Cancelled')
+			.setDescription(title)
+			.addFields(
+				{ name: 'Cancelled by', value: parsed.cancelledBy ? `<@${parsed.cancelledBy}>` : 'Unknown', inline: true },
+				{ name: 'Assigned to', value: parsed.assignedTo || task?.assigned_to ? `<@${parsed.assignedTo || task.assigned_to}>` : 'Unknown', inline: true },
+				{ name: 'Task ID', value: `\`${parsed.taskId || 'unknown'}\``, inline: false },
+				{ name: 'Block', value: `#${block.height}`, inline: true }
+			)
+			.setTimestamp(blockDate);
+	}
 	case 'document': {
 		const isFile = parsed.filename && parsed.fileSize;
 		const embed = new EmbedBuilder()
@@ -281,7 +302,17 @@ async function _notifyBlock(block) {
 		return;
 	}
 
-	const embed = _buildBlockEmbed(block);
+	let embed;
+	try {
+		embed = _buildBlockEmbed(block);
+	} catch (error) {
+		luceLog.warn(`Could not enrich audit event: ${error.message}`);
+		embed = new EmbedBuilder()
+			.setColor(0x808080)
+			.setTitle('⛓️ New Block')
+			.setDescription(`Block **#${block.height}** appended to the chain`)
+			.setTimestamp();
+	}
 
 	// Parse block data to build a content string with real mentions
 	// (Discord only triggers notifications for mentions in message content,
@@ -294,7 +325,14 @@ async function _notifyBlock(block) {
 			content = `<@${parsed.createdBy}> assigned a task to <@${parsed.assignedTo}>`;
 			break;
 		case 'task_done':
-			content = `<@${parsed.completedBy}> completed a task`;
+			content = parsed.completedBy
+				? `<@${parsed.completedBy}> completed **${parsed.title || `task \`${parsed.taskId || 'unknown'}\``}**`
+				: `Task **${parsed.title || parsed.taskId || 'unknown'}** was completed`;
+			break;
+		case 'task_cancel':
+			content = parsed.cancelledBy
+				? `<@${parsed.cancelledBy}> cancelled **${parsed.title || `task \`${parsed.taskId || 'unknown'}\``}**`
+				: `Task **${parsed.title || parsed.taskId || 'unknown'}** was cancelled`;
 			break;
 		case 'rep':
 			content = `<@${parsed.fromUser}> gave rep to <@${parsed.toUser}>`;
@@ -328,7 +366,23 @@ async function _notifyBlock(block) {
 		// fall through — send embed-only if data can't be parsed
 	}
 
-	await channel.send({ content: content || undefined, embeds: [embed] });
+	const userIds = [];
+	try {
+		const parsed = JSON.parse(block.data);
+		for (const id of [parsed.createdBy, parsed.assignedTo, parsed.completedBy, parsed.cancelledBy, parsed.fromUser, parsed.toUser, parsed.author, parsed.grantedBy, parsed.grantedTo, parsed.user, parsed.confirmedBy]) {
+			if (id && !userIds.includes(String(id))) {
+				userIds.push(String(id));
+			}
+		}
+	} catch {
+		// The embed is still useful when block data is malformed.
+	}
+
+	await channel.send({
+		content: content || undefined,
+		allowedMentions: { users: userIds },
+		embeds: [embed]
+	});
 }
 
 module.exports = {
@@ -337,5 +391,8 @@ module.exports = {
 	listBlocks,
 	getBlock,
 	getHeight,
-	validateChain
+	validateChain,
+	// Exported for testing
+	_buildBlockEmbed,
+	_notifyBlock
 };

@@ -67,19 +67,27 @@ function runMigrations(
 			applied.push(name);
 			migrationLogger.info(`Applied migration: ${name}`);
 		} catch (error) {
-			// Gracefully handle ALTER TABLE ADD COLUMN when the column already exists.
-			// SQLite does not support IF NOT EXISTS for ALTER TABLE, so the migration
-			// may encounter 'duplicate column name' on databases where the inline
-			// schema (CREATE TABLE IF NOT EXISTS in database/index.js) already includes
-			// the column. This is harmless — the target schema state is already achieved.
+			// Recover from inline-schema duplicates only after verifying every
+			// declared table and column exists. This avoids hiding partial upgrades.
 			if (error.message && error.message.includes('duplicate column name')) {
-				migrationLogger.warn(`Migration ${name}: column already exists, marking as applied`);
-				db.prepare('INSERT OR IGNORE INTO migrations (name) VALUES (?)').run(name);
-				applied.push(name);
-			} else {
-				migrationLogger.error(`Failed to apply migration ${name}`, error);
-				return { applied, skipped, error: error.message };
+				const migrationSql = fs.readFileSync(path.join(migrationsDir, file), 'utf8');
+				const alterColumns = [...migrationSql.matchAll(/ALTER TABLE\s+(\w+)\s+ADD COLUMN\s+(\w+)/gi)];
+				const createTables = [...migrationSql.matchAll(/CREATE TABLE IF NOT EXISTS\s+(\w+)/gi)];
+				const columnsPresent = alterColumns.every(([, table, column]) =>
+					db.prepare(`PRAGMA table_info(${table})`).all().some(info => info.name.toLowerCase() === column.toLowerCase())
+				);
+				const tablesPresent = createTables.every(([, table]) =>
+					db.prepare('SELECT 1 FROM sqlite_master WHERE type = \'table\' AND name = ?').get(table)
+				);
+				if (columnsPresent && tablesPresent) {
+					migrationLogger.warn(`Migration ${name}: schema already present, marking as applied`);
+					db.prepare('INSERT OR IGNORE INTO migrations (name) VALUES (?)').run(name);
+					applied.push(name);
+					continue;
+				}
 			}
+			migrationLogger.error(`Failed to apply migration ${name}`, error);
+			return { applied, skipped, error: error.message };
 		}
 	}
 

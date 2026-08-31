@@ -24,6 +24,8 @@ let lastDigestWeek = null;
 
 /** @type {string|null} Last date (YYYY-MM-DD Asia/Jakarta) for which the daily digest was sent */
 let lastDigestDate = null;
+let pollInProgress = false;
+let weeklyDigestSentThisCycle = false;
 
 /**
  * Start the reminder polling service.
@@ -37,10 +39,15 @@ function startReminderService(client) {
 
 	container.logger.info('Starting reminder service (polling every 30s)');
 
-	intervalHandle = setInterval(poll, interval);
+	if (intervalHandle) {
+		return;
+	}
+	intervalHandle = setInterval(() => {
+		poll().catch(error => container.logger.error('Reminder poll failed:', error));
+	}, interval);
 
 	// Also run once immediately
-	poll();
+	poll().catch(error => container.logger.error('Initial reminder poll failed:', error));
 }
 
 /**
@@ -57,9 +64,17 @@ function stopReminderService() {
  * Single poll cycle: check due per-task reminders, weekly digest, daily digest.
  */
 async function poll() {
-	await pollReminders();
-	await pollWeeklyDigest();
-	await pollDailyDigest();
+	if (pollInProgress) {
+		return;
+	}
+	pollInProgress = true;
+	try {
+		weeklyDigestSentThisCycle = await pollWeeklyDigest();
+		await pollDailyDigest();
+		await pollReminders();
+	} finally {
+		pollInProgress = false;
+	}
 }
 
 // ──────────────────────────────────────────────
@@ -74,14 +89,14 @@ async function pollReminders() {
 	const now = Math.floor(Date.now() / 1000);
 
 	try {
-		const due = taskRepository.getDueReminders(now);
+		const due = taskRepository.claimDueReminders(now);
 
 		for (const reminder of due) {
 			try {
 				const channel = await clientRef.channels.fetch(reminder.channel_id);
 				if (!channel) {
-					container.logger.warn(`Reminder channel ${reminder.channel_id} not found`);
-					taskRepository.markReminderSent(reminder.id);
+					container.logger.warn(`Reminder channel ${reminder.channel_id} not found; suppressing reminder ${reminder.id}`);
+					taskRepository.releaseReminder(reminder.id, 'Reminder channel not found', true);
 					continue;
 				}
 
@@ -90,6 +105,7 @@ async function pollReminders() {
 
 				await channel.send({
 					content: `⏰ **Reminder** ${userMention}`,
+					allowedMentions: { users: [reminder.assigned_to] },
 					embeds: [{
 						color: 0xE67E22,
 						title: reminder.title,
@@ -106,8 +122,9 @@ async function pollReminders() {
 				container.logger.info(`Sent reminder for task ${reminder.task_id}`);
 			} catch (err) {
 				container.logger.error(`Failed to send reminder ${reminder.id}:`, err);
-				// Mark as sent anyway to avoid retry loops on permanent errors
-				taskRepository.markReminderSent(reminder.id);
+				const permanent = [403, 404].includes(err.code) || /Missing Access|Cannot send messages/i.test(err.message || '');
+				taskRepository.releaseReminder(reminder.id, err.message, permanent);
+				container.logger.warn(`Reminder ${reminder.id} will be retried after delivery failure`);
 			}
 		}
 	} catch (error) {
@@ -209,7 +226,7 @@ function _estimateMentionsLength(tasks) {
  * @param {string} opts.mentionLabel
  * @param {Array<{heading: string, tasks: Array<object>}>} opts.sections
  */
-async function _sendDigest(channel, { title, color, description, footer, mentionLabel, sections }) {
+async function _sendDigest(channel, { title, color, description, footer, mentionLabel, digestKey, sections }) {
 	// Flatten sections into field groups, labelling chunks when a section splits.
 	const fieldGroups = [];
 	for (const section of sections) {
@@ -223,19 +240,26 @@ async function _sendDigest(channel, { title, color, description, footer, mention
 			});
 		});
 	}
+	if (fieldGroups.length === 0) {
+		fieldGroups.push({ heading: 'Tasks', tasks: [] });
+	}
 
 	// Pack field groups into messages, respecting Discord's per-message limits.
 	const messages = [];
 	let current = null;
 	for (const fg of fieldGroups) {
 		const value = _formatTaskGroup(fg.tasks);
-		const fieldLen = fg.heading.length + value.length;
+		// Raw text length plus JSON syntax overhead per field ("name", "value",
+		// "inline" keys and quotes) so the serialized embed stays under Discord's
+		// 6000-character total limit.
+		const fieldLen = fg.heading.length + value.length + 34;
 		const mentionsLen = _estimateMentionsLength(fg.tasks);
 
+		const messageOverhead = title.length + description.length + footer.length + 80;
 		const overflow =
 			!current ||
 			current.fields.length >= MAX_FIELDS_PER_EMBED ||
-			current.totalLen + fieldLen > MAX_EMBED_TOTAL ||
+			current.totalLen + fieldLen + messageOverhead > MAX_EMBED_TOTAL ||
 			current.mentionsLen + mentionsLen + 64 > MESSAGE_CONTENT_LIMIT;
 
 		if (overflow) {
@@ -251,6 +275,10 @@ async function _sendDigest(channel, { title, color, description, footer, mention
 	const total = messages.length;
 
 	for (const [idx, m] of messages.entries()) {
+		const partKey = digestKey ? `${digestKey}:part:${idx + 1}` : null;
+		if (partKey && (taskRepository.hasDigestBeenSent(partKey) || !taskRepository.claimDigestPart(partKey))) {
+			continue;
+		}
 		const embed = new EmbedBuilder().setColor(color);
 		if (idx === 0) {
 			embed.setTitle(title).setDescription(description);
@@ -266,7 +294,14 @@ async function _sendDigest(channel, { title, color, description, footer, mention
 		const label = total > 1 ? `${mentionLabel} (part ${idx + 1}/${total})` : mentionLabel;
 		const content = _buildMentionContent(label, mentions);
 
-		await channel.send({ content, embeds: [embed] });
+		await channel.send({
+			content,
+			allowedMentions: { users: _buildMentions(m.tasks).map(mention => mention.slice(2, -1)) },
+			embeds: [embed]
+		});
+		if (partKey) {
+			taskRepository.markDigestPartSent(partKey);
+		}
 	}
 }
 
@@ -328,15 +363,22 @@ function _buildMentionContent(label, mentions) {
  */
 async function pollWeeklyDigest() {
 	if (!clientRef) {
-		return;
+		return false;
 	}
 
 	const nowJakarta = DateTime.now().setZone('Asia/Jakarta');
 	const currentWeek = nowJakarta.weekNumber;
 
 	// Only send on Monday at/after 5:00 AM Jakarta time, once per ISO week
+	const digestKey = `weekly:${nowJakarta.weekYear}-${String(currentWeek).padStart(2, '0')}`;
 	if (nowJakarta.weekday !== 1 || nowJakarta.hour < 5 || currentWeek === lastDigestWeek) {
-		return;
+		return false;
+	}
+	// If the persisted digest was already sent (from a prior process cycle),
+	// set lastDigestWeek so pollDailyDigest can suppress Monday daily.
+	if (taskRepository.hasDigestBeenSent(digestKey)) {
+		lastDigestWeek = currentWeek;
+		return false;
 	}
 
 	lastDigestWeek = currentWeek;
@@ -344,8 +386,8 @@ async function pollWeeklyDigest() {
 	container.logger.info(`Sending weekly task digest (ISO week ${currentWeek})`);
 
 	const now = Math.floor(Date.now() / 1000);
-	const weekRange = computePeriodRange('week', now);
-	const monthRange = computePeriodRange('month', now);
+	const weekRange = computePeriodRange('week', now, 'Asia/Jakarta');
+	const monthRange = computePeriodRange('month', now, 'Asia/Jakarta');
 
 	try {
 		const weekTasks = taskRepository.listPendingTasks({
@@ -366,18 +408,22 @@ async function pollWeeklyDigest() {
 				description: 'Good morning! Here is an overview of pending tasks.',
 				footer: `Sent Monday ${nowJakarta.toLocaleString(DateTime.DATE_HUGE)} at 5AM Jakarta time`,
 				mentionLabel: '📋 **Weekly Task Digest**',
+				digestKey,
 				sections: [
 					{ heading: `🗓️ This Week (${weekTasks.length} tasks)`, tasks: weekTasks },
 					{ heading: `📅 This Month (${monthTasks.length} tasks)`, tasks: monthTasks }
 				]
 			});
+			taskRepository.markDigestSent(digestKey);
 			container.logger.info(`Weekly digest sent (week ${currentWeek})`);
+			return true;
 		}
 	} catch (error) {
 		container.logger.error('Failed to send weekly digest:', error);
 		// Reset so it retries next poll cycle (within the same Monday window)
 		lastDigestWeek = null;
 	}
+	return false;
 }
 
 // ──────────────────────────────────────────────
@@ -392,14 +438,22 @@ async function pollWeeklyDigest() {
  */
 async function pollDailyDigest() {
 	if (!clientRef) {
-		return;
+		return false;
 	}
 
 	const nowJakarta = DateTime.now().setZone('Asia/Jakarta');
 
 	// Only send at/after 4:00 AM Jakarta time, once per day (Asia/Jakarta date)
-	if (nowJakarta.hour < 4 || nowJakarta.toISODate() === lastDigestDate) {
-		return;
+	const digestKey = `daily:${nowJakarta.toISODate()}`;
+	const weeklyDigestAlreadySent = nowJakarta.weekday === 1 && lastDigestWeek === nowJakarta.weekNumber;
+	if (nowJakarta.hour < 4 || nowJakarta.toISODate() === lastDigestDate || weeklyDigestSentThisCycle || weeklyDigestAlreadySent) {
+		return false;
+	}
+	// If the persisted daily digest was already sent (from a prior process cycle),
+	// set lastDigestDate so this poll cycle does not resend.
+	if (taskRepository.hasDigestBeenSent(digestKey)) {
+		lastDigestDate = nowJakarta.toISODate();
+		return false;
 	}
 
 	lastDigestDate = nowJakarta.toISODate();
@@ -423,20 +477,35 @@ async function pollDailyDigest() {
 				description: 'Good morning! Here are the tasks for today until the end of this week.',
 				footer: `Sent ${nowJakarta.toLocaleString(DateTime.DATE_HUGE)} at 4AM Jakarta time`,
 				mentionLabel: '📅 **Daily Task Digest**',
+				digestKey,
 				sections: [
 					{ heading: `🗓️ Today → End of Week (${tasks.length} tasks)`, tasks }
 				]
 			});
+			taskRepository.markDigestSent(digestKey);
 			container.logger.info(`Daily digest sent (${lastDigestDate})`);
+			return true;
 		}
 	} catch (error) {
 		container.logger.error('Failed to send daily digest:', error);
 		// Reset so it retries next poll cycle (within the same 4AM window)
 		lastDigestDate = null;
 	}
+	return false;
 }
 
 module.exports = {
 	startReminderService,
-	stopReminderService
+	stopReminderService,
+	// Exported for testing
+	poll,
+	pollReminders,
+	pollWeeklyDigest,
+	pollDailyDigest,
+	_sendDigest,
+	_groupTasksForFields,
+	_formatTaskGroup,
+	_estimateMentionsLength,
+	_buildMentions,
+	_buildMentionContent
 };

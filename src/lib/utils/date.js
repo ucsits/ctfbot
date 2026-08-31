@@ -40,7 +40,7 @@ const FLEXIBLE_FORMATS = [
 	'MM/dd/yyyy HH:mm:ss',
 	'MM-dd-yyyy HH:mm',
 	'M/d/yyyy H:m',
-	'M/d/yyyy H:m:s',
+	'M/d/yyyy H:m:s'
 ];
 
 /**
@@ -166,39 +166,32 @@ function validateEndDateAfterStart(startDate, endDate) {
  * @param {number} now - Current unix timestamp (seconds)
  * @returns {{ start: number, end: number }}
  */
-function computePeriodRange(period, now) {
-	const date = new Date(now * 1000);
-	const startOfDay = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
+function computePeriodRange(period, now, timezone = 'UTC') {
+	const date = DateTime.fromSeconds(now, { zone: timezone });
 
 	switch (period) {
-		case 'week': {
-			// Start of current ISO week (Monday)
-			const dayOfWeek = date.getUTCDay() || 7; // Mon=1 … Sun=7
-			const mondayOffset = (dayOfWeek - 1) * 86400;
-			const weekStart = startOfDay / 1000 - mondayOffset;
-			return { start: weekStart, end: weekStart + 7 * 86400 - 1 };
-		}
-		case 'month': {
-			const monthStart = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1) / 1000;
-			const nextMonth = date.getUTCMonth() + 1;
-			const monthEnd = nextMonth === 12
-				? Date.UTC(date.getUTCFullYear() + 1, 0, 1) / 1000 - 1
-				: Date.UTC(date.getUTCFullYear(), nextMonth, 1) / 1000 - 1;
-			return { start: monthStart, end: monthEnd };
-		}
-		case 'quarter': {
-			const q = Math.floor(date.getUTCMonth() / 3);
-			const qStart = Date.UTC(date.getUTCFullYear(), q * 3, 1) / 1000;
-			const qEnd = Date.UTC(date.getUTCFullYear(), (q + 1) * 3, 1) / 1000 - 1;
-			return { start: qStart, end: qEnd };
-		}
-		case 'year': {
-			const yearStart = Date.UTC(date.getUTCFullYear(), 0, 1) / 1000;
-			const yearEnd = Date.UTC(date.getUTCFullYear() + 1, 0, 1) / 1000 - 1;
-			return { start: yearStart, end: yearEnd };
-		}
-		default:
-			return { start: 0, end: Infinity };
+	case 'week':
+		return {
+			start: date.startOf('week').toUTC().toUnixInteger(),
+			end: date.endOf('week').toUTC().toUnixInteger()
+		};
+	case 'month':
+		return {
+			start: date.startOf('month').toUTC().toUnixInteger(),
+			end: date.endOf('month').toUTC().toUnixInteger()
+		};
+	case 'quarter':
+		return {
+			start: date.startOf('quarter').toUTC().toUnixInteger(),
+			end: date.endOf('quarter').toUTC().toUnixInteger()
+		};
+	case 'year':
+		return {
+			start: date.startOf('year').toUTC().toUnixInteger(),
+			end: date.endOf('year').toUTC().toUnixInteger()
+		};
+	default:
+		return { start: 0, end: Infinity };
 	}
 }
 

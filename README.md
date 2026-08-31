@@ -36,9 +36,12 @@ powered by [Luce](https://github.com/ucsits/Luce).
 - `/pact` — Manage pacts
 
 ### Task Commands
-- `/task add` — Create a new task (title, description, assignee, deadline)
+- `/task add` — Create a new task (title, description, assignee, deadline, optional timezone)
 - `/task list [period]` — View remaining tasks for this week/month/quarter/year
 - `/task done` — Mark a task as completed
+- `/task cancel` — Confirm and cancel a pending task, removing its reminders
+
+Task reports use Asia/Jakarta calendar boundaries. Large lists are split into multiple responses, and cancellation requires `confirm: True`.
 
 ### Reputation Commands
 - `/rep [downvote]` — Give +1 or -1 rep (must reply to someone's message; response is ephemeral)
@@ -234,6 +237,8 @@ Created when a user runs `/task done`.
   "type": "task_done",
   "v": 1,
   "taskId": "a1b2c3d4-...",
+  "title": "Implement login page",
+  "assignedTo": "123456789012345678",
   "completedBy": "123456789012345678"
 }
 ```
@@ -244,6 +249,32 @@ Created when a user runs `/task done`.
 | `v`           | `number` | Schema version (currently `1`)|
 | `taskId`      | `string` | UUID of the completed task    |
 | `completedBy` | `string` | Discord user ID of completer  |
+| `title` | `string` | Task title, for recognizable audit events |
+| `assignedTo` | `string` | Discord user ID of assignee |
+
+### 🗑️ Task Cancellation (`type: "task_cancel"`)
+
+Created when a user runs `/task cancel confirm:True`.
+
+```json
+{
+  "type": "task_cancel",
+  "v": 1,
+  "taskId": "a1b2c3d4-...",
+  "title": "Implement login page",
+  "assignedTo": "123456789012345678",
+  "cancelledBy": "987654321098765432"
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `type` | `string` | Always `"task_cancel"` |
+| `v` | `number` | Schema version (currently `1`) |
+| `taskId` | `string` | UUID of the cancelled task |
+| `title` | `string` | Task title |
+| `assignedTo` | `string` | Discord user ID of assignee |
+| `cancelledBy` | `string` | Discord user ID of canceller |
 
 ### 👍 Reputation (`type: "rep"`)
 
@@ -407,8 +438,14 @@ your parser.
 ## Reminder System
 
 A background service (`src/services/reminder.js`) polls every 30 seconds for
-unsent task reminders. When a reminder is due (set to 1 hour before the task
-deadline), it sends a message to the channel ID `1524933314119467200`.
+unsent task reminders. Reminders are sent to `1524933314119467200` one hour
+before the deadline and at 09:00 Asia/Jakarta on the day before the deadline
+when those times are still in the future. Failed sends remain retryable.
+
+Daily digests run after 04:00 Asia/Jakarta and weekly digests run Monday after
+05:00 Asia/Jakarta; Monday sends avoid redundant notifications. Digest ranges
+and task reports use Asia/Jakarta calendar boundaries, and empty results are
+explicitly reported.
 
 **Flow:**
 1. `/task add` → creates blockchain block + DB row + reminder schedule
