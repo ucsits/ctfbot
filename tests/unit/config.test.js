@@ -104,4 +104,41 @@ describe('Config Module', () => {
 			expect(config.node.isDevelopment).toBe(false);
 		});
 	});
+
+	describe('google', () => {
+		it('should return false for enabled when not set', () => {
+			delete process.env.GOOGLE_CALENDAR_ENABLED;
+			expect(config.google.enabled).toBe(false);
+		});
+
+		it('should return true for enabled when set to true', () => {
+			process.env.GOOGLE_CALENDAR_ENABLED = 'true';
+			expect(config.google.enabled).toBe(true);
+		});
+
+		it('should return clientId from env', () => {
+			process.env.GOOGLE_CLIENT_ID = 'my-client';
+			expect(config.google.clientId).toBe('my-client');
+		});
+
+		it('should return empty string for clientId when not set', () => {
+			delete process.env.GOOGLE_CLIENT_ID;
+			expect(config.google.clientId).toBe('');
+		});
+
+		it('should return clientSecret from env', () => {
+			process.env.GOOGLE_CLIENT_SECRET = 'my-secret';
+			expect(config.google.clientSecret).toBe('my-secret');
+		});
+
+		it('should return refreshToken from env', () => {
+			process.env.GOOGLE_REFRESH_TOKEN = 'rt-abc';
+			expect(config.google.refreshToken).toBe('rt-abc');
+		});
+
+		it('should return calendarId from env', () => {
+			process.env.GOOGLE_CALENDAR_ID = 'cal@group.calendar.google.com';
+			expect(config.google.calendarId).toBe('cal@group.calendar.google.com');
+		});
+	});
 });

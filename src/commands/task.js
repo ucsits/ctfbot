@@ -10,6 +10,24 @@ const { ensureGovernanceChannelReply } = require('../lib/middleware/ensureGovern
 const { resolveTaskCandidates, MIN_FUZZY_SCORE } = require('../lib/utils/fuzzyMatch');
 const constants = require('../lib/constants/config');
 
+// Lazy-loaded calendar sync service — only loaded when GOOGLE_CALENDAR_ENABLED
+// is true, so there is no calendar import / side effect when the feature is off.
+let _calendarSync = null;
+function _syncService() {
+	if (_calendarSync === null && constants.GOOGLE_CALENDAR_ENABLED) {
+		_calendarSync = require('../services/calendarSync');
+	}
+	return _calendarSync;
+}
+
+/**
+ * Append a "Google Calendar synced" suffix to a message when the sync feature
+ * is enabled, indicating the task was mirrored to the shared calendar.
+ */
+function _calendarNote() {
+	return constants.GOOGLE_CALENDAR_ENABLED ? '\n\n📅 *Synced to Google Calendar*' : '';
+}
+
 // Custom ID namespaces for the task confirmation buttons handled by
 // src/listeners/interactionCreate.js. Format: <namespace>:<taskId>[:<score>]
 const TASK_DONE_IDS = {
@@ -275,6 +293,15 @@ class TaskCommand extends Command {
 				});
 			}
 
+			// 5. Push to Google Calendar (best-effort, never blocks the response)
+			const sync = _syncService();
+			if (sync) {
+				sync.pushTaskUpdate(
+					{ task_id: taskId, title, description, assigned_to: assignTo.id, deadline: deadlineUnix, calendar_event_id: null },
+					'create'
+				).catch(err => this.container.logger.warn(`Calendar push failed for new task ${taskId}: ${err.message}`));
+			}
+
 			const embed = new EmbedBuilder()
 				.setColor(0x00ff00)
 				.setTitle('✅ Task Created')
@@ -289,6 +316,10 @@ class TaskCommand extends Command {
 
 			if (description) {
 				embed.addFields({ name: 'Description', value: description.slice(0, 1024), inline: false });
+			}
+
+			if (constants.GOOGLE_CALENDAR_ENABLED) {
+				embed.addFields({ name: 'Google Calendar', value: '📅 Synced to shared calendar', inline: false });
 			}
 
 			const interpretation = formatDateInterpretation(deadlineStr, timezone, deadlineDate);
@@ -568,7 +599,13 @@ class TaskCommand extends Command {
 				return '⚠️ This task was already updated by another action; no completion was recorded.';
 			}
 
-			return { content: `✅ Task **${task.title}** marked as done!` };
+			// Push to Google Calendar (best-effort)
+			const sync = _syncService();
+			if (sync) {
+				sync.pushTaskUpdate(task, 'delete').catch(err => this.container.logger.warn(`Calendar push failed for done task ${task.task_id}: ${err.message}`));
+			}
+
+			return { content: `✅ Task **${task.title}** marked as done!${_calendarNote()}` };
 		} catch (error) {
 			this.container.logger.error('Error completing task:', error);
 			// Release the transition claim so the task is not blocked until the
@@ -613,7 +650,13 @@ class TaskCommand extends Command {
 				return '⚠️ This task was already updated by another action; no cancellation was recorded.';
 			}
 
-			return { content: `🗑️ Task **${task.title}** has been cancelled and removed from the pending list.` };
+			// Push to Google Calendar (best-effort)
+			const sync = _syncService();
+			if (sync) {
+				sync.pushTaskUpdate(task, 'cancel').catch(err => this.container.logger.warn(`Calendar push failed for cancelled task ${task.task_id}: ${err.message}`));
+			}
+
+			return { content: `🗑️ Task **${task.title}** has been cancelled and removed from the pending list.${_calendarNote()}` };
 		} catch (error) {
 			this.container.logger.error('Error cancelling task:', error);
 			// Release the transition claim so the task is not blocked until the

@@ -1,5 +1,6 @@
 const { Listener } = require('@sapphire/framework');
 const { startReminderService } = require('../services/reminder');
+const { startCalendarSyncService } = require('../services/calendarSync');
 
 class ReadyListener extends Listener {
 	constructor(context, options) {
@@ -16,6 +17,9 @@ class ReadyListener extends Listener {
 
 		// Start background reminder service
 		startReminderService(client);
+
+		// Start background calendar sync service
+		startCalendarSyncService(client);
 	}
 }
 

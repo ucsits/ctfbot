@@ -74,6 +74,24 @@ const config = {
 		get isEnvConfigured() {
 			return this.ids.length > 0;
 		}
+	},
+
+	google: {
+		get enabled() {
+			return process.env.GOOGLE_CALENDAR_ENABLED === 'true';
+		},
+		get clientId() {
+			return process.env.GOOGLE_CLIENT_ID || '';
+		},
+		get clientSecret() {
+			return process.env.GOOGLE_CLIENT_SECRET || '';
+		},
+		get refreshToken() {
+			return process.env.GOOGLE_REFRESH_TOKEN || '';
+		},
+		get calendarId() {
+			return process.env.GOOGLE_CALENDAR_ID || '';
+		}
 	}
 };
 

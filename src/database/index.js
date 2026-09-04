@@ -11,6 +11,7 @@ const taskRepository = require('./repositories/task.repository');
 const reputationRepository = require('./repositories/reputation.repository');
 const documentRepository = require('./repositories/document.repository');
 const activityRepository = require('./repositories/activity.repository');
+const calendarRepository = require('./repositories/calendar.repository');
 
 function initDatabase() {
 	const db = getConnection();
@@ -109,5 +110,6 @@ module.exports = {
 	taskRepository,
 	reputationRepository,
 	documentRepository,
-	activityRepository
+	activityRepository,
+	calendarRepository
 };
