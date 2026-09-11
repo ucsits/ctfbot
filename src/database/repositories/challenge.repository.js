@@ -1,4 +1,4 @@
-const { getConnection } = require('../connection');
+const { getConnection, runInTransaction } = require('../connection');
 
 const challengeOperations = {
 	upsertChallenge: (data) => {
@@ -92,25 +92,31 @@ const challengeOperations = {
 			WHERE s.user_id = ? AND c.ctf_id = ?
 		`).all(pendingUserId, ctfId);
 
-		let transferred = 0;
-		let dropped = 0;
+		// The whole transfer is one transaction: every pending solve is claimed
+		// or none is, so a failure partway through cannot leave a partially
+		// migrated solve set behind. A UNIQUE collision is expected (the discord
+		// user already solved it) and is handled by dropping that one row.
+		return runInTransaction(() => {
+			let transferred = 0;
+			let dropped = 0;
 
-		for (const solve of pendingSolves) {
-			try {
-				db.prepare('UPDATE ctf_challenge_solves SET user_id = ?, ctfd_username = NULL WHERE id = ?')
-					.run(discordUserId, solve.id);
-				transferred++;
-			} catch (err) {
-				if (err.message.includes('UNIQUE constraint')) {
-					db.prepare('DELETE FROM ctf_challenge_solves WHERE id = ?').run(solve.id);
-					dropped++;
-				} else {
-					throw err;
+			for (const solve of pendingSolves) {
+				try {
+					db.prepare('UPDATE ctf_challenge_solves SET user_id = ?, ctfd_username = NULL WHERE id = ?')
+						.run(discordUserId, solve.id);
+					transferred++;
+				} catch (err) {
+					if (err.message.includes('UNIQUE constraint')) {
+						db.prepare('DELETE FROM ctf_challenge_solves WHERE id = ?').run(solve.id);
+						dropped++;
+					} else {
+						throw err;
+					}
 				}
 			}
-		}
 
-		return { transferred, dropped };
+			return { transferred, dropped };
+		});
 	},
 
 	deleteChallenge: (challengeId) => {

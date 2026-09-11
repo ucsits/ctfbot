@@ -2,6 +2,7 @@ const { Command } = require('@sapphire/framework');
 const { EmbedBuilder } = require('discord.js');
 const { getIdHints } = require('../lib/utils');
 const { ctfOperations, registrationOperations, challengeOperations } = require('../database');
+const { runInTransaction } = require('../database/connection');
 const { ensureCTFChannelReply } = require('../lib/middleware/ensureCTFChannel');
 
 class RegisterCTFCommand extends Command {
@@ -90,28 +91,38 @@ class RegisterCTFCommand extends Command {
 				this.container.logger.info(`Skipping CTFd verification for ${username} - no API token configured`);
 			}
 
-			// Store registration in database
+			// Store the registration and claim any pending CTFd solves in ONE
+			// transaction. Registering without claiming the solves would leave them
+			// orphaned under the ctfd: id, so the two must commit or roll back
+			// together. transferPendingSolves opens its own (nested) transaction,
+			// which better-sqlite3 promotes to a savepoint.
+			let pendingSolvesResult = null;
 			try {
-				registrationOperations.registerUser({
-					ctf_id: ctf.id,
-					user_id: userId,
-					username: username,
-					team_name: teamName || ctfdData?.teamName || null,
-					ctfd_user_id: ctfdData?.userId || null,
-					ctfd_team_name: ctfdData?.teamName || null
+				runInTransaction(() => {
+					registrationOperations.registerUser({
+						ctf_id: ctf.id,
+						user_id: userId,
+						username: username,
+						team_name: teamName || ctfdData?.teamName || null,
+						ctfd_user_id: ctfdData?.userId || null,
+						ctfd_team_name: ctfdData?.teamName || null
+					});
+
+					if (ctfdData?.userId) {
+						pendingSolvesResult = challengeOperations.transferPendingSolves(
+							ctf.id,
+							ctfdData.userId,
+							userId
+						);
+					}
 				});
 				this.container.logger.info(`Registered ${userTag} for CTF "${ctf.ctf_name}" (team: ${teamName || ctfdData?.teamName || 'individual'})`);
+				if (pendingSolvesResult && pendingSolvesResult.transferred > 0) {
+					this.container.logger.info(`Transferred ${pendingSolvesResult.transferred} pending solves for ${username}`);
+				}
 			} catch (dbError) {
 				this.container.logger.error('Failed to store registration:', dbError);
 				return interaction.editReply('Failed to register. Please try again later.');
-			}
-
-			let pendingSolvesResult = null;
-			if (ctfdData?.userId) {
-				pendingSolvesResult = challengeOperations.transferPendingSolves(ctf.id, ctfdData.userId, userId);
-				if (pendingSolvesResult.transferred > 0) {
-					this.container.logger.info(`Transferred ${pendingSolvesResult.transferred} pending solves for ${username}`);
-				}
 			}
 
 			const embed = new EmbedBuilder()
