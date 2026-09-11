@@ -262,22 +262,37 @@ class StoreInteractionListener extends Listener {
 	async _buyWithAp(interaction, slug) {
 		await interaction.deferReply({ ephemeral: true });
 
+		// The payment buttons are one-shot: drop them as soon as this handler
+		// owns the interaction so the same message cannot be clicked again.
+		await interaction.message.edit({ components: [] }).catch(() => {});
+
 		const item = activityRepository.getStoreItemBySlug(slug);
 		if (!item) {
 			return interaction.editReply('❌ That item is no longer available.');
 		}
 
-		const balance = activityRepository.getBalance(interaction.user.id);
-		if (balance < item.ap_price) {
+		const purchaseId = randomUUID();
+
+		// 1. Reserve the points and the pending purchase row in one transaction.
+		// This ordering is the fix: no block is anchored until the spend has
+		// actually committed, so a rejected reservation can no longer leave an
+		// orphan "completed purchase" block on the chain.
+		const newBalance = activityRepository.reserveApPurchase({
+			purchaseId,
+			userId: interaction.user.id,
+			itemId: item.id,
+			apCost: item.ap_price
+		});
+
+		if (newBalance === null) {
+			const balance = activityRepository.getBalance(interaction.user.id);
 			return interaction.editReply(
 				`❌ You need **${item.ap_price} AP** but you only have **${balance} AP**. Earn more activity points first!`
 			);
 		}
 
 		try {
-			const purchaseId = randomUUID();
-
-			// 1. Blockchain
+			// 2. Blockchain
 			const data = JSON.stringify({
 				type: 'ap_purchase',
 				v: 1,
@@ -289,18 +304,8 @@ class StoreInteractionListener extends Listener {
 			});
 			const block = await luce.appendBlock({ author: interaction.user.id, data });
 
-			// 2. DB — spend the points and record the completed purchase atomically
-			const newBalance = activityRepository.completeApPurchase({
-				purchaseId,
-				userId: interaction.user.id,
-				itemId: item.id,
-				apCost: item.ap_price,
-				blockHeight: block.height
-			});
-
-			if (newBalance === null) {
-				return interaction.editReply('❌ Insufficient activity points.');
-			}
+			// 3. Stamp the confirmed height on the purchase and on its ledger row.
+			activityRepository.finalizeApPurchase({ purchaseId, blockHeight: block.height });
 
 			const embed = new EmbedBuilder()
 				.setColor(0x00ff00)
@@ -322,6 +327,9 @@ class StoreInteractionListener extends Listener {
 			return interaction.editReply({ embeds: [embed], files: [{ name: 'gallery.png', attachment: poster }] });
 		} catch (error) {
 			this.container.logger.error('Error buying with AP:', error);
+			// Nothing usable was anchored, so hand the points back instead of
+			// leaving the user debited for a purchase that never happened.
+			activityRepository.releaseApPurchase({ purchaseId });
 			return interaction.editReply('❌ Purchase failed. Blockchain error: ' + error.message);
 		}
 	}
@@ -333,15 +341,31 @@ class StoreInteractionListener extends Listener {
 	async _buyWithRp(interaction, slug) {
 		await interaction.deferReply({ ephemeral: true });
 
+		await interaction.message.edit({ components: [] }).catch(() => {});
+
 		const item = activityRepository.getStoreItemBySlug(slug);
 		if (!item) {
 			return interaction.editReply('❌ That item is no longer available.');
 		}
 
-		try {
-			const purchaseId = randomUUID();
+		const purchaseId = randomUUID();
 
-			// 1. Blockchain
+		// 1. Create the pending purchase row BEFORE anchoring, so a block can
+		// never exist for a purchase that was never recorded. The row is the
+		// source of truth; the block is anchored against it.
+		activityRepository.createPurchase({
+			id: purchaseId,
+			userId: interaction.user.id,
+			itemId: item.id,
+			paymentMethod: 'rp',
+			status: 'pending',
+			costAp: 0,
+			costRp: item.rp_price,
+			blockHeight: null
+		});
+
+		try {
+			// 2. Blockchain
 			const data = JSON.stringify({
 				type: 'ap_purchase',
 				v: 1,
@@ -353,17 +377,8 @@ class StoreInteractionListener extends Listener {
 			});
 			const block = await luce.appendBlock({ author: interaction.user.id, data });
 
-			// 2. DB — create pending purchase
-			activityRepository.createPurchase({
-				id: purchaseId,
-				userId: interaction.user.id,
-				itemId: item.id,
-				paymentMethod: 'rp',
-				status: 'pending',
-				costAp: 0,
-				costRp: item.rp_price,
-				blockHeight: block.height
-			});
+			// 3. Stamp the anchoring height onto the pending purchase.
+			activityRepository.setPurchaseBlockHeight({ id: purchaseId, blockHeight: block.height });
 
 			const embed = new EmbedBuilder()
 				.setColor(0xffaa00)
@@ -395,6 +410,8 @@ class StoreInteractionListener extends Listener {
 			});
 		} catch (error) {
 			this.container.logger.error('Error buying with Rp:', error);
+			// No usable pending purchase means no phantom order: remove it.
+			activityRepository.deletePendingPurchase(purchaseId);
 			return interaction.editReply('❌ Purchase failed. Blockchain error: ' + error.message);
 		}
 	}

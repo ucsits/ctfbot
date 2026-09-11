@@ -97,6 +97,16 @@ function initDatabase() {
 	} else {
 		dbLogger.info('All migrations up to date');
 	}
+
+	// Crash recovery, run after migrations so the purchases table exists. An AP
+	// purchase reservation is written before its block is anchored, so if the
+	// process died in between the points are still debited and the purchase is
+	// still pending. Release any reservation old enough that no in-flight
+	// request could still own it.
+	const releasedReservations = activityRepository.releaseStaleApReservations();
+	if (releasedReservations > 0) {
+		dbLogger.warn(`Released ${releasedReservations} stale AP purchase reservation(s) on startup`);
+	}
 }
 
 module.exports = {

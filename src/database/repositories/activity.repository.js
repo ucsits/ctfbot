@@ -1,5 +1,5 @@
 /**
- * Activity points repository — database operations for the activity economy.
+ * Activity points repository: database operations for the activity economy.
  * Every AP transaction is backed by a Luce blockchain block; the ledger row
  * records the block height that anchors it.
  * @module database/repositories/activity.repository
@@ -123,6 +123,154 @@ function grantPointsMany({ batchKey, entries, grantedBy, note, blockHeight }) {
 	});
 
 	return tx();
+}
+
+/**
+ * Reserve an AP purchase before anchoring it on the blockchain.
+ *
+ * The purchase used to be anchored first and only then debited, so a double
+ * click appended two "completed purchase" blocks while a single debit went
+ * through, and a crash after the block left a purchase that had no balance
+ * movement. Reserving first reverses the dependency: the debit and the pending
+ * purchase row commit together, and the block is anchored against an existing
+ * reservation. That row is created with block_height 0 and status 'pending'
+ * until finalizeApPurchase stamps the confirmed height.
+ *
+ * @param {object} params
+ * @param {string} params.purchaseId
+ * @param {string} params.userId
+ * @param {number} params.itemId
+ * @param {number} params.apCost
+ * @returns {number|null} new balance, or null when the user cannot afford it
+ */
+function reserveApPurchase({ purchaseId, userId, itemId, apCost }) {
+	const now = Math.floor(Date.now() / 1000);
+
+	const tx = db().transaction(() => {
+		// Ensure a balance row exists so the conditional debit below is
+		// deterministic even for a zero-cost item or a first-time spender.
+		db().prepare(`
+			INSERT INTO activity_balances (user_id, balance)
+			VALUES (?, 0)
+			ON CONFLICT(user_id) DO NOTHING
+		`).run(userId);
+
+		const debit = db().prepare(`
+			UPDATE activity_balances SET balance = balance - ?
+			WHERE user_id = ? AND balance >= ?
+		`).run(apCost, userId, apCost);
+
+		if (debit.changes === 0) {
+			return null;
+		}
+
+		db().prepare(`
+			INSERT INTO activity_ledger (user_id, amount, kind, reference_id, block_height, created_at)
+			VALUES (?, ?, 'purchase', ?, 0, ?)
+		`).run(userId, -apCost, purchaseId, now);
+
+		db().prepare(`
+			INSERT INTO purchases (id, user_id, item_id, payment_method, status, cost_ap, cost_rp, block_height, created_at)
+			VALUES (?, ?, ?, 'ap', 'pending', ?, 0, NULL, ?)
+		`).run(purchaseId, userId, itemId, apCost, now);
+
+		return getBalance(userId);
+	});
+
+	return tx();
+}
+
+/**
+ * Mark a reserved AP purchase as completed once its block is anchored.
+ *
+ * @param {object} params
+ * @param {string} params.purchaseId
+ * @param {number} params.blockHeight
+ * @returns {boolean} true when both the purchase and its ledger row were stamped
+ */
+function finalizeApPurchase({ purchaseId, blockHeight }) {
+	const tx = db().transaction(() => {
+		const purchase = db().prepare(`
+			UPDATE purchases SET status = 'completed', block_height = ?
+			WHERE id = ? AND payment_method = 'ap' AND status = 'pending'
+		`).run(blockHeight, purchaseId);
+
+		if (purchase.changes === 0) {
+			return false;
+		}
+
+		db().prepare(`
+			UPDATE activity_ledger SET block_height = ?
+			WHERE reference_id = ? AND kind = 'purchase'
+		`).run(blockHeight, purchaseId);
+
+		return true;
+	});
+
+	return tx();
+}
+
+/**
+ * Roll back a reserved AP purchase, restoring the spent points.
+ *
+ * Used when the blockchain append fails, and by the startup sweep that releases
+ * reservations abandoned by a crash. Only a still-pending AP purchase can be
+ * released, so a completed purchase is never undone.
+ *
+ * @param {object} params
+ * @param {string} params.purchaseId
+ * @returns {boolean} true when a reservation was released
+ */
+function releaseApPurchase({ purchaseId }) {
+	const tx = db().transaction(() => {
+		const purchase = db().prepare(`
+			SELECT id, user_id, cost_ap FROM purchases
+			WHERE id = ? AND payment_method = 'ap' AND status = 'pending'
+		`).get(purchaseId);
+
+		if (!purchase) {
+			return false;
+		}
+
+		db().prepare(`
+			DELETE FROM activity_ledger WHERE reference_id = ? AND kind = 'purchase'
+		`).run(purchaseId);
+		db().prepare('DELETE FROM purchases WHERE id = ?').run(purchaseId);
+
+		// Put the reserved points back. The conditional debit already proved the
+		// cost was covered, so this restore can never take a balance negative.
+		db().prepare('UPDATE activity_balances SET balance = balance + ? WHERE user_id = ?')
+			.run(purchase.cost_ap, purchase.user_id);
+
+		return true;
+	});
+
+	return tx();
+}
+
+/**
+ * Release AP reservations abandoned by a crash, so startup does not strand a
+ * user's points behind a purchase that was never anchored.
+ *
+ * @param {object} [params]
+ * @param {number} [params.olderThanSeconds=900] - age threshold for a reservation
+ * @returns {number} count of released reservations
+ */
+function releaseStaleApReservations({ olderThanSeconds = 900 } = {}) {
+	const cutoff = Math.floor(Date.now() / 1000) - olderThanSeconds;
+	const stale = db().prepare(`
+		SELECT id FROM purchases
+		WHERE payment_method = 'ap' AND status = 'pending' AND created_at < ?
+	`).all(cutoff);
+
+	let released = 0;
+	for (const row of stale) {
+		if (releaseApPurchase({ purchaseId: row.id })) {
+			released++;
+		}
+	}
+
+	return released;
 }
 
 /**
@@ -270,7 +418,7 @@ function listPendingPurchases() {
 		SELECT p.*, s.name AS item_name, s.slug AS item_slug
 		FROM purchases p
 		JOIN store_items s ON s.id = p.item_id
-		WHERE p.status = 'pending'
+		WHERE p.status = 'pending' AND p.payment_method = 'rp'
 		ORDER BY p.created_at ASC
 	`).all();
 }
@@ -314,6 +462,37 @@ function releasePurchaseConfirmation({ id, claimedBy }) {
 		SET confirm_claim_by = NULL, confirm_claim_until = NULL
 		WHERE id = ? AND confirm_claim_by = ?
 	`).run(id, claimedBy);
+	return result.changes > 0;
+}
+
+/**
+ * Stamp the anchoring block height onto a purchase row that has none yet.
+ *
+ * Used by the Rp flow, which creates the pending row before anchoring.
+ *
+ * @param {object} params
+ * @param {string} params.id
+ * @param {number} params.blockHeight
+ * @returns {boolean} true when a row was stamped
+ */
+function setPurchaseBlockHeight({ id, blockHeight }) {
+	const result = db().prepare(
+		'UPDATE purchases SET block_height = ? WHERE id = ? AND block_height IS NULL'
+	).run(blockHeight, id);
+	return result.changes > 0;
+}
+
+/**
+ * Delete a still-pending purchase, used when anchoring its block failed so no
+ * phantom purchase is left behind.
+ *
+ * @param {string} id
+ * @returns {boolean} true when a row was removed
+ */
+function deletePendingPurchase(id) {
+	const result = db().prepare(
+		'DELETE FROM purchases WHERE id = ? AND status = \'pending\''
+	).run(id);
 	return result.changes > 0;
 }
 
@@ -365,6 +544,12 @@ module.exports = {
 	createPurchase,
 	getPurchase,
 	listPendingPurchases,
+	reserveApPurchase,
+	finalizeApPurchase,
+	releaseApPurchase,
+	releaseStaleApReservations,
+	setPurchaseBlockHeight,
+	deletePendingPurchase,
 	claimPurchaseConfirmation,
 	releasePurchaseConfirmation,
 	confirmPurchase,
