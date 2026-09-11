@@ -1,6 +1,6 @@
 const { Command } = require('@sapphire/framework');
 const { PermissionFlagsBits, EmbedBuilder, ChannelType } = require('discord.js');
-const { getIdHints, parseLocalDateToUTC } = require('../lib/utils');
+const { getIdHints, parseLocalDateToUTC, formatDateInterpretation } = require('../lib/utils');
 const { ctfOperations } = require('../database');
 const config = require('../config');
 const { checkPermissionReply } = require('../lib/middleware/ensurePermission');
@@ -28,7 +28,7 @@ class CreateCTFCommand extends Command {
 				.addStringOption(option =>
 					option
 						.setName('ctf_date')
-						.setDescription('CTF start date — DD-MM-YYYY HH:MM or Unix timestamp (@time compatible)')
+						.setDescription('CTF start date: DD-MM-YYYY HH:MM or Unix timestamp (@time compatible)')
 						.setRequired(true)
 				)
 				.addStringOption(option =>
@@ -52,7 +52,7 @@ class CreateCTFCommand extends Command {
 				.addStringOption(option =>
 					option
 						.setName('ctf_end_date')
-						.setDescription('CTF end date — DD-MM-YYYY HH:MM or Unix timestamp (@time compatible, defaults +24h)')
+						.setDescription('CTF end date: DD-MM-YYYY HH:MM or Unix timestamp (@time compatible, defaults +24h)')
 						.setRequired(false)
 				)
 				.addStringOption(option =>
@@ -96,22 +96,70 @@ class CreateCTFCommand extends Command {
 
 		const options = this.parseOptions(interaction);
 
+		// Track what has been created so a later failure can be compensated rather
+		// than leaving an orphan channel, orphan event, or both behind.
+		let ctfChannel = null;
+		let scheduledEvent = null;
+
 		try {
 			const dates = this.parseDates(options);
 			this.validateDates(dates);
 
 			const category = this.getCategory(interaction);
 			const channelName = this.formatChannelName(options.ctfName);
-			const ctfChannel = await this.createChannel(interaction, channelName, category, options);
-			const scheduledEvent = await this.createEvent(interaction, options, dates);
+
+			ctfChannel = await this.createChannel(interaction, channelName, category, options);
+			scheduledEvent = await this.createEvent(interaction, options, dates);
+
 			await this.sendWelcomeMessage(ctfChannel, options, dates, scheduledEvent);
+
+			// The success reply must be unreachable until the CTF is persisted.
+			// saveToDatabase rethrows on failure, so a database error lands in the
+			// catch below and triggers the rollback.
 			await this.saveToDatabase(interaction, ctfChannel, scheduledEvent, options, dates);
 
 			return this.sendConfirmation(interaction, ctfChannel, scheduledEvent, options);
 
 		} catch (error) {
 			this.container.logger.error('Error creating CTF:', error);
-			return interaction.editReply('Failed to create CTF. Please check permissions and try again.');
+			await this._compensateCreate(interaction, ctfChannel, scheduledEvent);
+			return interaction.editReply(
+				'Failed to create CTF. The partial setup was rolled back. Please check permissions and try again.'
+			);
+		}
+	}
+
+	/**
+	 * Undo whatever /createctf managed to create before it failed.
+	 *
+	 * Without this the command could fail and still leave a channel, a scheduled
+	 * event, and a welcome message in place with no CTF row behind them, while the
+	 * admin had no way to clean up from Discord. Each step is guarded so a missing
+	 * object or a Discord error cannot mask the original failure.
+	 *
+	 * @param {import('discord.js').ChatInputCommandInteraction} interaction
+	 * @param {object|null} ctfChannel
+	 * @param {object|null} scheduledEvent
+	 */
+	async _compensateCreate(interaction, ctfChannel, scheduledEvent) {
+		if (scheduledEvent) {
+			try {
+				await interaction.guild.scheduledEvents.delete(scheduledEvent.id);
+				this.container.logger.info(`Rolled back scheduled event ${scheduledEvent.id}`);
+			} catch (error) {
+				this.container.logger.warn(
+					`Could not roll back scheduled event ${scheduledEvent.id}: ${error.message}`
+				);
+			}
+		}
+
+		if (ctfChannel) {
+			try {
+				await ctfChannel.delete('CTF creation failed; rolling back');
+				this.container.logger.info(`Rolled back channel ${ctfChannel.id}`);
+			} catch (error) {
+				this.container.logger.warn(`Could not roll back channel ${ctfChannel.id}: ${error.message}`);
+			}
 		}
 	}
 
@@ -244,27 +292,25 @@ class CreateCTFCommand extends Command {
 	}
 
 	async saveToDatabase(interaction, channel, event, options, dates) {
-		try {
-			const ctfId = ctfOperations.createCTF({
-				guild_id: interaction.guild.id,
-				channel_id: channel.id,
-				event_id: event.id,
-				ctf_name: options.ctfName,
-				ctf_base_url: options.ctfBaseUrl,
-				ctf_date: dates.eventDate.toISOString(),
-				description: options.description,
-				banner_url: options.banner?.url,
-				api_token: options.apiToken,
-				team_mode: options.teamMode ? 1 : 0,
-				created_by: interaction.user.id
-			});
-			this.container.logger.info(`Stored CTF "${options.ctfName}" in database (ID: ${ctfId})`);
-		} catch (dbError) {
-			this.container.logger.error('Failed to store CTF in database:', dbError);
-			await channel.send({
-				content: 'Warning: CTF was created but failed to register in the database. Error: ' + dbError.message
-			});
-		}
+		// Deliberately NOT wrapped in try/catch: a failure here must abort the
+		// command so the catch in chatInputRun can roll the Discord objects back.
+		// Swallowing it used to let the command report "CTF Created Successfully"
+		// with no database row behind it.
+		const ctfId = ctfOperations.createCTF({
+			guild_id: interaction.guild.id,
+			channel_id: channel.id,
+			event_id: event.id,
+			ctf_name: options.ctfName,
+			ctf_base_url: options.ctfBaseUrl,
+			ctf_date: dates.eventDate.toISOString(),
+			description: options.description,
+			banner_url: options.banner?.url,
+			api_token: options.apiToken,
+			team_mode: options.teamMode ? 1 : 0,
+			created_by: interaction.user.id
+		});
+		this.container.logger.info(`Stored CTF "${options.ctfName}" in database (ID: ${ctfId})`);
+		return ctfId;
 	}
 
 	sendConfirmation(interaction, channel, event, options) {

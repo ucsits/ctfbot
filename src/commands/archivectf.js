@@ -84,13 +84,32 @@ class ArchiveCTFCommand extends Command {
 				this.container.logger.info(`Created archive category: ${archiveCategoryName} (ID: ${archiveCategory.id})`);
 			}
 
+			// Remember where the channel came from so a database failure can be
+			// undone and the visible state keeps matching the database.
+			const originalParentId = channel.parentId;
+
 			// Move channel to archive category
 			await channel.setParent(archiveCategory.id, {
 				reason: `CTF archived by ${interaction.user.tag}`
 			});
 
-			// Mark as archived in database
-			ctfOperations.archiveCTF(channel.id);
+			// Mark as archived in database. If this throws, put the channel back so
+			// Discord does not show it archived while the database says otherwise.
+			try {
+				ctfOperations.archiveCTF(channel.id);
+			} catch (dbError) {
+				this.container.logger.error('Failed to mark CTF archived; restoring channel:', dbError);
+				try {
+					await channel.setParent(originalParentId, {
+						reason: 'Archive failed; restoring original category'
+					});
+				} catch (restoreError) {
+					this.container.logger.error('Failed to restore channel parent:', restoreError);
+				}
+				return interaction.editReply(
+					'Failed to archive CTF. The channel was returned to its original category.'
+				);
+			}
 
 			const embed = new EmbedBuilder()
 				.setColor(0xFFA500)
