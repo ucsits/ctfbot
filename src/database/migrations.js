@@ -9,6 +9,161 @@ const { getConnection } = require('./connection');
 const { logger } = require('../lib/logger');
 const migrationLogger = logger.child('Migration');
 
+/** Matches a single `ALTER TABLE <table> ADD COLUMN <column>` statement. */
+const ALTER_ADD_COLUMN = /^ALTER\s+TABLE\s+["`[]?(\w+)["`\]]?\s+ADD\s+COLUMN\s+["`[]?(\w+)["`\]]?/i;
+
+/**
+ * Split a migration file into individual SQL statements. Strips `--` line
+ * comments and `/* *\/` block comments, and keeps semicolons inside
+ * single-quoted string literals from being treated as separators (including
+ * the SQLite escaped-quote form `''`).
+ *
+ * @param {string} sql - Raw migration file contents
+ * @returns {string[]} Statements, trimmed, without the trailing semicolon
+ */
+function splitSqlStatements(sql) {
+	const statements = [];
+	let current = '';
+	let inSingleQuote = false;
+	let inLineComment = false;
+	let inBlockComment = false;
+
+	for (let i = 0; i < sql.length; i++) {
+		const char = sql[i];
+		const next = sql[i + 1];
+
+		if (inLineComment) {
+			if (char === '\n') {
+				inLineComment = false;
+			}
+			continue;
+		}
+
+		if (inBlockComment) {
+			if (char === '*' && next === '/') {
+				inBlockComment = false;
+				i++;
+			}
+			continue;
+		}
+
+		if (inSingleQuote) {
+			current += char;
+			// `''` is an escaped quote, not the end of the literal
+			if (char === '\'' && next === '\'') {
+				current += next;
+				i++;
+				continue;
+			}
+			if (char === '\'') {
+				inSingleQuote = false;
+			}
+			continue;
+		}
+
+		if (char === '-' && next === '-') {
+			inLineComment = true;
+			i++;
+			continue;
+		}
+		if (char === '/' && next === '*') {
+			inBlockComment = true;
+			i++;
+			continue;
+		}
+		if (char === '\'') {
+			inSingleQuote = true;
+			current += char;
+			continue;
+		}
+		if (char === ';') {
+			if (current.trim()) {
+				statements.push(current.trim());
+			}
+			current = '';
+			continue;
+		}
+
+		current += char;
+	}
+
+	if (current.trim()) {
+		statements.push(current.trim());
+	}
+
+	return statements;
+}
+
+/** True when `table` already has a column named `column` (case-insensitive). */
+function columnExists(db, table, column) {
+	return db
+		.prepare(`PRAGMA table_info(${table})`)
+		.all()
+		.some(info => info.name.toLowerCase() === column.toLowerCase());
+}
+
+/** True when a table (or view) named `table` exists. */
+function tableExists(db, table) {
+	return Boolean(
+		db.prepare('SELECT 1 FROM sqlite_master WHERE type = \'table\' AND name = ?').get(table)
+	);
+}
+
+/**
+ * Re-apply a migration that failed with `duplicate column name` by skipping the
+ * `ALTER TABLE ... ADD COLUMN` statements whose column already exists and running
+ * everything else. This lets a single already-present column stop aborting the
+ * rest of the migration chain (and the columns the migration was supposed to add).
+ *
+ * @param {object} db - better-sqlite3 database handle
+ * @param {string} sql - Raw migration SQL that failed
+ * @returns {{ok: boolean, reason: string}}
+ */
+function recoverDuplicatedColumns(db, sql) {
+	const statements = splitSqlStatements(sql);
+	// Match against comment-stripped SQL so a table/column name mentioned in a
+	// `--` comment cannot be mistaken for a declaration.
+	const cleaned = statements.join(';\n');
+	const alterColumns = [...cleaned.matchAll(/ALTER TABLE\s+(\w+)\s+ADD COLUMN\s+(\w+)/gi)];
+
+	// Only column-add migrations are safe to replay: a partially applied
+	// INSERT/SELECT migration could duplicate rows, so refuse to guess there.
+	if (alterColumns.length === 0) {
+		return { ok: false, reason: 'no ALTER TABLE ADD COLUMN statements to recover' };
+	}
+
+	const createTables = [...cleaned.matchAll(/CREATE TABLE IF NOT EXISTS\s+(\w+)/gi)];
+
+	try {
+		db.transaction(() => {
+			for (const statement of statements) {
+				const match = statement.match(ALTER_ADD_COLUMN);
+				if (match && columnExists(db, match[1], match[2])) {
+					continue;
+				}
+				db.exec(statement);
+			}
+
+			const missing = [
+				...alterColumns
+					.filter(([, table, column]) => !columnExists(db, table, column))
+					.map(([, table, column]) => `${table}.${column}`),
+				...createTables
+					.filter(([, table]) => !tableExists(db, table))
+					.map(([, table]) => table)
+			];
+
+			if (missing.length > 0) {
+				throw new Error(`recovery left schema incomplete: ${missing.join(', ')}`);
+			}
+		})();
+
+		return { ok: true, reason: 'already-present columns skipped, remaining schema applied' };
+	} catch (recoveryError) {
+		return { ok: false, reason: recoveryError.message };
+	}
+}
+
 /**
  * Run all pending migrations
  *
@@ -67,24 +222,23 @@ function runMigrations(
 			applied.push(name);
 			migrationLogger.info(`Applied migration: ${name}`);
 		} catch (error) {
-			// Recover from inline-schema duplicates only after verifying every
-			// declared table and column exists. This avoids hiding partial upgrades.
+			// Recover from inline-schema duplicates. On a drifted database a
+			// migration can fail on a column that already exists while other
+			// columns it declares are still missing (e.g. migration 005 when
+			// team_name exists but team_mode does not). Re-run the migration
+			// with the already-present ALTER statements filtered out so the
+			// remaining columns are still added and the chain never aborts.
 			if (error.message && error.message.includes('duplicate column name')) {
 				const migrationSql = fs.readFileSync(path.join(migrationsDir, file), 'utf8');
-				const alterColumns = [...migrationSql.matchAll(/ALTER TABLE\s+(\w+)\s+ADD COLUMN\s+(\w+)/gi)];
-				const createTables = [...migrationSql.matchAll(/CREATE TABLE IF NOT EXISTS\s+(\w+)/gi)];
-				const columnsPresent = alterColumns.every(([, table, column]) =>
-					db.prepare(`PRAGMA table_info(${table})`).all().some(info => info.name.toLowerCase() === column.toLowerCase())
-				);
-				const tablesPresent = createTables.every(([, table]) =>
-					db.prepare('SELECT 1 FROM sqlite_master WHERE type = \'table\' AND name = ?').get(table)
-				);
-				if (columnsPresent && tablesPresent) {
-					migrationLogger.warn(`Migration ${name}: schema already present, marking as applied`);
+				const recovery = recoverDuplicatedColumns(db, migrationSql);
+				if (recovery.ok) {
+					migrationLogger.warn(`Migration ${name}: ${recovery.reason}`);
 					db.prepare('INSERT OR IGNORE INTO migrations (name) VALUES (?)').run(name);
 					applied.push(name);
 					continue;
 				}
+				migrationLogger.error(`Migration ${name}: recovery failed (${recovery.reason})`);
+				return { applied, skipped, error: recovery.reason };
 			}
 			migrationLogger.error(`Failed to apply migration ${name}`, error);
 			return { applied, skipped, error: error.message };
