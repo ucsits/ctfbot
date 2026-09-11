@@ -276,3 +276,30 @@ describe('regression guards for prior fixes', () => {
 		expect(reminderService).toContain('Asia/Jakarta');
 	});
 });
+
+// ── Task transition anchoring idempotency (H6) ───────────────
+describe('task transition anchoring', () => {
+	it('records the transition before anchoring and skips an existing block', () => {
+		const doneMethod = taskCommand.slice(
+			taskCommand.indexOf('async _executeDone'),
+			taskCommand.indexOf('async _executeCancel')
+		);
+		const cancelMethod = taskCommand.slice(taskCommand.indexOf('async _executeCancel'));
+
+		for (const [method, action] of [[doneMethod, "'done'"], [cancelMethod, "'cancel'"]]) {
+			const beginAt = method.indexOf('beginTaskTransition');
+			const appendAt = method.indexOf('luce.appendBlock');
+			const setAt = method.indexOf('setTaskTransitionBlock');
+
+			expect(beginAt).toBeGreaterThan(-1);
+			expect(appendAt).toBeGreaterThan(-1);
+			expect(setAt).toBeGreaterThan(-1);
+			// The idempotency record is written before the append, and only an
+			// unrecorded height is allowed to reach the blockchain.
+			expect(beginAt).toBeLessThan(appendAt);
+			expect(appendAt).toBeLessThan(setAt);
+			expect(method).toContain('transition.block_height === null');
+			expect(method).toContain('action: ' + action);
+		}
+	});
+});

@@ -80,6 +80,62 @@ function claimTaskTransition({ taskId, actorId, leaseSeconds = 120 }) {
 	return result.changes > 0;
 }
 
+/**
+ * Record that a transition is being attempted, and return its current state.
+ *
+ * The lease from claimTaskTransition serializes the transition itself but not
+ * the blockchain append against the database write. If a block was persisted
+ * and the response was lost, the caller released the lease and a retry appended
+ * a second block for the same transition. This row gives the retry a place to
+ * see that the chain write already happened.
+ *
+ * @param {object} params
+ * @param {string} params.taskId
+ * @param {'done'|'cancel'} params.action
+ * @param {string} params.actorId
+ * @returns {{task_id: string, action: string, actor_id: string|null, block_height: number|null, created_at: number}}
+ */
+function beginTaskTransition({ taskId, action, actorId }) {
+	const now = Math.floor(Date.now() / 1000);
+	db()
+		.prepare(
+			`
+		INSERT OR IGNORE INTO task_transition_blocks (task_id, action, actor_id, block_height, created_at)
+			VALUES (?, ?, ?, NULL, ?)
+		`
+		)
+		.run(taskId, action, actorId, now);
+	return getTaskTransition(taskId, action);
+}
+
+/**
+ * Read the recorded transition row for a task and action, or undefined.
+ */
+function getTaskTransition(taskId, action) {
+	return db()
+		.prepare('SELECT * FROM task_transition_blocks WHERE task_id = ? AND action = ?')
+		.get(taskId, action);
+}
+
+/**
+ * Store the anchored block height for a transition, so a retry can skip the
+ * append. Only fills an unset height.
+ *
+ * @param {object} params
+ * @param {string} params.taskId
+ * @param {'done'|'cancel'} params.action
+ * @param {number} params.blockHeight
+ * @returns {boolean} true when a height was recorded
+ */
+function setTaskTransitionBlock({ taskId, action, blockHeight }) {
+	const result = db()
+		.prepare(
+			'UPDATE task_transition_blocks SET block_height = ? WHERE task_id = ? AND action = ? AND block_height IS NULL'
+		)
+		.run(blockHeight, taskId, action);
+	return result.changes > 0;
+}
+
 function releaseTaskTransition({ taskId, actorId }) {
 	db()
 		.prepare(
@@ -290,6 +346,9 @@ module.exports = {
 	claimDueReminders,
 	claimTaskTransition,
 	releaseTaskTransition,
+	beginTaskTransition,
+	getTaskTransition,
+	setTaskTransitionBlock,
 	markReminderSent,
 	releaseReminder,
 	hasDigestBeenSent,

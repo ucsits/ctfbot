@@ -574,20 +574,36 @@ class TaskCommand extends Command {
 		}
 
 		try {
-			// 1. Write completion to blockchain
-			const data = JSON.stringify({
-				type: 'task_done',
-				v: 1,
+			// 1. Anchor the completion block at most once. beginTaskTransition
+			// records the attempt, so a retry after a lost response can see that
+			// the chain write already happened and skip a duplicate append.
+			const transition = taskRepository.beginTaskTransition({
 				taskId: task.task_id,
-				title: task.title,
-				assignedTo: task.assigned_to,
-				completedBy: interaction.user.id
+				action: 'done',
+				actorId: interaction.user.id
 			});
 
-			await luce.appendBlock({
-				author: interaction.user.id,
-				data
-			});
+			if (transition.block_height === null) {
+				const data = JSON.stringify({
+					type: 'task_done',
+					v: 1,
+					taskId: task.task_id,
+					title: task.title,
+					assignedTo: task.assigned_to,
+					completedBy: interaction.user.id
+				});
+
+				const block = await luce.appendBlock({
+					author: interaction.user.id,
+					data
+				});
+
+				taskRepository.setTaskTransitionBlock({
+					taskId: task.task_id,
+					action: 'done',
+					blockHeight: block.height
+				});
+			}
 
 			// 2. Update DB. A concurrent done/cancel action may have won the race.
 			if (
@@ -625,20 +641,35 @@ class TaskCommand extends Command {
 		}
 
 		try {
-			// 1. Write cancellation to blockchain
-			const data = JSON.stringify({
-				type: 'task_cancel',
-				v: 1,
+			// 1. Anchor the cancellation block at most once. See _executeDone for
+			// why the attempt is recorded before the append.
+			const transition = taskRepository.beginTaskTransition({
 				taskId: task.task_id,
-				title: task.title,
-				assignedTo: task.assigned_to,
-				cancelledBy: interaction.user.id
+				action: 'cancel',
+				actorId: interaction.user.id
 			});
 
-			await luce.appendBlock({
-				author: interaction.user.id,
-				data
-			});
+			if (transition.block_height === null) {
+				const data = JSON.stringify({
+					type: 'task_cancel',
+					v: 1,
+					taskId: task.task_id,
+					title: task.title,
+					assignedTo: task.assigned_to,
+					cancelledBy: interaction.user.id
+				});
+
+				const block = await luce.appendBlock({
+					author: interaction.user.id,
+					data
+				});
+
+				taskRepository.setTaskTransitionBlock({
+					taskId: task.task_id,
+					action: 'cancel',
+					blockHeight: block.height
+				});
+			}
 
 			// 2. Update DB (marks cancelled, removes reminders)
 			if (

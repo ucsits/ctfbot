@@ -321,3 +321,52 @@ describe('createTaskWithReminders', () => {
 		expect(reminders.n).toBe(0);
 	});
 });
+
+// ── Task transition block idempotency (H6) ──────────────────────────────
+// A retry after a lost response must not anchor a second block for the same
+// transition. beginTaskTransition records the attempt; setTaskTransitionBlock
+// records the height, and a non-null height tells the caller to skip the append.
+describe('task transition block idempotency', () => {
+	it('creates one row per (task, action) and returns the same row twice', () => {
+		const first = repo.beginTaskTransition({ taskId: 'task-1', action: 'done', actorId: 'actor-a' });
+		expect(first).toBeTruthy();
+		expect(first.task_id).toBe('task-1');
+		expect(first.action).toBe('done');
+		expect(first.block_height).toBeNull();
+
+		const second = repo.beginTaskTransition({ taskId: 'task-1', action: 'done', actorId: 'actor-b' });
+		// INSERT OR IGNORE: the original actor and the null height are preserved.
+		expect(second.actor_id).toBe('actor-a');
+		expect(second.block_height).toBeNull();
+
+		const rows = db.prepare('SELECT * FROM task_transition_blocks WHERE task_id = ? AND action = ?')
+			.all('task-1', 'done');
+		expect(rows.length).toBe(1);
+	});
+
+	it('tracks done and cancel independently for the same task', () => {
+		repo.beginTaskTransition({ taskId: 'task-2', action: 'done', actorId: 'actor-a' });
+		repo.beginTaskTransition({ taskId: 'task-2', action: 'cancel', actorId: 'actor-a' });
+		const rows = db.prepare('SELECT action FROM task_transition_blocks WHERE task_id = ? ORDER BY action').all('task-2');
+		expect(rows.map(r => r.action)).toEqual(['cancel', 'done']);
+	});
+
+	it('records the block height once and reports it to a retry', () => {
+		expect(repo.setTaskTransitionBlock({ taskId: 'task-1', action: 'done', blockHeight: 1234 })).toBe(true);
+
+		const stored = repo.getTaskTransition('task-1', 'done');
+		expect(stored.block_height).toBe(1234);
+
+		// A second stamp must not overwrite the first anchoring height.
+		expect(repo.setTaskTransitionBlock({ taskId: 'task-1', action: 'done', blockHeight: 9999 })).toBe(false);
+		expect(repo.getTaskTransition('task-1', 'done').block_height).toBe(1234);
+
+		// This is the signal the transition path uses to skip a duplicate append.
+		const retry = repo.beginTaskTransition({ taskId: 'task-1', action: 'done', actorId: 'actor-c' });
+		expect(retry.block_height).toBe(1234);
+	});
+
+	it('returns undefined for a transition that was never attempted', () => {
+		expect(repo.getTaskTransition('never-attempted', 'done')).toBeUndefined();
+	});
+});
