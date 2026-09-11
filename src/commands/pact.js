@@ -13,25 +13,20 @@ class PactCommand extends Command {
 	}
 
 	registerApplicationCommands(registry) {
-		registry.registerChatInputCommand((builder) =>
-			builder
-				.setName(this.name)
-				.setDescription(this.description)
-				.addStringOption(option =>
-					option
-						.setName('name')
-						.setDescription('Your full name')
-						.setRequired(true)
-				)
-				.addStringOption(option =>
-					option
-						.setName('nrp')
-						.setDescription('Your NRP (must be a number)')
-						.setRequired(true)
-				),
-		{
-			idHints: getIdHints(this.name)
-		}
+		registry.registerChatInputCommand(
+			builder =>
+				builder
+					.setName(this.name)
+					.setDescription(this.description)
+					.addStringOption(option =>
+						option.setName('name').setDescription('Your full name').setRequired(true)
+					)
+					.addStringOption(option =>
+						option.setName('nrp').setDescription('Your NRP (must be a number)').setRequired(true)
+					),
+			{
+				idHints: getIdHints(this.name)
+			}
 		);
 	}
 
@@ -52,13 +47,10 @@ class PactCommand extends Command {
 			pactOperations.createPact(userId, name, nrp);
 
 			const embed = new EmbedBuilder()
-				.setColor(0x00FF00)
+				.setColor(0x00ff00)
 				.setTitle('✅ Pact Registered')
 				.setDescription('Your information has been securely saved.')
-				.addFields(
-					{ name: '👤 Name', value: name, inline: true },
-					{ name: '🔢 NRP', value: nrp, inline: true }
-				)
+				.addFields({ name: '👤 Name', value: name, inline: true }, { name: '🔢 NRP', value: nrp, inline: true })
 				.setTimestamp()
 				.setFooter({ text: `User ID: ${userId}` });
 

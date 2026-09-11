@@ -72,7 +72,8 @@ function parseCsv(content) {
 
 	// Detect and skip header row: first cell is a non-numeric column name
 	const firstCell = rows[0][0].toLowerCase();
-	const looksLikeHeader = isNaN(Number(rows[0][0])) &&
+	const looksLikeHeader =
+		isNaN(Number(rows[0][0])) &&
 		(firstCell.includes('id') || firstCell.includes('point') || firstCell.includes('discord'));
 	const dataRows = looksLikeHeader ? rows.slice(1) : rows;
 
@@ -93,19 +94,20 @@ class GiveApBulkCommand extends Command {
 	}
 
 	registerApplicationCommands(registry) {
-		registry.registerChatInputCommand((builder) =>
-			builder
-				.setName(this.name)
-				.setDescription(this.description)
-				.addAttachmentOption(opt =>
-					opt
-						.setName('csv')
-						.setDescription('CSV file with discord_id and points columns')
-						.setRequired(true)
-				),
-		{
-			idHints: getIdHints(this.name)
-		}
+		registry.registerChatInputCommand(
+			builder =>
+				builder
+					.setName(this.name)
+					.setDescription(this.description)
+					.addAttachmentOption(opt =>
+						opt
+							.setName('csv')
+							.setDescription('CSV file with discord_id and points columns')
+							.setRequired(true)
+					),
+			{
+				idHints: getIdHints(this.name)
+			}
 		);
 	}
 
@@ -185,12 +187,13 @@ class GiveApBulkCommand extends Command {
 			}
 
 			const granted = balances.length;
-			const preview = valid.slice(0, 10)
+			const preview = valid
+				.slice(0, 10)
 				.map(e => `<@${e.discord_id}> gets **+${e.points} AP**`)
 				.join('\n');
 
 			const embed = new EmbedBuilder()
-				.setColor(0x9B59B6)
+				.setColor(0x9b59b6)
 				.setTitle('🎯 Bulk Activity Points Granted')
 				.setDescription(
 					`**${granted}** user(s) received a total of **${payload.reduce((s, e) => s + e.points, 0)} AP** from the CSV.`

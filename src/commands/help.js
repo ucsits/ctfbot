@@ -13,9 +13,7 @@ class HelpCommand extends Command {
 	async messageRun(message) {
 		const commands = this.container.stores.get('commands');
 
-		const commandList = commands
-			.map(cmd => `**${cmd.name}** - ${cmd.description}`)
-			.join('\n');
+		const commandList = commands.map(cmd => `**${cmd.name}** - ${cmd.description}`).join('\n');
 
 		return message.reply({
 			content: `📚 **Available Commands:**\n${commandList}`
@@ -23,22 +21,15 @@ class HelpCommand extends Command {
 	}
 
 	registerApplicationCommands(registry) {
-		registry.registerChatInputCommand((builder) =>
-			builder
-				.setName(this.name)
-				.setDescription(this.description),
-		{
+		registry.registerChatInputCommand(builder => builder.setName(this.name).setDescription(this.description), {
 			idHints: getIdHints(this.name)
-		}
-		);
+		});
 	}
 
 	async chatInputRun(interaction) {
 		const commands = this.container.stores.get('commands');
 
-		const commandList = commands
-			.map(cmd => `**${cmd.name}** - ${cmd.description}`)
-			.join('\n');
+		const commandList = commands.map(cmd => `**${cmd.name}** - ${cmd.description}`).join('\n');
 
 		return interaction.reply({
 			content: `📚 **Available Commands:**\n${commandList}`

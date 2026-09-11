@@ -14,25 +14,20 @@ class ChalPtsCommand extends Command {
 	}
 
 	registerApplicationCommands(registry) {
-		registry.registerChatInputCommand((builder) =>
-			builder
-				.setName(this.name)
-				.setDescription(this.description)
-				.addStringOption(option =>
-					option
-						.setName('chalname')
-						.setDescription('Name of the challenge')
-						.setRequired(true)
-				)
-				.addIntegerOption(option =>
-					option
-						.setName('pts')
-						.setDescription('Points for the challenge')
-						.setRequired(true)
-				),
-		{
-			idHints: getIdHints(this.name)
-		}
+		registry.registerChatInputCommand(
+			builder =>
+				builder
+					.setName(this.name)
+					.setDescription(this.description)
+					.addStringOption(option =>
+						option.setName('chalname').setDescription('Name of the challenge').setRequired(true)
+					)
+					.addIntegerOption(option =>
+						option.setName('pts').setDescription('Points for the challenge').setRequired(true)
+					),
+			{
+				idHints: getIdHints(this.name)
+			}
 		);
 	}
 
@@ -66,7 +61,7 @@ class ChalPtsCommand extends Command {
 			challengeOperations.updateChallengePoints(challenge.id, points);
 
 			const embed = new EmbedBuilder()
-				.setColor(0x00FF00)
+				.setColor(0x00ff00)
 				.setTitle('✅ Points Updated')
 				.setDescription(`Points for challenge **${chalName}** have been updated.`)
 				.addFields(
@@ -76,7 +71,6 @@ class ChalPtsCommand extends Command {
 				.setTimestamp();
 
 			await interaction.editReply({ embeds: [embed] });
-
 		} catch (error) {
 			this.container.logger.error(error);
 			return interaction.editReply('❌ An error occurred while updating challenge points.');

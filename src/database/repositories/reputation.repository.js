@@ -16,9 +16,13 @@ const db = () => getConnection();
  */
 function hasGivenRepToday(fromUser) {
 	const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD UTC
-	const row = db().prepare(`
+	const row = db()
+		.prepare(
+			`
 		SELECT COUNT(*) AS cnt FROM reputations WHERE from_user = ? AND date = ?
-	`).get(fromUser, today);
+	`
+		)
+		.get(fromUser, today);
 	return row.cnt > 0;
 }
 
@@ -35,10 +39,14 @@ function hasGivenRepToday(fromUser) {
 function addReputation({ userId, fromUser, amount, reason, blockHeight }) {
 	const now = Math.floor(Date.now() / 1000);
 	const date = new Date().toISOString().slice(0, 10);
-	db().prepare(`
+	db()
+		.prepare(
+			`
 		INSERT INTO reputations (user_id, from_user, amount, reason, date, block_height, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
-	`).run(userId, fromUser, amount, reason || null, date, blockHeight, now);
+	`
+		)
+		.run(userId, fromUser, amount, reason || null, date, blockHeight, now);
 }
 
 /**
@@ -63,10 +71,14 @@ function addReputation({ userId, fromUser, amount, reason, blockHeight }) {
 function claimDailyReputation({ userId, fromUser, amount, reason }) {
 	const now = Math.floor(Date.now() / 1000);
 	const date = new Date().toISOString().slice(0, 10);
-	const result = db().prepare(`
+	const result = db()
+		.prepare(
+			`
 		INSERT OR IGNORE INTO reputations (user_id, from_user, amount, reason, date, block_height, created_at)
 		VALUES (?, ?, ?, ?, ?, 0, ?)
-	`).run(userId, fromUser, amount, reason || null, date, now);
+	`
+		)
+		.run(userId, fromUser, amount, reason || null, date, now);
 
 	return { claimed: result.changes > 0, date };
 }
@@ -80,7 +92,8 @@ function claimDailyReputation({ userId, fromUser, amount, reason }) {
  * @param {number} params.blockHeight
  */
 function finalizeReputationBlock({ fromUser, date, blockHeight }) {
-	db().prepare('UPDATE reputations SET block_height = ? WHERE from_user = ? AND date = ?')
+	db()
+		.prepare('UPDATE reputations SET block_height = ? WHERE from_user = ? AND date = ?')
 		.run(blockHeight, fromUser, date);
 }
 
@@ -93,8 +106,7 @@ function finalizeReputationBlock({ fromUser, date, blockHeight }) {
  * @returns {boolean} true when a claim row was removed
  */
 function releaseReputationClaim({ fromUser, date }) {
-	const result = db().prepare('DELETE FROM reputations WHERE from_user = ? AND date = ?')
-		.run(fromUser, date);
+	const result = db().prepare('DELETE FROM reputations WHERE from_user = ? AND date = ?').run(fromUser, date);
 	return result.changes > 0;
 }
 
@@ -105,22 +117,30 @@ function releaseReputationClaim({ fromUser, date }) {
  * @returns {Array<{user_id: string, total: number}>}
  */
 function getLeaderboard(limit = 20) {
-	return db().prepare(`
+	return db()
+		.prepare(
+			`
 		SELECT user_id, SUM(amount) AS total
 		FROM reputations
 		GROUP BY user_id
 		ORDER BY total DESC
 		LIMIT ?
-	`).all(limit);
+	`
+		)
+		.all(limit);
 }
 
 /**
  * Get total rep for a single user.
  */
 function getUserTotal(userId) {
-	const row = db().prepare(`
+	const row = db()
+		.prepare(
+			`
 		SELECT COALESCE(SUM(amount), 0) AS total FROM reputations WHERE user_id = ?
-	`).get(userId);
+	`
+		)
+		.get(userId);
 	return row.total;
 }
 

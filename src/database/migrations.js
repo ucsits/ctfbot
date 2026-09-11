@@ -50,12 +50,12 @@ function splitSqlStatements(sql) {
 		if (inSingleQuote) {
 			current += char;
 			// `''` is an escaped quote, not the end of the literal
-			if (char === '\'' && next === '\'') {
+			if (char === "'" && next === "'") {
 				current += next;
 				i++;
 				continue;
 			}
-			if (char === '\'') {
+			if (char === "'") {
 				inSingleQuote = false;
 			}
 			continue;
@@ -71,7 +71,7 @@ function splitSqlStatements(sql) {
 			i++;
 			continue;
 		}
-		if (char === '\'') {
+		if (char === "'") {
 			inSingleQuote = true;
 			current += char;
 			continue;
@@ -104,9 +104,7 @@ function columnExists(db, table, column) {
 
 /** True when a table (or view) named `table` exists. */
 function tableExists(db, table) {
-	return Boolean(
-		db.prepare('SELECT 1 FROM sqlite_master WHERE type = \'table\' AND name = ?').get(table)
-	);
+	return Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table));
 }
 
 /**
@@ -148,9 +146,7 @@ function recoverDuplicatedColumns(db, sql) {
 				...alterColumns
 					.filter(([, table, column]) => !columnExists(db, table, column))
 					.map(([, table, column]) => `${table}.${column}`),
-				...createTables
-					.filter(([, table]) => !tableExists(db, table))
-					.map(([, table]) => table)
+				...createTables.filter(([, table]) => !tableExists(db, table)).map(([, table]) => table)
 			];
 
 			if (missing.length > 0) {
@@ -172,10 +168,7 @@ function recoverDuplicatedColumns(db, sql) {
  * @returns {Object} Migration results
  */
 // eslint-disable-next-line no-unused-vars
-function runMigrations(
-	db = getConnection(),
-	migrationsDir = path.join(process.cwd(), 'migrations')
-) {
+function runMigrations(db = getConnection(), migrationsDir = path.join(process.cwd(), 'migrations')) {
 	// Ensure migrations table exists
 	db.exec(`
 		CREATE TABLE IF NOT EXISTS migrations (
@@ -194,7 +187,8 @@ function runMigrations(
 		return { applied: [], skipped: [], error: null };
 	}
 
-	const migrationFiles = fs.readdirSync(migrationsDir)
+	const migrationFiles = fs
+		.readdirSync(migrationsDir)
 		.filter(f => f.endsWith('.sql'))
 		.sort();
 
@@ -303,7 +297,8 @@ function listMigrations(db, migrationsDir = path.join(process.cwd(), 'migrations
 		return [];
 	}
 
-	const migrationFiles = fs.readdirSync(migrationsDir)
+	const migrationFiles = fs
+		.readdirSync(migrationsDir)
 		.filter(f => f.endsWith('.sql'))
 		.sort();
 

@@ -14,23 +14,24 @@ class SummarizeCTFCommand extends Command {
 	}
 
 	registerApplicationCommands(registry) {
-		registry.registerChatInputCommand((builder) =>
-			builder
-				.setName(this.name)
-				.setDescription(this.description)
-				.addStringOption(option =>
-					option
-						.setName('format')
-						.setDescription('Output format')
-						.setRequired(false)
-						.addChoices(
-							{ name: 'Pretty (Embed)', value: 'pretty' },
-							{ name: 'TSV (Tab Separated)', value: 'tsv' }
-						)
-				),
-		{
-			idHints: getIdHints(this.name)
-		}
+		registry.registerChatInputCommand(
+			builder =>
+				builder
+					.setName(this.name)
+					.setDescription(this.description)
+					.addStringOption(option =>
+						option
+							.setName('format')
+							.setDescription('Output format')
+							.setRequired(false)
+							.addChoices(
+								{ name: 'Pretty (Embed)', value: 'pretty' },
+								{ name: 'TSV (Tab Separated)', value: 'tsv' }
+							)
+					),
+			{
+				idHints: getIdHints(this.name)
+			}
 		);
 	}
 
@@ -70,7 +71,6 @@ class SummarizeCTFCommand extends Command {
 			// deliberately returns before this call is made.
 			const scoreboard = await this.fetchScoreboard(ctf);
 			return this.handlePrettyOutput(interaction, stats, ctf, isMultiTeam, scoreboard);
-
 		} catch (error) {
 			this.container.logger.error('Error generating summary:', error);
 			return interaction.editReply('❌ Failed to generate summary.');
@@ -125,7 +125,7 @@ class SummarizeCTFCommand extends Command {
 			: this.formatSingleTeamOutput(stats, scoreboard);
 
 		const embed = new EmbedBuilder()
-			.setColor(0x0099FF)
+			.setColor(0x0099ff)
 			.setTitle(`📊 Summary for ${ctf.ctf_name}`)
 			.setDescription(output)
 			.setTimestamp();
@@ -134,9 +134,10 @@ class SummarizeCTFCommand extends Command {
 	}
 
 	formatSingleTeamOutput(stats, scoreboard) {
-		const teamName = stats.find(s => s.ctfd_team_name || s.team_name)?.ctfd_team_name
-			|| stats.find(s => s.ctfd_team_name || s.team_name)?.team_name
-			|| 'Unknown Team';
+		const teamName =
+			stats.find(s => s.ctfd_team_name || s.team_name)?.ctfd_team_name ||
+			stats.find(s => s.ctfd_team_name || s.team_name)?.team_name ||
+			'Unknown Team';
 
 		const totalPoints = stats.reduce((sum, s) => sum + s.total_points, 0);
 		const rank = this.getTeamRank(scoreboard, teamName);
@@ -163,15 +164,17 @@ class SummarizeCTFCommand extends Command {
 			teamGroups[tName].push(s);
 		});
 
-		const sortedTeams = Object.entries(teamGroups).map(([tName, members]) => {
-			const tPoints = members.reduce((sum, m) => sum + m.total_points, 0);
-			return {
-				name: tName,
-				points: tPoints,
-				rank: this.getTeamRank(scoreboard, tName),
-				members: members.sort((a, b) => b.total_points - a.total_points)
-			};
-		}).sort((a, b) => b.points - a.points);
+		const sortedTeams = Object.entries(teamGroups)
+			.map(([tName, members]) => {
+				const tPoints = members.reduce((sum, m) => sum + m.total_points, 0);
+				return {
+					name: tName,
+					points: tPoints,
+					rank: this.getTeamRank(scoreboard, tName),
+					members: members.sort((a, b) => b.total_points - a.total_points)
+				};
+			})
+			.sort((a, b) => b.points - a.points);
 
 		let output = '';
 		sortedTeams.forEach(team => {

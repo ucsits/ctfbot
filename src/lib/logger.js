@@ -61,9 +61,8 @@ function getSapphireLogger() {
 /**
  * Format a log message with optional arguments.
  */
-function formatMessage(level, context, message, args) {
+function formatMessage(context, message, args) {
 	const prefix = context ? `[${context}]` : '';
-	const levelTag = level.toUpperCase().padEnd(5);
 
 	if (args.length > 0) {
 		const extra = args.length === 1 ? args[0] : args;
@@ -93,14 +92,16 @@ function formatMessage(level, context, message, args) {
  */
 function createLogger(context) {
 	function log(level, message, ...args) {
-		if (!shouldLog(level)) return;
+		if (!shouldLog(level)) {
+			return;
+		}
 
 		const sapphireLogger = getSapphireLogger();
 
 		if (sapphireLogger && LOG_LEVELS[level] >= LOG_LEVELS.info) {
 			// SapphireLogger has: trace, debug, info, warn, error
 			if (sapphireLogger[level]) {
-				const { formatted, extra } = formatMessage(level, context, message, args);
+				const { formatted, extra } = formatMessage(context, message, args);
 				if (extra !== undefined) {
 					sapphireLogger[level](formatted, extra);
 				} else {
@@ -111,7 +112,7 @@ function createLogger(context) {
 		}
 
 		// Fallback: formatted console output
-		const { formatted, extra } = formatMessage(level, context, message, args);
+		const { formatted, extra } = formatMessage(context, message, args);
 		const ts = timestamp();
 		const levelTag = level.toUpperCase().padEnd(5);
 
@@ -162,9 +163,7 @@ function createLogger(context) {
 		 * @returns {Logger}
 		 */
 		child(childContext) {
-			const combined = context
-				? `${context}|${childContext}`
-				: childContext;
+			const combined = context ? `${context}|${childContext}` : childContext;
 			return createLogger(combined);
 		},
 

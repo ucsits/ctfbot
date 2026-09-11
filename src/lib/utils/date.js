@@ -102,10 +102,10 @@ function parseFlexibleDateToUTC(dateStr, timezone) {
 
 	throw new ValidationError(
 		'❌ Invalid date format. Try one of these examples:\n' +
-		'  `31-12-2025 20:00`   (DD-MM-YYYY HH:MM)\n' +
-		'  `2025-12-31 20:00`   (YYYY-MM-DD HH:MM)\n' +
-		'  `31/12/2025 20:00`   (DD/MM/YYYY HH:MM)\n' +
-		'  `1735689600`         (Unix timestamp — Discord @time compatible)'
+			'  `31-12-2025 20:00`   (DD-MM-YYYY HH:MM)\n' +
+			'  `2025-12-31 20:00`   (YYYY-MM-DD HH:MM)\n' +
+			'  `31/12/2025 20:00`   (DD/MM/YYYY HH:MM)\n' +
+			'  `1735689600`         (Unix timestamp — Discord @time compatible)'
 	);
 }
 
@@ -170,28 +170,28 @@ function computePeriodRange(period, now, timezone = 'UTC') {
 	const date = DateTime.fromSeconds(now, { zone: timezone });
 
 	switch (period) {
-	case 'week':
-		return {
-			start: date.startOf('week').toUTC().toUnixInteger(),
-			end: date.endOf('week').toUTC().toUnixInteger()
-		};
-	case 'month':
-		return {
-			start: date.startOf('month').toUTC().toUnixInteger(),
-			end: date.endOf('month').toUTC().toUnixInteger()
-		};
-	case 'quarter':
-		return {
-			start: date.startOf('quarter').toUTC().toUnixInteger(),
-			end: date.endOf('quarter').toUTC().toUnixInteger()
-		};
-	case 'year':
-		return {
-			start: date.startOf('year').toUTC().toUnixInteger(),
-			end: date.endOf('year').toUTC().toUnixInteger()
-		};
-	default:
-		return { start: 0, end: Infinity };
+		case 'week':
+			return {
+				start: date.startOf('week').toUTC().toUnixInteger(),
+				end: date.endOf('week').toUTC().toUnixInteger()
+			};
+		case 'month':
+			return {
+				start: date.startOf('month').toUTC().toUnixInteger(),
+				end: date.endOf('month').toUTC().toUnixInteger()
+			};
+		case 'quarter':
+			return {
+				start: date.startOf('quarter').toUTC().toUnixInteger(),
+				end: date.endOf('quarter').toUTC().toUnixInteger()
+			};
+		case 'year':
+			return {
+				start: date.startOf('year').toUTC().toUnixInteger(),
+				end: date.endOf('year').toUTC().toUnixInteger()
+			};
+		default:
+			return { start: 0, end: Infinity };
 	}
 }
 

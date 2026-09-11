@@ -13,19 +13,20 @@ class ActivityPointsCommand extends Command {
 	}
 
 	registerApplicationCommands(registry) {
-		registry.registerChatInputCommand((builder) =>
-			builder
-				.setName(this.name)
-				.setDescription(this.description)
-				.addUserOption(opt =>
-					opt
-						.setName('user')
-						.setDescription('User whose balance to check (default: you)')
-						.setRequired(false)
-				),
-		{
-			idHints: getIdHints(this.name)
-		}
+		registry.registerChatInputCommand(
+			builder =>
+				builder
+					.setName(this.name)
+					.setDescription(this.description)
+					.addUserOption(opt =>
+						opt
+							.setName('user')
+							.setDescription('User whose balance to check (default: you)')
+							.setRequired(false)
+					),
+			{
+				idHints: getIdHints(this.name)
+			}
 		);
 	}
 
@@ -38,7 +39,7 @@ class ActivityPointsCommand extends Command {
 			const balance = activityRepository.getBalance(target.id);
 
 			const embed = new EmbedBuilder()
-				.setColor(0x9B59B6)
+				.setColor(0x9b59b6)
 				.setTitle('🎯 Activity Points')
 				.setDescription(`${target} has **${balance} AP**`)
 				.addFields(

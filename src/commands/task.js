@@ -297,9 +297,18 @@ class TaskCommand extends Command {
 			const sync = _syncService();
 			if (sync) {
 				sync.pushTaskUpdate(
-					{ task_id: taskId, title, description, assigned_to: assignTo.id, deadline: deadlineUnix, calendar_event_id: null },
+					{
+						task_id: taskId,
+						title,
+						description,
+						assigned_to: assignTo.id,
+						deadline: deadlineUnix,
+						calendar_event_id: null
+					},
 					'create'
-				).catch(err => this.container.logger.warn(`Calendar push failed for new task ${taskId}: ${err.message}`));
+				).catch(err =>
+					this.container.logger.warn(`Calendar push failed for new task ${taskId}: ${err.message}`)
+				);
 			}
 
 			const embed = new EmbedBuilder()
@@ -618,7 +627,9 @@ class TaskCommand extends Command {
 			// Push to Google Calendar (best-effort)
 			const sync = _syncService();
 			if (sync) {
-				sync.pushTaskUpdate(task, 'delete').catch(err => this.container.logger.warn(`Calendar push failed for done task ${task.task_id}: ${err.message}`));
+				sync.pushTaskUpdate(task, 'delete').catch(err =>
+					this.container.logger.warn(`Calendar push failed for done task ${task.task_id}: ${err.message}`)
+				);
 			}
 
 			return { content: `✅ Task **${task.title}** marked as done!${_calendarNote()}` };
@@ -684,10 +695,16 @@ class TaskCommand extends Command {
 			// Push to Google Calendar (best-effort)
 			const sync = _syncService();
 			if (sync) {
-				sync.pushTaskUpdate(task, 'cancel').catch(err => this.container.logger.warn(`Calendar push failed for cancelled task ${task.task_id}: ${err.message}`));
+				sync.pushTaskUpdate(task, 'cancel').catch(err =>
+					this.container.logger.warn(
+						`Calendar push failed for cancelled task ${task.task_id}: ${err.message}`
+					)
+				);
 			}
 
-			return { content: `🗑️ Task **${task.title}** has been cancelled and removed from the pending list.${_calendarNote()}` };
+			return {
+				content: `🗑️ Task **${task.title}** has been cancelled and removed from the pending list.${_calendarNote()}`
+			};
 		} catch (error) {
 			this.container.logger.error('Error cancelling task:', error);
 			// Release the transition claim so the task is not blocked until the

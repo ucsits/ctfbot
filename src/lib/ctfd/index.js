@@ -234,9 +234,11 @@ class CTFdClient {
 	async testConnection() {
 		try {
 			const response = await fetch(`${this.baseUrl}/api/v1/`, {
-				headers: this.apiToken ? {
-					'Authorization': `Token ${this.apiToken}`
-				} : {}
+				headers: this.apiToken
+					? {
+							Authorization: `Token ${this.apiToken}`
+						}
+					: {}
 			});
 			return response.ok;
 		} catch (error) {

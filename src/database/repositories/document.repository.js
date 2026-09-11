@@ -27,21 +27,25 @@ const db = () => getConnection();
  */
 function createDocument({ docId, title, content, author, mimeType, blockHeight, fileData, filename, fileSize }) {
 	const now = Math.floor(Date.now() / 1000);
-	db().prepare(`
+	db()
+		.prepare(
+			`
 		INSERT INTO documents (doc_id, title, content, author, mime_type, block_height, created_at, file_data, filename, file_size)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`).run(
-		docId,
-		title,
-		fileData ? (content || '') : (content || null),
-		author,
-		mimeType || 'text/plain',
-		blockHeight,
-		now,
-		fileData || null,
-		filename || null,
-		fileSize || null
-	);
+	`
+		)
+		.run(
+			docId,
+			title,
+			fileData ? content || '' : content || null,
+			author,
+			mimeType || 'text/plain',
+			blockHeight,
+			now,
+			fileData || null,
+			filename || null,
+			fileSize || null
+		);
 }
 
 /**

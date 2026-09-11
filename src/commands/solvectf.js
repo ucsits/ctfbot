@@ -14,20 +14,21 @@ class SolveCTFCommand extends Command {
 	}
 
 	registerApplicationCommands(registry) {
-		registry.registerChatInputCommand((builder) =>
-			builder
-				.setName(this.name)
-				.setDescription(this.description)
-				.addStringOption(option =>
-					option
-						.setName('chal_name')
-						.setDescription('Name of the challenge you solved')
-						.setRequired(true)
-						.setAutocomplete(true)
-				),
-		{
-			idHints: getIdHints(this.name)
-		}
+		registry.registerChatInputCommand(
+			builder =>
+				builder
+					.setName(this.name)
+					.setDescription(this.description)
+					.addStringOption(option =>
+						option
+							.setName('chal_name')
+							.setDescription('Name of the challenge you solved')
+							.setRequired(true)
+							.setAutocomplete(true)
+					),
+			{
+				idHints: getIdHints(this.name)
+			}
 		);
 	}
 
@@ -91,7 +92,9 @@ class SolveCTFCommand extends Command {
 			// Get challenge from database
 			const challenge = challengeOperations.getChallengeByName(ctf.id, chalName);
 			if (!challenge) {
-				return interaction.editReply(`Challenge **${chalName}** does not exist. Make sure it was added with \`/addchalctf\` first.`);
+				return interaction.editReply(
+					`Challenge **${chalName}** does not exist. Make sure it was added with \`/addchalctf\` first.`
+				);
 			}
 
 			// Check if user already solved this challenge
@@ -134,13 +137,17 @@ class SolveCTFCommand extends Command {
 				const isFirstBlood = solverCount === 1;
 
 				const embed = new EmbedBuilder()
-					.setColor(isFirstBlood ? 0xFF0000 : 0x00FF00)
+					.setColor(isFirstBlood ? 0xff0000 : 0x00ff00)
 					.setTitle(isFirstBlood ? 'First Blood!' : 'Challenge Solved')
 					.setDescription(`**${chalName}** solved by ${interaction.user}!`)
 					.addFields(
 						{ name: 'Category', value: challenge.chal_category, inline: true },
 						{ name: 'Solver', value: registration.username, inline: true },
-						{ name: 'Solve Count', value: `${solverCount} solve${solverCount !== 1 ? 's' : ''}`, inline: true }
+						{
+							name: 'Solve Count',
+							value: `${solverCount} solve${solverCount !== 1 ? 's' : ''}`,
+							inline: true
+						}
 					)
 					.setTimestamp();
 
@@ -149,7 +156,6 @@ class SolveCTFCommand extends Command {
 				}
 
 				await interaction.editReply({ embeds: [embed] });
-
 			} catch (dbError) {
 				if (dbError.message.includes('team_key')) {
 					return interaction.editReply(
@@ -162,7 +168,6 @@ class SolveCTFCommand extends Command {
 				this.container.logger.error('Failed to mark challenge as solved:', dbError);
 				return interaction.editReply('Failed to mark challenge as solved. Please try again later.');
 			}
-
 		} catch (error) {
 			this.container.logger.error('Error solving challenge:', error);
 			return interaction.editReply('Failed to solve challenge. Please try again later.');

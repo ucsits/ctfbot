@@ -13,21 +13,22 @@ class ActivityLeaderboardCommand extends Command {
 	}
 
 	registerApplicationCommands(registry) {
-		registry.registerChatInputCommand((builder) =>
-			builder
-				.setName(this.name)
-				.setDescription(this.description)
-				.addIntegerOption(opt =>
-					opt
-						.setName('limit')
-						.setDescription('Number of top users to show (default: 10, max: 50)')
-						.setRequired(false)
-						.setMinValue(1)
-						.setMaxValue(50)
-				),
-		{
-			idHints: getIdHints(this.name)
-		}
+		registry.registerChatInputCommand(
+			builder =>
+				builder
+					.setName(this.name)
+					.setDescription(this.description)
+					.addIntegerOption(opt =>
+						opt
+							.setName('limit')
+							.setDescription('Number of top users to show (default: 10, max: 50)')
+							.setRequired(false)
+							.setMinValue(1)
+							.setMaxValue(50)
+					),
+			{
+				idHints: getIdHints(this.name)
+			}
 		);
 	}
 
@@ -44,7 +45,7 @@ class ActivityLeaderboardCommand extends Command {
 			}
 
 			const embed = new EmbedBuilder()
-				.setColor(0x9B59B6)
+				.setColor(0x9b59b6)
 				.setTitle('🏆 Activity Points Leaderboard')
 				.setTimestamp();
 

@@ -29,23 +29,24 @@ class SyncChallengesCommand extends Command {
 	}
 
 	registerApplicationCommands(registry) {
-		registry.registerChatInputCommand((builder) =>
-			builder
-				.setName(this.name)
-				.setDescription(this.description)
-				.addStringOption(option =>
-					option
-						.setName('source')
-						.setDescription('Source to sync solves from (default: direct)')
-						.setRequired(false)
-						.addChoices(
-							{ name: 'Direct (from Challenges)', value: 'direct' },
-							{ name: 'Users (from User Profiles)', value: 'users' }
-						)
-				),
-		{
-			idHints: getIdHints(this.name)
-		}
+		registry.registerChatInputCommand(
+			builder =>
+				builder
+					.setName(this.name)
+					.setDescription(this.description)
+					.addStringOption(option =>
+						option
+							.setName('source')
+							.setDescription('Source to sync solves from (default: direct)')
+							.setRequired(false)
+							.addChoices(
+								{ name: 'Direct (from Challenges)', value: 'direct' },
+								{ name: 'Users (from User Profiles)', value: 'users' }
+							)
+					),
+			{
+				idHints: getIdHints(this.name)
+			}
 		);
 	}
 
@@ -68,12 +69,9 @@ class SyncChallengesCommand extends Command {
 		}
 
 		try {
-			const client = createPlatformClient(
-				ctf.platform,
-				ctf.api_base_url || ctf.ctf_base_url,
-				ctf.api_token,
-				{ divisionId: ctf.platform_division_id }
-			);
+			const client = createPlatformClient(ctf.platform, ctf.api_base_url || ctf.ctf_base_url, ctf.api_token, {
+				divisionId: ctf.platform_division_id
+			});
 			const newChallenges = [];
 
 			const nameToLocalIdMap = await this.loadExistingChallenges(ctf);
@@ -98,7 +96,6 @@ class SyncChallengesCommand extends Command {
 			);
 
 			return this.formatSyncResponse(interaction, source, solvesSynced, newChallenges, newSolves);
-
 		} catch (error) {
 			this.container.logger.error(error);
 			return interaction.editReply(`Error syncing challenges: ${error.message}`);
@@ -185,7 +182,14 @@ class SyncChallengesCommand extends Command {
 			}
 		} else {
 			for (const chal of challenges) {
-				const result = await this.syncSolvesForChallenge(ctf, client, chal, platformUserMap, nameToLocalIdMap, userRegMap);
+				const result = await this.syncSolvesForChallenge(
+					ctf,
+					client,
+					chal,
+					platformUserMap,
+					nameToLocalIdMap,
+					userRegMap
+				);
 				solvesSynced += result.count;
 				newSolves.push(...result.solves);
 			}
@@ -238,9 +242,7 @@ class SyncChallengesCommand extends Command {
 			try {
 				user = await client.findUser(reg.username);
 			} catch (error) {
-				this.container.logger.warn(
-					`Could not link ${reg.username} to the platform: ${error.message}`
-				);
+				this.container.logger.warn(`Could not link ${reg.username} to the platform: ${error.message}`);
 				continue;
 			}
 
@@ -248,8 +250,12 @@ class SyncChallengesCommand extends Command {
 				continue;
 			}
 
-			const wanted = String(reg.username || '').trim().toLowerCase();
-			const found = String(user.username || '').trim().toLowerCase();
+			const wanted = String(reg.username || '')
+				.trim()
+				.toLowerCase();
+			const found = String(user.username || '')
+				.trim()
+				.toLowerCase();
 			if (!wanted || found !== wanted) {
 				this.container.logger.warn(
 					`Platform user "${user.username}" does not match registration "${reg.username}"; leaving it unlinked`
@@ -397,9 +403,8 @@ class SyncChallengesCommand extends Command {
 				continue;
 			}
 
-			const platformUserId = solve.userId === null || solve.userId === undefined
-				? null
-				: String(parseInt(solve.userId, 10));
+			const platformUserId =
+				solve.userId === null || solve.userId === undefined ? null : String(parseInt(solve.userId, 10));
 			const discordUserId = platformUserId ? platformUserMap.get(platformUserId) : null;
 
 			if (discordUserId) {
@@ -486,9 +491,7 @@ class SyncChallengesCommand extends Command {
 			// Unlike the adapter, which reports a name failure by omission, a client
 			// that throws leaves scope undetermined. Parking on an unknown scope is
 			// what imported the whole division, so an error means nothing is parked.
-			this.container.logger.warn(
-				`Could not scope solves to the registered teams: ${error.message}`
-			);
+			this.container.logger.warn(`Could not scope solves to the registered teams: ${error.message}`);
 		}
 
 		return scoped;
@@ -706,10 +709,12 @@ class SyncChallengesCommand extends Command {
 		// instead of inserting a second one for the same solve. The id is
 		// normalised through parseInt because a registration written before the
 		// link repair can hold a float-shaped string such as '1706.0'.
-		const normalisedPlatformUserId = platformUserId === null || platformUserId === undefined
-			? null
-			: String(parseInt(platformUserId, 10));
-		if (normalisedPlatformUserId && challengeOperations.hasCtfdUserSolved(challengeId, normalisedPlatformUserId, ctf.platform)) {
+		const normalisedPlatformUserId =
+			platformUserId === null || platformUserId === undefined ? null : String(parseInt(platformUserId, 10));
+		if (
+			normalisedPlatformUserId &&
+			challengeOperations.hasCtfdUserSolved(challengeId, normalisedPlatformUserId, ctf.platform)
+		) {
 			challengeOperations.transferPendingSolves(ctf.id, normalisedPlatformUserId, discordUserId, ctf.platform);
 			if (challengeOperations.hasUserSolved(challengeId, discordUserId)) {
 				return null;
@@ -720,8 +725,8 @@ class SyncChallengesCommand extends Command {
 
 		if (ctf.team_mode && reg && reg.team_name) {
 			const teamMembers = registrationOperations.getTeamMembers(ctf.id, reg.team_name);
-			const alreadySolved = teamMembers.some(m =>
-				m.user_id !== discordUserId && challengeOperations.hasUserSolved(challengeId, m.user_id)
+			const alreadySolved = teamMembers.some(
+				m => m.user_id !== discordUserId && challengeOperations.hasUserSolved(challengeId, m.user_id)
 			);
 			if (alreadySolved) {
 				return null;

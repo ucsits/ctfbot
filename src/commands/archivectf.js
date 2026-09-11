@@ -14,18 +14,17 @@ class ArchiveCTFCommand extends Command {
 	}
 
 	registerApplicationCommands(registry) {
-		registry.registerChatInputCommand((builder) =>
-			builder
-				.setName(this.name)
-				.setDescription(this.description),
-		{
+		registry.registerChatInputCommand(builder => builder.setName(this.name).setDescription(this.description), {
 			idHints: getIdHints(this.name)
-		}
-		);
+		});
 	}
 
 	async chatInputRun(interaction) {
-		const cancelled = await checkPermissionReply(interaction, PermissionFlagsBits.ManageChannels, 'Manage Channels');
+		const cancelled = await checkPermissionReply(
+			interaction,
+			PermissionFlagsBits.ManageChannels,
+			'Manage Channels'
+		);
 		if (cancelled) {
 			return;
 		}
@@ -81,7 +80,9 @@ class ArchiveCTFCommand extends Command {
 					]
 				});
 
-				this.container.logger.info(`Created archive category: ${archiveCategoryName} (ID: ${archiveCategory.id})`);
+				this.container.logger.info(
+					`Created archive category: ${archiveCategoryName} (ID: ${archiveCategory.id})`
+				);
 			}
 
 			// Remember where the channel came from so a database failure can be
@@ -112,7 +113,7 @@ class ArchiveCTFCommand extends Command {
 			}
 
 			const embed = new EmbedBuilder()
-				.setColor(0xFFA500)
+				.setColor(0xffa500)
 				.setTitle('CTF Archived')
 				.setDescription(`**${ctf.ctf_name}** has been archived!`)
 				.addFields(
@@ -124,7 +125,6 @@ class ArchiveCTFCommand extends Command {
 			await interaction.editReply({ embeds: [embed] });
 
 			this.container.logger.info(`Archived CTF "${ctf.ctf_name}" (ID: ${ctf.id}) by ${interaction.user.tag}`);
-
 		} catch (error) {
 			this.container.logger.error('Error archiving CTF:', error);
 			return interaction.editReply('Failed to archive CTF. Please check permissions and try again.');

@@ -15,31 +15,29 @@ class RegisterCTFCommand extends Command {
 	}
 
 	registerApplicationCommands(registry) {
-		registry.registerChatInputCommand((builder) =>
-			builder
-				.setName(this.name)
-				.setDescription(this.description)
-				.addStringOption(option =>
-					option
-						.setName('username')
-						.setDescription('Your username on the CTF platform')
-						.setRequired(true)
-				)
-				.addStringOption(option =>
-					option
-						.setName('team_name')
-						.setDescription('Your team name (required for team-based CTFs)')
-						.setRequired(false)
-				)
-				.addStringOption(option =>
-					option
-						.setName('platform_url')
-						.setDescription('CTF platform URL (e.g., https://ctf.example.com)')
-						.setRequired(false)
-				),
-		{
-			idHints: getIdHints(this.name)
-		}
+		registry.registerChatInputCommand(
+			builder =>
+				builder
+					.setName(this.name)
+					.setDescription(this.description)
+					.addStringOption(option =>
+						option.setName('username').setDescription('Your username on the CTF platform').setRequired(true)
+					)
+					.addStringOption(option =>
+						option
+							.setName('team_name')
+							.setDescription('Your team name (required for team-based CTFs)')
+							.setRequired(false)
+					)
+					.addStringOption(option =>
+						option
+							.setName('platform_url')
+							.setDescription('CTF platform URL (e.g., https://ctf.example.com)')
+							.setRequired(false)
+					),
+			{
+				idHints: getIdHints(this.name)
+			}
 		);
 	}
 
@@ -67,7 +65,9 @@ class RegisterCTFCommand extends Command {
 
 			// Check if team name is required for team-based CTF
 			if (ctf.team_mode && !teamName && !platformUrl) {
-				return interaction.editReply('This is a team-based CTF. Please provide your team name using the `team_name` parameter.');
+				return interaction.editReply(
+					'This is a team-based CTF. Please provide your team name using the `team_name` parameter.'
+				);
 			}
 
 			// When an API token is configured the username is verified against the
@@ -119,9 +119,13 @@ class RegisterCTFCommand extends Command {
 						);
 					}
 				});
-				this.container.logger.info(`Registered ${userTag} for CTF "${ctf.ctf_name}" (team: ${teamName || platformData?.teamName || 'individual'})`);
+				this.container.logger.info(
+					`Registered ${userTag} for CTF "${ctf.ctf_name}" (team: ${teamName || platformData?.teamName || 'individual'})`
+				);
 				if (pendingSolvesResult && pendingSolvesResult.transferred > 0) {
-					this.container.logger.info(`Transferred ${pendingSolvesResult.transferred} pending solves for ${username}`);
+					this.container.logger.info(
+						`Transferred ${pendingSolvesResult.transferred} pending solves for ${username}`
+					);
 				}
 			} catch (dbError) {
 				this.container.logger.error('Failed to store registration:', dbError);
@@ -129,7 +133,7 @@ class RegisterCTFCommand extends Command {
 			}
 
 			const embed = new EmbedBuilder()
-				.setColor(0x00FF00)
+				.setColor(0x00ff00)
 				.setTitle('Registration Successful')
 				.setDescription(`You have been registered for **${ctf.ctf_name}**!`)
 				.addFields(
@@ -146,15 +150,15 @@ class RegisterCTFCommand extends Command {
 				);
 			} else if (teamName) {
 				// Show team name from manual input if platform data not available
-				embed.addFields(
-					{ name: 'Team', value: teamName, inline: true }
-				);
+				embed.addFields({ name: 'Team', value: teamName, inline: true });
 			}
 
 			if (pendingSolvesResult && pendingSolvesResult.transferred > 0) {
-				embed.addFields(
-					{ name: 'Solves Claimed', value: `${pendingSolvesResult.transferred} solve${pendingSolvesResult.transferred !== 1 ? 's' : ''} transferred from the platform`, inline: true }
-				);
+				embed.addFields({
+					name: 'Solves Claimed',
+					value: `${pendingSolvesResult.transferred} solve${pendingSolvesResult.transferred !== 1 ? 's' : ''} transferred from the platform`,
+					inline: true
+				});
 			}
 
 			// Send confirmation to user
@@ -162,15 +166,16 @@ class RegisterCTFCommand extends Command {
 
 			// Announce registration in channel
 			const announceEmbed = new EmbedBuilder()
-				.setColor(0x0099FF)
+				.setColor(0x0099ff)
 				.setDescription(`${interaction.user} registered as **${username}**`)
 				.setTimestamp();
 
 			await channel.send({ embeds: [announceEmbed] });
 
 			// Log registration
-			this.container.logger.info(`CTF Registration: ${userTag} (${userId}) registered as ${username} for ${ctf.ctf_name}`);
-
+			this.container.logger.info(
+				`CTF Registration: ${userTag} (${userId}) registered as ${username} for ${ctf.ctf_name}`
+			);
 		} catch (error) {
 			this.container.logger.error('Error registering for CTF:', error);
 			return interaction.editReply('Failed to register. Please try again later.');
@@ -209,7 +214,9 @@ class RegisterCTFCommand extends Command {
 			const user = await client.findUser(username);
 
 			if (!user) {
-				throw new Error(`User "${username}" not found on the CTF platform. Make sure you are using the exact username from your account.`);
+				throw new Error(
+					`User "${username}" not found on the CTF platform. Make sure you are using the exact username from your account.`
+				);
 			}
 
 			this.container.logger.info(`Found platform user: ${user.username} (ID: ${user.userId})`);

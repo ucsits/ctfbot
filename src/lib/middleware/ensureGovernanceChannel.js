@@ -21,9 +21,7 @@ function ensureGovernanceChannel(interaction) {
 	}
 
 	if (!constants.GOVERNANCE_CATEGORIES.includes(channel.parentId)) {
-		throw new GovernanceChannelError(
-			'❌ This command is not available in this channel category.'
-		);
+		throw new GovernanceChannelError('❌ This command is not available in this channel category.');
 	}
 
 	return channel;

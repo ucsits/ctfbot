@@ -7,13 +7,13 @@ const adminRepository = {
 		return stmt.all();
 	},
 
-	getByUserId: (userId) => {
+	getByUserId: userId => {
 		const db = getConnection();
 		const stmt = db.prepare('SELECT * FROM admins WHERE user_id = ?');
 		return stmt.get(userId);
 	},
 
-	exists: (userId) => {
+	exists: userId => {
 		const db = getConnection();
 		const stmt = db.prepare('SELECT 1 FROM admins WHERE user_id = ?');
 		return stmt.get(userId) !== undefined;
@@ -38,7 +38,7 @@ const adminRepository = {
 		return result.changes;
 	},
 
-	remove: (userId) => {
+	remove: userId => {
 		const db = getConnection();
 		const stmt = db.prepare('DELETE FROM admins WHERE user_id = ?');
 		return stmt.run(userId);

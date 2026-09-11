@@ -10,7 +10,7 @@ const pactOperations = {
 		return stmt.run(userId, name, nrp);
 	},
 
-	getPact: (userId) => {
+	getPact: userId => {
 		const db = getConnection();
 		const stmt = db.prepare('SELECT * FROM pacts WHERE user_id = ?');
 		return stmt.get(userId);

@@ -25,13 +25,17 @@ function getBalance(userId) {
  * @returns {Array<{user_id: string, balance: number}>}
  */
 function getLeaderboard(limit = 20) {
-	return db().prepare(`
+	return db()
+		.prepare(
+			`
 		SELECT user_id, balance
 		FROM activity_balances
 		WHERE balance != 0
 		ORDER BY balance DESC
 		LIMIT ?
-	`).all(limit);
+	`
+		)
+		.all(limit);
 }
 
 /**
@@ -50,16 +54,24 @@ function grantPoints({ userId, amount, grantedBy, note, blockHeight }) {
 	const now = Math.floor(Date.now() / 1000);
 
 	const tx = db().transaction(() => {
-		db().prepare(`
+		db()
+			.prepare(
+				`
 			INSERT INTO activity_ledger (user_id, amount, kind, granted_by, note, block_height, created_at)
 			VALUES (?, ?, 'grant', ?, ?, ?, ?)
-		`).run(userId, amount, grantedBy, note || null, blockHeight, now);
+		`
+			)
+			.run(userId, amount, grantedBy, note || null, blockHeight, now);
 
-		db().prepare(`
+		db()
+			.prepare(
+				`
 			INSERT INTO activity_balances (user_id, balance)
 			VALUES (?, ?)
 			ON CONFLICT(user_id) DO UPDATE SET balance = balance + excluded.balance
-		`).run(userId, amount);
+		`
+			)
+			.run(userId, amount);
 
 		return getBalance(userId);
 	});
@@ -149,30 +161,46 @@ function reserveApPurchase({ purchaseId, userId, itemId, apCost }) {
 	const tx = db().transaction(() => {
 		// Ensure a balance row exists so the conditional debit below is
 		// deterministic even for a zero-cost item or a first-time spender.
-		db().prepare(`
+		db()
+			.prepare(
+				`
 			INSERT INTO activity_balances (user_id, balance)
 			VALUES (?, 0)
 			ON CONFLICT(user_id) DO NOTHING
-		`).run(userId);
+		`
+			)
+			.run(userId);
 
-		const debit = db().prepare(`
+		const debit = db()
+			.prepare(
+				`
 			UPDATE activity_balances SET balance = balance - ?
 			WHERE user_id = ? AND balance >= ?
-		`).run(apCost, userId, apCost);
+		`
+			)
+			.run(apCost, userId, apCost);
 
 		if (debit.changes === 0) {
 			return null;
 		}
 
-		db().prepare(`
+		db()
+			.prepare(
+				`
 			INSERT INTO activity_ledger (user_id, amount, kind, reference_id, block_height, created_at)
 			VALUES (?, ?, 'purchase', ?, 0, ?)
-		`).run(userId, -apCost, purchaseId, now);
+		`
+			)
+			.run(userId, -apCost, purchaseId, now);
 
-		db().prepare(`
+		db()
+			.prepare(
+				`
 			INSERT INTO purchases (id, user_id, item_id, payment_method, status, cost_ap, cost_rp, block_height, created_at)
 			VALUES (?, ?, ?, 'ap', 'pending', ?, 0, NULL, ?)
-		`).run(purchaseId, userId, itemId, apCost, now);
+		`
+			)
+			.run(purchaseId, userId, itemId, apCost, now);
 
 		return getBalance(userId);
 	});
@@ -190,19 +218,27 @@ function reserveApPurchase({ purchaseId, userId, itemId, apCost }) {
  */
 function finalizeApPurchase({ purchaseId, blockHeight }) {
 	const tx = db().transaction(() => {
-		const purchase = db().prepare(`
+		const purchase = db()
+			.prepare(
+				`
 			UPDATE purchases SET status = 'completed', block_height = ?
 			WHERE id = ? AND payment_method = 'ap' AND status = 'pending'
-		`).run(blockHeight, purchaseId);
+		`
+			)
+			.run(blockHeight, purchaseId);
 
 		if (purchase.changes === 0) {
 			return false;
 		}
 
-		db().prepare(`
+		db()
+			.prepare(
+				`
 			UPDATE activity_ledger SET block_height = ?
 			WHERE reference_id = ? AND kind = 'purchase'
-		`).run(blockHeight, purchaseId);
+		`
+			)
+			.run(blockHeight, purchaseId);
 
 		return true;
 	});
@@ -223,23 +259,32 @@ function finalizeApPurchase({ purchaseId, blockHeight }) {
  */
 function releaseApPurchase({ purchaseId }) {
 	const tx = db().transaction(() => {
-		const purchase = db().prepare(`
+		const purchase = db()
+			.prepare(
+				`
 			SELECT id, user_id, cost_ap FROM purchases
 			WHERE id = ? AND payment_method = 'ap' AND status = 'pending'
-		`).get(purchaseId);
+		`
+			)
+			.get(purchaseId);
 
 		if (!purchase) {
 			return false;
 		}
 
-		db().prepare(`
+		db()
+			.prepare(
+				`
 			DELETE FROM activity_ledger WHERE reference_id = ? AND kind = 'purchase'
-		`).run(purchaseId);
+		`
+			)
+			.run(purchaseId);
 		db().prepare('DELETE FROM purchases WHERE id = ?').run(purchaseId);
 
 		// Put the reserved points back. The conditional debit already proved the
 		// cost was covered, so this restore can never take a balance negative.
-		db().prepare('UPDATE activity_balances SET balance = balance + ? WHERE user_id = ?')
+		db()
+			.prepare('UPDATE activity_balances SET balance = balance + ? WHERE user_id = ?')
 			.run(purchase.cost_ap, purchase.user_id);
 
 		return true;
@@ -258,10 +303,14 @@ function releaseApPurchase({ purchaseId }) {
  */
 function releaseStaleApReservations({ olderThanSeconds = 900 } = {}) {
 	const cutoff = Math.floor(Date.now() / 1000) - olderThanSeconds;
-	const stale = db().prepare(`
+	const stale = db()
+		.prepare(
+			`
 		SELECT id FROM purchases
 		WHERE payment_method = 'ap' AND status = 'pending' AND created_at < ?
-	`).all(cutoff);
+	`
+		)
+		.all(cutoff);
 
 	let released = 0;
 	for (const row of stale) {
@@ -295,24 +344,36 @@ function completeApPurchase({ purchaseId, userId, itemId, apCost, blockHeight })
 		// which is exactly the hole that would allow a negative balance if a
 		// second writer ever appeared. Zero changed rows means the user could not
 		// afford it, and nothing else is written.
-		const debit = db().prepare(`
+		const debit = db()
+			.prepare(
+				`
 			UPDATE activity_balances SET balance = balance - ?
 			WHERE user_id = ? AND balance >= ?
-		`).run(apCost, userId, apCost);
+		`
+			)
+			.run(apCost, userId, apCost);
 
 		if (debit.changes === 0) {
 			return null;
 		}
 
-		db().prepare(`
+		db()
+			.prepare(
+				`
 			INSERT INTO activity_ledger (user_id, amount, kind, reference_id, block_height, created_at)
 			VALUES (?, ?, 'purchase', ?, ?, ?)
-		`).run(userId, -apCost, purchaseId, blockHeight, now);
+		`
+			)
+			.run(userId, -apCost, purchaseId, blockHeight, now);
 
-		db().prepare(`
+		db()
+			.prepare(
+				`
 			INSERT INTO purchases (id, user_id, item_id, payment_method, status, cost_ap, cost_rp, block_height, created_at)
 			VALUES (?, ?, ?, 'ap', 'completed', ?, 0, ?, ?)
-		`).run(purchaseId, userId, itemId, apCost, blockHeight, now);
+		`
+			)
+			.run(purchaseId, userId, itemId, apCost, blockHeight, now);
 
 		return getBalance(userId);
 	});
@@ -337,19 +398,27 @@ function spendPoints({ userId, amount, purchaseId, blockHeight }) {
 	const tx = db().transaction(() => {
 		// Same pattern as completeApPurchase: the conditional debit is the guard,
 		// so it cannot be separated from the write by a stale read.
-		const debit = db().prepare(`
+		const debit = db()
+			.prepare(
+				`
 			UPDATE activity_balances SET balance = balance - ?
 			WHERE user_id = ? AND balance >= ?
-		`).run(amount, userId, amount);
+		`
+			)
+			.run(amount, userId, amount);
 
 		if (debit.changes === 0) {
 			return null;
 		}
 
-		db().prepare(`
+		db()
+			.prepare(
+				`
 			INSERT INTO activity_ledger (user_id, amount, kind, reference_id, block_height, created_at)
 			VALUES (?, ?, 'purchase', ?, ?, ?)
-		`).run(userId, -amount, purchaseId, blockHeight, now);
+		`
+			)
+			.run(userId, -amount, purchaseId, blockHeight, now);
 
 		return getBalance(userId);
 	});
@@ -362,11 +431,15 @@ function spendPoints({ userId, amount, purchaseId, blockHeight }) {
  * @returns {Array<object>}
  */
 function getStoreItems() {
-	return db().prepare(`
+	return db()
+		.prepare(
+			`
 		SELECT id, slug, name, description, ap_price, rp_price
 		FROM store_items
 		ORDER BY ap_price ASC
-	`).all();
+	`
+		)
+		.all();
 }
 
 /**
@@ -375,11 +448,15 @@ function getStoreItems() {
  * @returns {object|undefined}
  */
 function getStoreItemBySlug(slug) {
-	return db().prepare(`
+	return db()
+		.prepare(
+			`
 		SELECT id, slug, name, description, ap_price, rp_price
 		FROM store_items
 		WHERE slug = ?
-	`).get(slug);
+	`
+		)
+		.get(slug);
 }
 
 /**
@@ -396,10 +473,14 @@ function getStoreItemBySlug(slug) {
  */
 function createPurchase({ id, userId, itemId, paymentMethod, status, costAp, costRp, blockHeight }) {
 	const now = Math.floor(Date.now() / 1000);
-	db().prepare(`
+	db()
+		.prepare(
+			`
 		INSERT INTO purchases (id, user_id, item_id, payment_method, status, cost_ap, cost_rp, block_height, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`).run(id, userId, itemId, paymentMethod, status, costAp, costRp, blockHeight || null, now);
+	`
+		)
+		.run(id, userId, itemId, paymentMethod, status, costAp, costRp, blockHeight || null, now);
 }
 
 /**
@@ -408,12 +489,16 @@ function createPurchase({ id, userId, itemId, paymentMethod, status, costAp, cos
  * @returns {object|undefined}
  */
 function getPurchase(id) {
-	return db().prepare(`
+	return db()
+		.prepare(
+			`
 		SELECT p.*, s.name AS item_name, s.slug AS item_slug
 		FROM purchases p
 		JOIN store_items s ON s.id = p.item_id
 		WHERE p.id = ?
-	`).get(id);
+	`
+		)
+		.get(id);
 }
 
 /**
@@ -421,13 +506,17 @@ function getPurchase(id) {
  * @returns {Array<object>}
  */
 function listPendingPurchases() {
-	return db().prepare(`
+	return db()
+		.prepare(
+			`
 		SELECT p.*, s.name AS item_name, s.slug AS item_slug
 		FROM purchases p
 		JOIN store_items s ON s.id = p.item_id
 		WHERE p.status = 'pending' AND p.payment_method = 'rp'
 		ORDER BY p.created_at ASC
-	`).all();
+	`
+		)
+		.all();
 }
 
 /**
@@ -446,12 +535,16 @@ function listPendingPurchases() {
  */
 function claimPurchaseConfirmation({ id, claimedBy, leaseSeconds = 120 }) {
 	const now = Math.floor(Date.now() / 1000);
-	const result = db().prepare(`
+	const result = db()
+		.prepare(
+			`
 		UPDATE purchases
 		SET confirm_claim_by = ?, confirm_claim_until = ?
 		WHERE id = ? AND status = 'pending'
 		AND (confirm_claim_until IS NULL OR confirm_claim_until < ?)
-	`).run(claimedBy, now + leaseSeconds, id, now);
+	`
+		)
+		.run(claimedBy, now + leaseSeconds, id, now);
 	return result.changes > 0;
 }
 
@@ -464,11 +557,15 @@ function claimPurchaseConfirmation({ id, claimedBy, leaseSeconds = 120 }) {
  * @returns {boolean} true when a claim was cleared
  */
 function releasePurchaseConfirmation({ id, claimedBy }) {
-	const result = db().prepare(`
+	const result = db()
+		.prepare(
+			`
 		UPDATE purchases
 		SET confirm_claim_by = NULL, confirm_claim_until = NULL
 		WHERE id = ? AND confirm_claim_by = ?
-	`).run(id, claimedBy);
+	`
+		)
+		.run(id, claimedBy);
 	return result.changes > 0;
 }
 
@@ -483,9 +580,9 @@ function releasePurchaseConfirmation({ id, claimedBy }) {
  * @returns {boolean} true when a row was stamped
  */
 function setPurchaseBlockHeight({ id, blockHeight }) {
-	const result = db().prepare(
-		'UPDATE purchases SET block_height = ? WHERE id = ? AND block_height IS NULL'
-	).run(blockHeight, id);
+	const result = db()
+		.prepare('UPDATE purchases SET block_height = ? WHERE id = ? AND block_height IS NULL')
+		.run(blockHeight, id);
 	return result.changes > 0;
 }
 
@@ -497,9 +594,7 @@ function setPurchaseBlockHeight({ id, blockHeight }) {
  * @returns {boolean} true when a row was removed
  */
 function deletePendingPurchase(id) {
-	const result = db().prepare(
-		'DELETE FROM purchases WHERE id = ? AND status = \'pending\''
-	).run(id);
+	const result = db().prepare("DELETE FROM purchases WHERE id = ? AND status = 'pending'").run(id);
 	return result.changes > 0;
 }
 
@@ -513,12 +608,16 @@ function deletePendingPurchase(id) {
  */
 function confirmPurchase({ id, confirmedBy, blockHeight }) {
 	const now = Math.floor(Date.now() / 1000);
-	const result = db().prepare(`
+	const result = db()
+		.prepare(
+			`
 		UPDATE purchases
 		SET status = 'completed', block_height = ?, confirmed_at = ?, confirmed_by = ?,
 			confirm_claim_by = NULL, confirm_claim_until = NULL
 		WHERE id = ? AND status = 'pending'
-	`).run(blockHeight, now, confirmedBy, id);
+	`
+		)
+		.run(blockHeight, now, confirmedBy, id);
 	return result.changes > 0;
 }
 
@@ -529,14 +628,18 @@ function confirmPurchase({ id, confirmedBy, blockHeight }) {
  * @returns {Array<object>}
  */
 function getUserPurchases(userId, limit = 20) {
-	return db().prepare(`
+	return db()
+		.prepare(
+			`
 		SELECT p.*, s.name AS item_name, s.slug AS item_slug
 		FROM purchases p
 		JOIN store_items s ON s.id = p.item_id
 		WHERE p.user_id = ?
 		ORDER BY p.created_at DESC
 		LIMIT ?
-	`).all(userId, limit);
+	`
+		)
+		.all(userId, limit);
 }
 
 module.exports = {

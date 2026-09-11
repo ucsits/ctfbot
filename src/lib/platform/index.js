@@ -58,12 +58,7 @@
  * @module platform
  */
 
-const {
-	PLATFORMS,
-	DEFAULT_PLATFORM,
-	PLATFORM_CHOICES,
-	isKnownPlatform
-} = require('../constants/platforms');
+const { PLATFORMS, DEFAULT_PLATFORM, PLATFORM_CHOICES, isKnownPlatform } = require('../constants/platforms');
 
 /**
  * Factories are resolved lazily so a platform whose module is missing only
@@ -71,10 +66,8 @@ const {
  * tests without pulling in every adapter.
  */
 const FACTORIES = {
-	ctfd: (baseUrl, token, options) =>
-		require('./ctfd.adapter').createCTFdAdapter(baseUrl, token, options),
-	noctf: (baseUrl, token, options) =>
-		require('../noctf').createNoCTFClient(baseUrl, token, options)
+	ctfd: (baseUrl, token, options) => require('./ctfd.adapter').createCTFdAdapter(baseUrl, token, options),
+	noctf: (baseUrl, token, options) => require('../noctf').createNoCTFClient(baseUrl, token, options)
 };
 
 /**

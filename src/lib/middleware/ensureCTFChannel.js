@@ -15,7 +15,9 @@ function ensureCTFChannel(interaction) {
 	}
 
 	if (channel.parentId !== config.ctf.categoryId) {
-		throw new CTFChannelError('❌ This command can only be used in CTF channels (channels within the CTF category).');
+		throw new CTFChannelError(
+			'❌ This command can only be used in CTF channels (channels within the CTF category).'
+		);
 	}
 
 	return channel;

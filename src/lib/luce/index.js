@@ -160,131 +160,153 @@ function _buildBlockEmbed(block) {
 	const blockDate = new Date((block.timestamp || Math.floor(Date.now() / 1000)) * 1000);
 
 	switch (type) {
-	case 'rep': {
-		const amount = parsed.amount || 0;
-		const sign = amount > 0 ? '⬆️ +1' : '⬇️ -1';
-		return new EmbedBuilder()
-			.setColor(amount > 0 ? 0x00FF00 : 0xFF0000)
-			.setTitle(`${sign} Rep ${amount > 0 ? 'Upvote' : 'Downvote'}`)
-			.setDescription(
-				`<@${parsed.fromUser}> gave **${sign}** rep to <@${parsed.toUser}>`
-			)
-			.addFields({ name: 'Block', value: `#${block.height}`, inline: true })
-			.setTimestamp(blockDate);
-	}
-	case 'task':
-		return new EmbedBuilder()
-			.setColor(0x0099FF)
-			.setTitle('📋 Task Created')
-			.setDescription(parsed.title || 'Untitled task')
-			.addFields(
-				{ name: 'Created by', value: `<@${parsed.createdBy}>`, inline: true },
-				{ name: 'Assigned to', value: `<@${parsed.assignedTo}>`, inline: true },
-				{ name: 'Block', value: `#${block.height}`, inline: true }
-			)
-			.setTimestamp(blockDate);
-	case 'task_done': {
-		const task = parsed.taskId ? taskRepository.getTask(parsed.taskId) : null;
-		const title = parsed.title || task?.title || `Task \`${parsed.taskId || 'unknown'}\` marked as done`;
-		return new EmbedBuilder()
-			.setColor(0x00FF00)
-			.setTitle('✅ Task Completed')
-			.setDescription(title)
-			.addFields(
-				{ name: 'Completed by', value: parsed.completedBy ? `<@${parsed.completedBy}>` : 'Unknown', inline: true },
-				{ name: 'Assigned to', value: parsed.assignedTo || task?.assigned_to ? `<@${parsed.assignedTo || task.assigned_to}>` : 'Unknown', inline: true },
-				{ name: 'Task ID', value: `\`${parsed.taskId || 'unknown'}\``, inline: false },
-				{ name: 'Block', value: `#${block.height}`, inline: true }
-			)
-			.setTimestamp(blockDate);
-	}
-	case 'task_cancel': {
-		const task = parsed.taskId ? taskRepository.getTask(parsed.taskId) : null;
-		const title = parsed.title || task?.title || `Task \`${parsed.taskId || 'unknown'}\` was cancelled`;
-		return new EmbedBuilder()
-			.setColor(0xE74C3C)
-			.setTitle('🗑️ Task Cancelled')
-			.setDescription(title)
-			.addFields(
-				{ name: 'Cancelled by', value: parsed.cancelledBy ? `<@${parsed.cancelledBy}>` : 'Unknown', inline: true },
-				{ name: 'Assigned to', value: parsed.assignedTo || task?.assigned_to ? `<@${parsed.assignedTo || task.assigned_to}>` : 'Unknown', inline: true },
-				{ name: 'Task ID', value: `\`${parsed.taskId || 'unknown'}\``, inline: false },
-				{ name: 'Block', value: `#${block.height}`, inline: true }
-			)
-			.setTimestamp(blockDate);
-	}
-	case 'document': {
-		const isFile = parsed.filename && parsed.fileSize;
-		const embed = new EmbedBuilder()
-			.setColor(0xFFAA00)
-			.setTitle(isFile ? '📎 File Anchored' : '📄 Document Anchored')
-			.setDescription(parsed.title || 'Untitled document')
-			.addFields(
-				{ name: 'Author', value: `<@${parsed.author}>`, inline: true },
-				{ name: 'Block', value: `#${block.height}`, inline: true }
-			);
-
-		if (isFile) {
-			embed.addFields(
-				{ name: 'Filename', value: parsed.filename, inline: true },
-				{ name: 'Size', value: formatFileSizeShort(parsed.fileSize), inline: true }
-			);
+		case 'rep': {
+			const amount = parsed.amount || 0;
+			const sign = amount > 0 ? '⬆️ +1' : '⬇️ -1';
+			return new EmbedBuilder()
+				.setColor(amount > 0 ? 0x00ff00 : 0xff0000)
+				.setTitle(`${sign} Rep ${amount > 0 ? 'Upvote' : 'Downvote'}`)
+				.setDescription(`<@${parsed.fromUser}> gave **${sign}** rep to <@${parsed.toUser}>`)
+				.addFields({ name: 'Block', value: `#${block.height}`, inline: true })
+				.setTimestamp(blockDate);
 		}
+		case 'task':
+			return new EmbedBuilder()
+				.setColor(0x0099ff)
+				.setTitle('📋 Task Created')
+				.setDescription(parsed.title || 'Untitled task')
+				.addFields(
+					{ name: 'Created by', value: `<@${parsed.createdBy}>`, inline: true },
+					{ name: 'Assigned to', value: `<@${parsed.assignedTo}>`, inline: true },
+					{ name: 'Block', value: `#${block.height}`, inline: true }
+				)
+				.setTimestamp(blockDate);
+		case 'task_done': {
+			const task = parsed.taskId ? taskRepository.getTask(parsed.taskId) : null;
+			const title = parsed.title || task?.title || `Task \`${parsed.taskId || 'unknown'}\` marked as done`;
+			return new EmbedBuilder()
+				.setColor(0x00ff00)
+				.setTitle('✅ Task Completed')
+				.setDescription(title)
+				.addFields(
+					{
+						name: 'Completed by',
+						value: parsed.completedBy ? `<@${parsed.completedBy}>` : 'Unknown',
+						inline: true
+					},
+					{
+						name: 'Assigned to',
+						value:
+							parsed.assignedTo || task?.assigned_to
+								? `<@${parsed.assignedTo || task.assigned_to}>`
+								: 'Unknown',
+						inline: true
+					},
+					{ name: 'Task ID', value: `\`${parsed.taskId || 'unknown'}\``, inline: false },
+					{ name: 'Block', value: `#${block.height}`, inline: true }
+				)
+				.setTimestamp(blockDate);
+		}
+		case 'task_cancel': {
+			const task = parsed.taskId ? taskRepository.getTask(parsed.taskId) : null;
+			const title = parsed.title || task?.title || `Task \`${parsed.taskId || 'unknown'}\` was cancelled`;
+			return new EmbedBuilder()
+				.setColor(0xe74c3c)
+				.setTitle('🗑️ Task Cancelled')
+				.setDescription(title)
+				.addFields(
+					{
+						name: 'Cancelled by',
+						value: parsed.cancelledBy ? `<@${parsed.cancelledBy}>` : 'Unknown',
+						inline: true
+					},
+					{
+						name: 'Assigned to',
+						value:
+							parsed.assignedTo || task?.assigned_to
+								? `<@${parsed.assignedTo || task.assigned_to}>`
+								: 'Unknown',
+						inline: true
+					},
+					{ name: 'Task ID', value: `\`${parsed.taskId || 'unknown'}\``, inline: false },
+					{ name: 'Block', value: `#${block.height}`, inline: true }
+				)
+				.setTimestamp(blockDate);
+		}
+		case 'document': {
+			const isFile = parsed.filename && parsed.fileSize;
+			const embed = new EmbedBuilder()
+				.setColor(0xffaa00)
+				.setTitle(isFile ? '📎 File Anchored' : '📄 Document Anchored')
+				.setDescription(parsed.title || 'Untitled document')
+				.addFields(
+					{ name: 'Author', value: `<@${parsed.author}>`, inline: true },
+					{ name: 'Block', value: `#${block.height}`, inline: true }
+				);
 
-		embed.setTimestamp(blockDate);
-		return embed;
-	}
-	case 'ap_grant': {
-		const amount = parsed.amount || 0;
-		return new EmbedBuilder()
-			.setColor(0x9B59B6)
-			.setTitle('🎯 Activity Points Granted')
-			.setDescription(
-				`<@${parsed.grantedTo}> was granted **${amount} AP**`
-			)
-			.addFields(
-				{ name: 'Granted by', value: `<@${parsed.grantedBy}>`, inline: true },
-				{ name: 'Block', value: `#${block.height}`, inline: true }
-			)
-			.setTimestamp(blockDate);
-	}
-	case 'ap_purchase': {
-		const itemName = parsed.itemName || 'an item';
-		return new EmbedBuilder()
-			.setColor(0x00E5FF)
-			.setTitle('🛒 Store Purchase')
-			.setDescription(
-				`<@${parsed.user}> purchased **${itemName}** (${parsed.paymentMethod === 'ap' ? `${parsed.costAp} AP` : `Rp ${parsed.costRp}`})`
-			)
-			.addFields(
-				{ name: 'Status', value: parsed.status ?? 'completed', inline: true },
-				{ name: 'Block', value: `#${block.height}`, inline: true }
-			)
-			.setTimestamp(blockDate);
-	}
-	case 'ap_confirm': {
-		return new EmbedBuilder()
-			.setColor(0x2ECC71)
-			.setTitle('✅ Purchase Confirmed')
-			.setDescription(
-				`<@${parsed.confirmedBy}> confirmed **${parsed.itemName || 'a purchase'}** for <@${parsed.user}>`
-			)
-			.addFields(
-				{ name: 'Method', value: parsed.paymentMethod === 'rp' ? 'Rp (offline payment)' : 'AP', inline: true },
-				{ name: 'Block', value: `#${block.height}`, inline: true }
-			)
-			.setTimestamp(blockDate);
-	}
-	default:
-		return new EmbedBuilder()
-			.setColor(0x808080)
-			.setTitle('⛓️ New Block')
-			.setDescription(`Block **#${block.height}** appended to the chain`)
-			.addFields(
-				{ name: 'Author', value: `<@${block.author}>`, inline: true },
-				{ name: 'Type', value: type || 'unknown', inline: true }
-			)
-			.setTimestamp(blockDate);
+			if (isFile) {
+				embed.addFields(
+					{ name: 'Filename', value: parsed.filename, inline: true },
+					{ name: 'Size', value: formatFileSizeShort(parsed.fileSize), inline: true }
+				);
+			}
+
+			embed.setTimestamp(blockDate);
+			return embed;
+		}
+		case 'ap_grant': {
+			const amount = parsed.amount || 0;
+			return new EmbedBuilder()
+				.setColor(0x9b59b6)
+				.setTitle('🎯 Activity Points Granted')
+				.setDescription(`<@${parsed.grantedTo}> was granted **${amount} AP**`)
+				.addFields(
+					{ name: 'Granted by', value: `<@${parsed.grantedBy}>`, inline: true },
+					{ name: 'Block', value: `#${block.height}`, inline: true }
+				)
+				.setTimestamp(blockDate);
+		}
+		case 'ap_purchase': {
+			const itemName = parsed.itemName || 'an item';
+			return new EmbedBuilder()
+				.setColor(0x00e5ff)
+				.setTitle('🛒 Store Purchase')
+				.setDescription(
+					`<@${parsed.user}> purchased **${itemName}** (${parsed.paymentMethod === 'ap' ? `${parsed.costAp} AP` : `Rp ${parsed.costRp}`})`
+				)
+				.addFields(
+					{ name: 'Status', value: parsed.status ?? 'completed', inline: true },
+					{ name: 'Block', value: `#${block.height}`, inline: true }
+				)
+				.setTimestamp(blockDate);
+		}
+		case 'ap_confirm': {
+			return new EmbedBuilder()
+				.setColor(0x2ecc71)
+				.setTitle('✅ Purchase Confirmed')
+				.setDescription(
+					`<@${parsed.confirmedBy}> confirmed **${parsed.itemName || 'a purchase'}** for <@${parsed.user}>`
+				)
+				.addFields(
+					{
+						name: 'Method',
+						value: parsed.paymentMethod === 'rp' ? 'Rp (offline payment)' : 'AP',
+						inline: true
+					},
+					{ name: 'Block', value: `#${block.height}`, inline: true }
+				)
+				.setTimestamp(blockDate);
+		}
+		default:
+			return new EmbedBuilder()
+				.setColor(0x808080)
+				.setTitle('⛓️ New Block')
+				.setDescription(`Block **#${block.height}** appended to the chain`)
+				.addFields(
+					{ name: 'Author', value: `<@${block.author}>`, inline: true },
+					{ name: 'Type', value: type || 'unknown', inline: true }
+				)
+				.setTimestamp(blockDate);
 	}
 }
 
@@ -321,46 +343,46 @@ async function _notifyBlock(block) {
 	try {
 		const parsed = JSON.parse(block.data);
 		switch (parsed.type) {
-		case 'task':
-			content = `<@${parsed.createdBy}> assigned a task to <@${parsed.assignedTo}>`;
-			break;
-		case 'task_done':
-			content = parsed.completedBy
-				? `<@${parsed.completedBy}> completed **${parsed.title || `task \`${parsed.taskId || 'unknown'}\``}**`
-				: `Task **${parsed.title || parsed.taskId || 'unknown'}** was completed`;
-			break;
-		case 'task_cancel':
-			content = parsed.cancelledBy
-				? `<@${parsed.cancelledBy}> cancelled **${parsed.title || `task \`${parsed.taskId || 'unknown'}\``}**`
-				: `Task **${parsed.title || parsed.taskId || 'unknown'}** was cancelled`;
-			break;
-		case 'rep':
-			content = `<@${parsed.fromUser}> gave rep to <@${parsed.toUser}>`;
-			break;
-		case 'document': {
-			const isFile = parsed.filename && parsed.fileSize;
-			content = isFile
-				? `<@${parsed.author}> anchored a file **${parsed.filename}**`
-				: `<@${parsed.author}> anchored a document`;
-			break;
-		}
-		case 'ap_grant': {
-			if (parsed.v === 2) {
-				content = `<@${parsed.grantedBy}> granted **${parsed.total} AP** to ${parsed.count} user(s)`;
-			} else {
-				content = `<@${parsed.grantedBy}> granted **${parsed.amount} AP** to <@${parsed.grantedTo}>`;
+			case 'task':
+				content = `<@${parsed.createdBy}> assigned a task to <@${parsed.assignedTo}>`;
+				break;
+			case 'task_done':
+				content = parsed.completedBy
+					? `<@${parsed.completedBy}> completed **${parsed.title || `task \`${parsed.taskId || 'unknown'}\``}**`
+					: `Task **${parsed.title || parsed.taskId || 'unknown'}** was completed`;
+				break;
+			case 'task_cancel':
+				content = parsed.cancelledBy
+					? `<@${parsed.cancelledBy}> cancelled **${parsed.title || `task \`${parsed.taskId || 'unknown'}\``}**`
+					: `Task **${parsed.title || parsed.taskId || 'unknown'}** was cancelled`;
+				break;
+			case 'rep':
+				content = `<@${parsed.fromUser}> gave rep to <@${parsed.toUser}>`;
+				break;
+			case 'document': {
+				const isFile = parsed.filename && parsed.fileSize;
+				content = isFile
+					? `<@${parsed.author}> anchored a file **${parsed.filename}**`
+					: `<@${parsed.author}> anchored a document`;
+				break;
 			}
-			break;
-		}
-		case 'ap_purchase': {
-			const cost = parsed.paymentMethod === 'ap' ? `${parsed.costAp} AP` : `Rp ${parsed.costRp}`;
-			content = `<@${parsed.user}> purchased **${parsed.itemName}** for ${cost}`;
-			break;
-		}
-		case 'ap_confirm': {
-			content = `<@${parsed.confirmedBy}> confirmed **${parsed.itemName}** for <@${parsed.user}>`;
-			break;
-		}
+			case 'ap_grant': {
+				if (parsed.v === 2) {
+					content = `<@${parsed.grantedBy}> granted **${parsed.total} AP** to ${parsed.count} user(s)`;
+				} else {
+					content = `<@${parsed.grantedBy}> granted **${parsed.amount} AP** to <@${parsed.grantedTo}>`;
+				}
+				break;
+			}
+			case 'ap_purchase': {
+				const cost = parsed.paymentMethod === 'ap' ? `${parsed.costAp} AP` : `Rp ${parsed.costRp}`;
+				content = `<@${parsed.user}> purchased **${parsed.itemName}** for ${cost}`;
+				break;
+			}
+			case 'ap_confirm': {
+				content = `<@${parsed.confirmedBy}> confirmed **${parsed.itemName}** for <@${parsed.user}>`;
+				break;
+			}
 		}
 	} catch {
 		// fall through — send embed-only if data can't be parsed
@@ -369,7 +391,19 @@ async function _notifyBlock(block) {
 	const userIds = [];
 	try {
 		const parsed = JSON.parse(block.data);
-		for (const id of [parsed.createdBy, parsed.assignedTo, parsed.completedBy, parsed.cancelledBy, parsed.fromUser, parsed.toUser, parsed.author, parsed.grantedBy, parsed.grantedTo, parsed.user, parsed.confirmedBy]) {
+		for (const id of [
+			parsed.createdBy,
+			parsed.assignedTo,
+			parsed.completedBy,
+			parsed.cancelledBy,
+			parsed.fromUser,
+			parsed.toUser,
+			parsed.author,
+			parsed.grantedBy,
+			parsed.grantedTo,
+			parsed.user,
+			parsed.confirmedBy
+		]) {
 			if (id && !userIds.includes(String(id))) {
 				userIds.push(String(id));
 			}

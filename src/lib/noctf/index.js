@@ -35,10 +35,7 @@ const TEAM_ID_CHUNK_SIZE = 50;
  * failure, and flagged so callers can present them as a configuration problem
  * rather than an outage.
  */
-const GATING_MESSAGES = [
-	'The CTF is not currently active',
-	'The CTF has not started yet'
-];
+const GATING_MESSAGES = ['The CTF is not currently active', 'The CTF has not started yet'];
 
 function sleep(ms) {
 	return new Promise(resolve => setTimeout(resolve, ms));
@@ -130,9 +127,12 @@ class NoCTFClient {
 			headers.Authorization = `Bearer ${this.token}`;
 		}
 
-		const body = options.body === undefined || options.body === null
-			? undefined
-			: (typeof options.body === 'string' ? options.body : JSON.stringify(options.body));
+		const body =
+			options.body === undefined || options.body === null
+				? undefined
+				: typeof options.body === 'string'
+					? options.body
+					: JSON.stringify(options.body);
 
 		let attempt = 0;
 		for (;;) {
@@ -164,9 +164,7 @@ class NoCTFClient {
 			if (response.status >= 500 && attempt < MAX_SERVER_ERROR_RETRIES) {
 				attempt += 1;
 				const backoff = RETRY_BACKOFF_MS * attempt;
-				this.log.warn(
-					`noCTF ${response.status} from ${method} ${url}, retrying in ${backoff}ms`
-				);
+				this.log.warn(`noCTF ${response.status} from ${method} ${url}, retrying in ${backoff}ms`);
 				await sleep(backoff);
 				continue;
 			}
@@ -234,10 +232,11 @@ class NoCTFClient {
 	 * @returns {string}
 	 */
 	_categoryFromTags(tags) {
-		const raw = tags && tags.categories !== undefined && tags.categories !== null
-			? String(tags.categories)
-			: '';
-		const first = raw.split(',').map(part => part.trim()).find(Boolean);
+		const raw = tags && tags.categories !== undefined && tags.categories !== null ? String(tags.categories) : '';
+		const first = raw
+			.split(',')
+			.map(part => part.trim())
+			.find(Boolean);
 		return first || 'uncategorized';
 	}
 
@@ -351,10 +350,14 @@ class NoCTFClient {
 	 * @returns {Promise<Map<string, string>>} Map of String(team id) to team name
 	 */
 	async resolveTeamNames(teamIds) {
-		const unique = [...new Set((teamIds || [])
-			.filter(id => id !== null && id !== undefined && id !== '')
-			.map(id => Number(id))
-			.filter(id => Number.isFinite(id)))];
+		const unique = [
+			...new Set(
+				(teamIds || [])
+					.filter(id => id !== null && id !== undefined && id !== '')
+					.map(id => Number(id))
+					.filter(id => Number.isFinite(id))
+			)
+		];
 		const names = new Map();
 
 		for (let i = 0; i < unique.length; i += TEAM_ID_CHUNK_SIZE) {
@@ -391,10 +394,14 @@ class NoCTFClient {
 	 * @returns {Promise<Map<string, string>>} Map of String(user id) to name
 	 */
 	async resolveUserNames(userIds) {
-		const unique = [...new Set((userIds || [])
-			.filter(id => id !== null && id !== undefined && id !== '')
-			.map(id => Number(id))
-			.filter(id => Number.isFinite(id)))];
+		const unique = [
+			...new Set(
+				(userIds || [])
+					.filter(id => id !== null && id !== undefined && id !== '')
+					.map(id => Number(id))
+					.filter(id => Number.isFinite(id))
+			)
+		];
 		const names = new Map();
 
 		for (let i = 0; i < unique.length; i += TEAM_ID_CHUNK_SIZE) {

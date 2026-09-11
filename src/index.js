@@ -36,11 +36,7 @@ const client = new SapphireClient({
 		GatewayIntentBits.MessageContent,
 		GatewayIntentBits.GuildMembers
 	],
-	partials: [
-		Partials.Message,
-		Partials.Channel,
-		Partials.Reaction
-	],
+	partials: [Partials.Message, Partials.Channel, Partials.Reaction],
 	loadMessageCommandListeners: true,
 	baseUserDirectory: __dirname,
 	logger: {

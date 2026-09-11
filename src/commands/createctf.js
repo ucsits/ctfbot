@@ -15,79 +15,85 @@ class CreateCTFCommand extends Command {
 	}
 
 	registerApplicationCommands(registry) {
-		registry.registerChatInputCommand((builder) =>
-			builder
-				.setName(this.name)
-				.setDescription(this.description)
-				.addStringOption(option =>
-					option
-						.setName('ctf_name')
-						.setDescription('Name of the CTF competition')
-						.setRequired(true)
-				)
-				.addStringOption(option =>
-					option
-						.setName('ctf_date')
-						.setDescription('CTF start date: DD-MM-YYYY HH:MM or Unix timestamp (@time compatible)')
-						.setRequired(true)
-				)
-				.addStringOption(option =>
-					option
-						.setName('ctf_base_url')
-						.setDescription('Base URL of the CTF (e.g., https://ctf.example.com)')
-						.setRequired(true)
-				)
-				.addStringOption(option =>
-					option
-						.setName('timezone')
-						.setDescription('Your timezone (default: Asia/Jakarta)')
-						.setRequired(false)
-				)
-				.addStringOption(option =>
-					option
-						.setName('api_token')
-						.setDescription('Platform API token for automatic registration integration (optional)')
-						.setRequired(false)
-				)
-				.addStringOption(option =>
-					option
-						.setName('ctf_end_date')
-						.setDescription('CTF end date: DD-MM-YYYY HH:MM or Unix timestamp (@time compatible, defaults +24h)')
-						.setRequired(false)
-				)
-				.addStringOption(option =>
-					option
-						.setName('event_description')
-						.setDescription('Description of the CTF event')
-						.setRequired(false)
-				)
-				.addAttachmentOption(option =>
-					option
-						.setName('event_banner')
-						.setDescription('Banner image for the CTF event')
-						.setRequired(false)
-				)
-				.addBooleanOption(option =>
-					option
-						.setName('team_mode')
-						.setDescription('Is this a team-based CTF? (default: false)')
-						.setRequired(false)
-				)
-				.addChannelOption(option =>
-					option
-						.setName('voice_channel')
-						.setDescription('Voice or Stage channel for the event (optional, creates external event if omitted)')
-						.setRequired(false)
-						.addChannelTypes(ChannelType.GuildVoice, ChannelType.GuildStageVoice)
-				),
-		{
-			idHints: getIdHints(this.name)
-		}
+		registry.registerChatInputCommand(
+			builder =>
+				builder
+					.setName(this.name)
+					.setDescription(this.description)
+					.addStringOption(option =>
+						option.setName('ctf_name').setDescription('Name of the CTF competition').setRequired(true)
+					)
+					.addStringOption(option =>
+						option
+							.setName('ctf_date')
+							.setDescription('CTF start date: DD-MM-YYYY HH:MM or Unix timestamp (@time compatible)')
+							.setRequired(true)
+					)
+					.addStringOption(option =>
+						option
+							.setName('ctf_base_url')
+							.setDescription('Base URL of the CTF (e.g., https://ctf.example.com)')
+							.setRequired(true)
+					)
+					.addStringOption(option =>
+						option
+							.setName('timezone')
+							.setDescription('Your timezone (default: Asia/Jakarta)')
+							.setRequired(false)
+					)
+					.addStringOption(option =>
+						option
+							.setName('api_token')
+							.setDescription('Platform API token for automatic registration integration (optional)')
+							.setRequired(false)
+					)
+					.addStringOption(option =>
+						option
+							.setName('ctf_end_date')
+							.setDescription(
+								'CTF end date: DD-MM-YYYY HH:MM or Unix timestamp (@time compatible, defaults +24h)'
+							)
+							.setRequired(false)
+					)
+					.addStringOption(option =>
+						option
+							.setName('event_description')
+							.setDescription('Description of the CTF event')
+							.setRequired(false)
+					)
+					.addAttachmentOption(option =>
+						option
+							.setName('event_banner')
+							.setDescription('Banner image for the CTF event')
+							.setRequired(false)
+					)
+					.addBooleanOption(option =>
+						option
+							.setName('team_mode')
+							.setDescription('Is this a team-based CTF? (default: false)')
+							.setRequired(false)
+					)
+					.addChannelOption(option =>
+						option
+							.setName('voice_channel')
+							.setDescription(
+								'Voice or Stage channel for the event (optional, creates external event if omitted)'
+							)
+							.setRequired(false)
+							.addChannelTypes(ChannelType.GuildVoice, ChannelType.GuildStageVoice)
+					),
+			{
+				idHints: getIdHints(this.name)
+			}
 		);
 	}
 
 	async chatInputRun(interaction) {
-		const cancelled = await checkPermissionReply(interaction, PermissionFlagsBits.ManageChannels, 'Manage Channels');
+		const cancelled = await checkPermissionReply(
+			interaction,
+			PermissionFlagsBits.ManageChannels,
+			'Manage Channels'
+		);
 		if (cancelled) {
 			return;
 		}
@@ -120,7 +126,6 @@ class CreateCTFCommand extends Command {
 			ctfId = await this.saveToDatabase(interaction, ctfChannel, scheduledEvent, options, dates);
 
 			return this.sendConfirmation(interaction, ctfChannel, scheduledEvent, options);
-
 		} catch (error) {
 			this.container.logger.error('Error creating CTF:', error);
 			await this._compensateCreate(interaction, ctfChannel, scheduledEvent, ctfId);
@@ -189,7 +194,9 @@ class CreateCTFCommand extends Command {
 			timezone: interaction.options.getString('timezone') || 'Asia/Jakarta',
 			apiToken: interaction.options.getString('api_token'),
 			teamMode: interaction.options.getBoolean('team_mode') || false,
-			description: interaction.options.getString('event_description') || `Join us for ${interaction.options.getString('ctf_name')}!`,
+			description:
+				interaction.options.getString('event_description') ||
+				`Join us for ${interaction.options.getString('ctf_name')}!`,
 			banner: interaction.options.getAttachment('event_banner'),
 			voiceChannel: interaction.options.getChannel('voice_channel')
 		};
@@ -235,7 +242,10 @@ class CreateCTFCommand extends Command {
 	}
 
 	formatChannelName(ctfName) {
-		return ctfName.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+		return ctfName
+			.toLowerCase()
+			.replace(/\s+/g, '-')
+			.replace(/[^a-z0-9-]/g, '');
 	}
 
 	async createChannel(interaction, channelName, category, options) {
@@ -284,7 +294,7 @@ class CreateCTFCommand extends Command {
 	async sendWelcomeMessage(channel, options, dates, scheduledEvent) {
 		const interpretation = formatDateInterpretation(options.dateStr, options.timezone, dates.eventDate);
 		const embed = new EmbedBuilder()
-			.setColor(0x0099FF)
+			.setColor(0x0099ff)
 			.setTitle(`${options.ctfName}`)
 			.setDescription(`${options.description}\n\n${interpretation}`)
 			.addFields(
@@ -299,7 +309,11 @@ class CreateCTFCommand extends Command {
 			embed.addFields({ name: '🔊 Channel', value: options.voiceChannel.toString(), inline: true });
 		}
 
-		embed.addFields({ name: 'Register', value: 'Use `/registerctf <username>` to register your participation!', inline: false });
+		embed.addFields({
+			name: 'Register',
+			value: 'Use `/registerctf <username>` to register your participation!',
+			inline: false
+		});
 
 		if (options.banner) {
 			embed.setImage(options.banner.url);
@@ -333,12 +347,16 @@ class CreateCTFCommand extends Command {
 	sendConfirmation(interaction, channel, event, options) {
 		const interpretation = formatDateInterpretation(options.dateStr, options.timezone, event.scheduledStartAt);
 		const embed = new EmbedBuilder()
-			.setColor(0x00FF00)
+			.setColor(0x00ff00)
 			.setTitle('CTF Created Successfully')
 			.setDescription(`**${options.ctfName}** has been set up!\n\n${interpretation}`)
 			.addFields(
 				{ name: 'Channel', value: `${channel}`, inline: true },
-				{ name: 'Start Time', value: `<t:${Math.floor(event.scheduledStartAt.getTime() / 1000)}:F>`, inline: false }
+				{
+					name: 'Start Time',
+					value: `<t:${Math.floor(event.scheduledStartAt.getTime() / 1000)}:F>`,
+					inline: false
+				}
 			)
 			.setTimestamp();
 

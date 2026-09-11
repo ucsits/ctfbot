@@ -8,7 +8,7 @@
 
 /** Common timezones grouped by continent/region */
 const COMMON_TIMEZONES = {
-	'Asia': [
+	Asia: [
 		'Asia/Jakarta',
 		'Asia/Makassar',
 		'Asia/Jayapura',
@@ -28,7 +28,7 @@ const COMMON_TIMEZONES = {
 		'Asia/Riyadh',
 		'Asia/Manila'
 	],
-	'America': [
+	America: [
 		'America/New_York',
 		'America/Chicago',
 		'America/Denver',
@@ -47,7 +47,7 @@ const COMMON_TIMEZONES = {
 		'America/Halifax',
 		'America/St_Johns'
 	],
-	'Europe': [
+	Europe: [
 		'Europe/London',
 		'Europe/Paris',
 		'Europe/Berlin',
@@ -69,7 +69,7 @@ const COMMON_TIMEZONES = {
 		'Europe/Istanbul',
 		'Europe/Kyiv'
 	],
-	'Africa': [
+	Africa: [
 		'Africa/Cairo',
 		'Africa/Casablanca',
 		'Africa/Lagos',
@@ -77,7 +77,7 @@ const COMMON_TIMEZONES = {
 		'Africa/Johannesburg',
 		'Africa/Tunis'
 	],
-	'Australia': [
+	Australia: [
 		'Australia/Sydney',
 		'Australia/Melbourne',
 		'Australia/Brisbane',
@@ -86,12 +86,7 @@ const COMMON_TIMEZONES = {
 		'Australia/Darwin',
 		'Australia/Hobart'
 	],
-	'Pacific': [
-		'Pacific/Auckland',
-		'Pacific/Fiji',
-		'Pacific/Honolulu',
-		'Pacific/Guam'
-	]
+	Pacific: ['Pacific/Auckland', 'Pacific/Fiji', 'Pacific/Honolulu', 'Pacific/Guam']
 };
 
 /** Flat list of all common timezones */
@@ -108,9 +103,7 @@ function searchTimezone(query, limit = 25) {
 		return ALL_COMMON.slice(0, limit);
 	}
 	const lower = query.toLowerCase().replace(/\s+/g, '_');
-	const results = ALL_COMMON.filter(tz =>
-		tz.toLowerCase().includes(lower)
-	);
+	const results = ALL_COMMON.filter(tz => tz.toLowerCase().includes(lower));
 	return results.slice(0, limit);
 }
 
@@ -122,7 +115,9 @@ function searchTimezone(query, limit = 25) {
  * @returns {string[]} Suggested timezone strings
  */
 function suggestTimezones(invalidInput, limit = 5) {
-	if (!invalidInput) return [];
+	if (!invalidInput) {
+		return [];
+	}
 	const lower = invalidInput.toLowerCase().replace(/\s+/g, '_');
 	const parts = lower.split(/[/_]/).filter(Boolean);
 

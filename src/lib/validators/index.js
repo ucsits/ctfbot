@@ -21,9 +21,7 @@ function validateURL(url, options = {}) {
 	try {
 		const urlObj = new URL(url);
 		if (!allowedProtocols.includes(urlObj.protocol)) {
-			throw new ValidationError(
-				`❌ Invalid URL protocol. Allowed: ${allowedProtocols.join(', ')}`
-			);
+			throw new ValidationError(`❌ Invalid URL protocol. Allowed: ${allowedProtocols.join(', ')}`);
 		}
 		return true;
 	} catch (error) {
@@ -51,9 +49,7 @@ function validateDateFormat(dateStr) {
 	const dateMatch = dateStr.match(/^(\d{2})-(\d{2})-(\d{4})\s+(\d{2}):(\d{2})$/);
 
 	if (!dateMatch) {
-		throw new ValidationError(
-			'❌ Invalid date format. Please use: DD-MM-YYYY HH:MM (e.g., 31-12-2025 20:00)'
-		);
+		throw new ValidationError('❌ Invalid date format. Please use: DD-MM-YYYY HH:MM (e.g., 31-12-2025 20:00)');
 	}
 
 	const [, day, month, year, hour, minute] = dateMatch;
@@ -110,7 +106,7 @@ const FLEXIBLE_DATE_FORMATS = [
 	'MM/dd/yyyy HH:mm:ss',
 	'MM-dd-yyyy HH:mm',
 	'M/d/yyyy H:m',
-	'M/d/yyyy H:m:s',
+	'M/d/yyyy H:m:s'
 ];
 
 /**
@@ -190,8 +186,8 @@ function validateFlexibleDateFormat(dateStr) {
 
 	throw new ValidationError(
 		'❌ Invalid date format. Try:\n' +
-		'  `31-12-2025 20:00`   (DD-MM-YYYY HH:MM)\n' +
-		'  `1735689600`         (Unix timestamp — Discord @time compatible)'
+			'  `31-12-2025 20:00`   (DD-MM-YYYY HH:MM)\n' +
+			'  `1735689600`         (Unix timestamp — Discord @time compatible)'
 	);
 }
 
@@ -208,12 +204,11 @@ function validateTimezone(timezone) {
 		return true;
 	} catch (error) {
 		const suggestions = suggestTimezones(timezone);
-		const suggestionStr = suggestions.length > 0
-			? ` Did you mean: ${suggestions.map(s => '\`' + s + '\`').join(', ')}?`
-			: ' Use `/timezones` to see common timezones.';
-		throw new ValidationError(
-			`❌ Invalid timezone \`${timezone}\`.${suggestionStr}`
-		);
+		const suggestionStr =
+			suggestions.length > 0
+				? ` Did you mean: ${suggestions.map(s => '`' + s + '`').join(', ')}?`
+				: ' Use `/timezones` to see common timezones.';
+		throw new ValidationError(`❌ Invalid timezone \`${timezone}\`.${suggestionStr}`);
 	}
 }
 

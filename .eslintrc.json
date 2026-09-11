@@ -9,9 +9,16 @@
 		"sourceType": "module"
 	},
 	"rules": {
-		"indent": ["error", "tab"],
+		// Indentation is Prettier's job. This rule cannot agree with it on switch
+		// cases or on ternaries and object literals continued over several lines,
+		// and it is deprecated in ESLint 8 and removed in ESLint 9, so keeping it
+		// on only ever produced errors that no formatting could satisfy.
+		"indent": "off",
 		"linebreak-style": ["error", "unix"],
-		"quotes": ["error", "single"],
+		// A string that contains a single quote is written with double quotes,
+		// which is what Prettier emits for it; avoidEscape is what lets the two
+		// agree instead of contradicting each other.
+		"quotes": ["error", "single", { "avoidEscape": true }],
 		"semi": ["error", "always"],
 		"no-unused-vars": ["warn", { "argsIgnorePattern": "^_" }],
 		"no-console": "off",

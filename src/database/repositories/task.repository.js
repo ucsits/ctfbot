@@ -112,9 +112,7 @@ function beginTaskTransition({ taskId, action, actorId }) {
  * Read the recorded transition row for a task and action, or undefined.
  */
 function getTaskTransition(taskId, action) {
-	return db()
-		.prepare('SELECT * FROM task_transition_blocks WHERE task_id = ? AND action = ?')
-		.get(taskId, action);
+	return db().prepare('SELECT * FROM task_transition_blocks WHERE task_id = ? AND action = ?').get(taskId, action);
 }
 
 /**

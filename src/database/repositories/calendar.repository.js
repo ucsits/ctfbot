@@ -18,9 +18,11 @@ const db = () => getConnection();
  * @returns {{client_id: string, client_secret: string, refresh_token: string, calendar_id: string}|null}
  */
 function getCredentials() {
-	return db()
-		.prepare('SELECT client_id, client_secret, refresh_token, calendar_id FROM google_credentials WHERE id = 1')
-		.get() || null;
+	return (
+		db()
+			.prepare('SELECT client_id, client_secret, refresh_token, calendar_id FROM google_credentials WHERE id = 1')
+			.get() || null
+	);
 }
 
 /**
@@ -55,9 +57,7 @@ function setCredentials({ clientId, clientSecret, refreshToken, calendarId }) {
  * @returns {{sync_token: string|null, last_sync_at: number|null}|null}
  */
 function getSyncToken() {
-	return db()
-		.prepare('SELECT sync_token, last_sync_at FROM calendar_sync_state WHERE id = 1')
-		.get() || null;
+	return db().prepare('SELECT sync_token, last_sync_at FROM calendar_sync_state WHERE id = 1').get() || null;
 }
 
 /**

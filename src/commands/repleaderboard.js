@@ -12,17 +12,19 @@ class RepLeaderboardCommand extends Command {
 	}
 
 	registerApplicationCommands(registry) {
-		registry.registerChatInputCommand((builder) =>
-			builder
-				.setName(this.name)
-				.setDescription(this.description)
-				.addIntegerOption(opt =>
-					opt.setName('limit')
-						.setDescription('Number of top users to show (default: 10, max: 50)')
-						.setRequired(false)
-						.setMinValue(1)
-						.setMaxValue(50)
-				),
+		registry.registerChatInputCommand(
+			builder =>
+				builder
+					.setName(this.name)
+					.setDescription(this.description)
+					.addIntegerOption(opt =>
+						opt
+							.setName('limit')
+							.setDescription('Number of top users to show (default: 10, max: 50)')
+							.setRequired(false)
+							.setMinValue(1)
+							.setMaxValue(50)
+					),
 			{
 				idHints: require('../lib/utils/commandIds').getIdHints('repleaderboard')
 			}
@@ -41,10 +43,7 @@ class RepLeaderboardCommand extends Command {
 				return interaction.editReply('📊 No rep data yet. Be the first to give rep!');
 			}
 
-			const embed = new EmbedBuilder()
-				.setColor(0xF1C40F)
-				.setTitle('🏆 Reputation Leaderboard')
-				.setTimestamp();
+			const embed = new EmbedBuilder().setColor(0xf1c40f).setTitle('🏆 Reputation Leaderboard').setTimestamp();
 
 			const lines = [];
 			for (let i = 0; i < rows.length; i++) {

@@ -22,19 +22,17 @@ class StoreConfirmCommand extends Command {
 	}
 
 	registerApplicationCommands(registry) {
-		registry.registerChatInputCommand((builder) =>
-			builder
-				.setName(this.name)
-				.setDescription(this.description)
-				.addStringOption(opt =>
-					opt
-						.setName('purchase_id')
-						.setDescription('The purchase ID to confirm')
-						.setRequired(true)
-				),
-		{
-			idHints: getIdHints(this.name)
-		}
+		registry.registerChatInputCommand(
+			builder =>
+				builder
+					.setName(this.name)
+					.setDescription(this.description)
+					.addStringOption(opt =>
+						opt.setName('purchase_id').setDescription('The purchase ID to confirm').setRequired(true)
+					),
+			{
+				idHints: getIdHints(this.name)
+			}
 		);
 	}
 
@@ -107,7 +105,7 @@ class StoreConfirmCommand extends Command {
 			}
 
 			const embed = new EmbedBuilder()
-				.setColor(0x2ECC71)
+				.setColor(0x2ecc71)
 				.setTitle('✅ Purchase Confirmed')
 				.setDescription(`**${purchase.item_name}** confirmed for <@${purchase.user_id}>`)
 				.addFields(

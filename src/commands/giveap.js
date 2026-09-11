@@ -15,32 +15,30 @@ class GiveApCommand extends Command {
 	}
 
 	registerApplicationCommands(registry) {
-		registry.registerChatInputCommand((builder) =>
-			builder
-				.setName(this.name)
-				.setDescription(this.description)
-				.addIntegerOption(opt =>
-					opt
-						.setName('points')
-						.setDescription('Number of activity points to grant')
-						.setRequired(true)
-						.setMinValue(1)
-				)
-				.addUserOption(opt =>
-					opt
-						.setName('user')
-						.setDescription('User to grant activity points to')
-						.setRequired(false)
-				)
-				.addRoleOption(opt =>
-					opt
-						.setName('role')
-						.setDescription('Grant activity points to every member of this role')
-						.setRequired(false)
-				),
-		{
-			idHints: getIdHints(this.name)
-		}
+		registry.registerChatInputCommand(
+			builder =>
+				builder
+					.setName(this.name)
+					.setDescription(this.description)
+					.addIntegerOption(opt =>
+						opt
+							.setName('points')
+							.setDescription('Number of activity points to grant')
+							.setRequired(true)
+							.setMinValue(1)
+					)
+					.addUserOption(opt =>
+						opt.setName('user').setDescription('User to grant activity points to').setRequired(false)
+					)
+					.addRoleOption(opt =>
+						opt
+							.setName('role')
+							.setDescription('Grant activity points to every member of this role')
+							.setRequired(false)
+					),
+			{
+				idHints: getIdHints(this.name)
+			}
 		);
 	}
 
@@ -94,13 +92,15 @@ class GiveApCommand extends Command {
 			});
 
 			if (!applied) {
-				return interaction.editReply('⚠️ These points were already granted for this action; nothing was changed.');
+				return interaction.editReply(
+					'⚠️ These points were already granted for this action; nothing was changed.'
+				);
 			}
 
 			const newBalance = balances[0].balance;
 
 			const embed = new EmbedBuilder()
-				.setColor(0x9B59B6)
+				.setColor(0x9b59b6)
 				.setTitle('🎯 Activity Points Granted')
 				.setDescription(`${user} was granted **${points} AP**`)
 				.addFields(
@@ -164,11 +164,13 @@ class GiveApCommand extends Command {
 			});
 
 			if (!applied) {
-				return interaction.editReply('⚠️ These points were already granted for this action; nothing was changed.');
+				return interaction.editReply(
+					'⚠️ These points were already granted for this action; nothing was changed.'
+				);
 			}
 
 			const embed = new EmbedBuilder()
-				.setColor(0x9B59B6)
+				.setColor(0x9b59b6)
 				.setTitle('🎯 Activity Points Granted to Role')
 				.setDescription(`**${members.length}** member(s) of **${role.name}** each received **+${points} AP**`)
 				.addFields(
@@ -180,7 +182,8 @@ class GiveApCommand extends Command {
 				)
 				.setTimestamp();
 
-			const preview = members.slice(0, 10)
+			const preview = members
+				.slice(0, 10)
 				.map(m => `<@${m.user.id}>`)
 				.join(', ');
 			if (members.length > 0) {

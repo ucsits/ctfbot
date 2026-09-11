@@ -156,11 +156,7 @@ async function listAllEvents(creds, opts = {}) {
  */
 async function createEvent(creds, event) {
 	const url = `${BASE}/calendars/${encodeURIComponent(creds.calendarId)}/events`;
-	const res = await _authorizedFetch(
-		url,
-		{ method: 'POST', body: JSON.stringify(event) },
-		creds
-	);
+	const res = await _authorizedFetch(url, { method: 'POST', body: JSON.stringify(event) }, creds);
 
 	if (!res.ok) {
 		const body = await res.text().catch(() => '');
@@ -180,11 +176,7 @@ async function createEvent(creds, event) {
  */
 async function patchEvent(creds, eventId, fields) {
 	const url = `${BASE}/calendars/${encodeURIComponent(creds.calendarId)}/events/${encodeURIComponent(eventId)}`;
-	const res = await _authorizedFetch(
-		url,
-		{ method: 'PATCH', body: JSON.stringify(fields) },
-		creds
-	);
+	const res = await _authorizedFetch(url, { method: 'PATCH', body: JSON.stringify(fields) }, creds);
 
 	if (!res.ok) {
 		const body = await res.text().catch(() => '');
@@ -277,9 +269,7 @@ function calendarEventToTaskPatch(event) {
 	const taskId = privateProps.xCtfbotTaskId || null;
 	const isBotOwned = privateProps.xCtfbotTask === 'true';
 
-	const endTime = event.end?.dateTime
-		? Math.floor(new Date(event.end.dateTime).getTime() / 1000)
-		: null;
+	const endTime = event.end?.dateTime ? Math.floor(new Date(event.end.dateTime).getTime() / 1000) : null;
 
 	return {
 		eventId: event.id,

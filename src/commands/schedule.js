@@ -13,50 +13,44 @@ class ScheduleCommand extends Command {
 	}
 
 	registerApplicationCommands(registry) {
-		registry.registerChatInputCommand((builder) =>
-			builder
-				.setName(this.name)
-				.setDescription(this.description)
-				.addStringOption(option =>
-					option
-						.setName('event_title')
-						.setDescription('The title of the event')
-						.setRequired(true)
-				)
-				.addStringOption(option =>
-					option
-						.setName('event_description')
-						.setDescription('Description of the event')
-						.setRequired(true)
-				)
-				.addStringOption(option =>
-					option
-						.setName('event_date')
-						.setDescription('Event date — DD-MM-YYYY HH:MM or Unix timestamp (@time compatible)')
-						.setRequired(true)
-				)
-				.addStringOption(option =>
-					option
-						.setName('timezone')
-						.setDescription('Your timezone (default: Asia/Jakarta)')
-						.setRequired(false)
-				)
-				.addAttachmentOption(option =>
-					option
-						.setName('event_banner')
-						.setDescription('Banner image for the event')
-						.setRequired(false)
-				)
-				.addChannelOption(option =>
-					option
-						.setName('voice_channel')
-						.setDescription('Voice or Stage channel for the event (optional, creates external event if omitted)')
-						.setRequired(false)
-						.addChannelTypes(ChannelType.GuildVoice, ChannelType.GuildStageVoice)
-				),
-		{
-			idHints: getIdHints(this.name)
-		}
+		registry.registerChatInputCommand(
+			builder =>
+				builder
+					.setName(this.name)
+					.setDescription(this.description)
+					.addStringOption(option =>
+						option.setName('event_title').setDescription('The title of the event').setRequired(true)
+					)
+					.addStringOption(option =>
+						option.setName('event_description').setDescription('Description of the event').setRequired(true)
+					)
+					.addStringOption(option =>
+						option
+							.setName('event_date')
+							.setDescription('Event date — DD-MM-YYYY HH:MM or Unix timestamp (@time compatible)')
+							.setRequired(true)
+					)
+					.addStringOption(option =>
+						option
+							.setName('timezone')
+							.setDescription('Your timezone (default: Asia/Jakarta)')
+							.setRequired(false)
+					)
+					.addAttachmentOption(option =>
+						option.setName('event_banner').setDescription('Banner image for the event').setRequired(false)
+					)
+					.addChannelOption(option =>
+						option
+							.setName('voice_channel')
+							.setDescription(
+								'Voice or Stage channel for the event (optional, creates external event if omitted)'
+							)
+							.setRequired(false)
+							.addChannelTypes(ChannelType.GuildVoice, ChannelType.GuildStageVoice)
+					),
+			{
+				idHints: getIdHints(this.name)
+			}
 		);
 	}
 
@@ -119,7 +113,7 @@ class ScheduleCommand extends Command {
 
 			const interpretation = formatDateInterpretation(dateStr, timezone, eventDate);
 			const embed = new EmbedBuilder()
-				.setColor(0x00FF00)
+				.setColor(0x00ff00)
 				.setTitle('✅ Event Scheduled')
 				.setDescription(`**${title}** has been scheduled!\n\n${interpretation}`)
 				.addFields(

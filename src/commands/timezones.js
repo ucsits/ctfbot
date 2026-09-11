@@ -13,23 +13,25 @@ class TimezonesCommand extends Command {
 	}
 
 	registerApplicationCommands(registry) {
-		registry.registerChatInputCommand((builder) =>
-			builder
-				.setName(this.name)
-				.setDescription(this.description)
-				.addStringOption(opt =>
-					opt.setName('region')
-						.setDescription('Filter by region')
-						.setRequired(false)
-						.addChoices(
-							{ name: 'Asia', value: 'Asia' },
-							{ name: 'America', value: 'America' },
-							{ name: 'Europe', value: 'Europe' },
-							{ name: 'Africa', value: 'Africa' },
-							{ name: 'Australia', value: 'Australia' },
-							{ name: 'Pacific', value: 'Pacific' }
-						)
-				),
+		registry.registerChatInputCommand(
+			builder =>
+				builder
+					.setName(this.name)
+					.setDescription(this.description)
+					.addStringOption(opt =>
+						opt
+							.setName('region')
+							.setDescription('Filter by region')
+							.setRequired(false)
+							.addChoices(
+								{ name: 'Asia', value: 'Asia' },
+								{ name: 'America', value: 'America' },
+								{ name: 'Europe', value: 'Europe' },
+								{ name: 'Africa', value: 'Africa' },
+								{ name: 'Australia', value: 'Australia' },
+								{ name: 'Pacific', value: 'Pacific' }
+							)
+					),
 			{
 				idHints: getIdHints(this.name)
 			}
@@ -41,10 +43,7 @@ class TimezonesCommand extends Command {
 
 		const region = interaction.options.getString('region');
 
-		const embed = new EmbedBuilder()
-			.setColor(0x3498DB)
-			.setTitle('🕐 Common Timezones')
-			.setTimestamp();
+		const embed = new EmbedBuilder().setColor(0x3498db).setTitle('🕐 Common Timezones').setTimestamp();
 
 		if (region && COMMON_TIMEZONES[region]) {
 			embed.setDescription(`**${region}**`);

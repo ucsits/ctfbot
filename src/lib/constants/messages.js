@@ -7,8 +7,10 @@ module.exports = {
 	// Error Messages
 	ERRORS: {
 		PERMISSION_DENIED: 'You need the "{permission}" permission to use this command.',
-		INVALID_DATE_FORMAT: 'Invalid date format. Use DD-MM-YYYY HH:MM or a Unix timestamp (Discord @time compatible). E.g. 31-12-2025 20:00 or 1735689600',
-		INVALID_TIMEZONE: 'Invalid timezone. Please use a valid IANA timezone (e.g., Asia/Jakarta, Europe/London, America/New_York)',
+		INVALID_DATE_FORMAT:
+			'Invalid date format. Use DD-MM-YYYY HH:MM or a Unix timestamp (Discord @time compatible). E.g. 31-12-2025 20:00 or 1735689600',
+		INVALID_TIMEZONE:
+			'Invalid timezone. Please use a valid IANA timezone (e.g., Asia/Jakarta, Europe/London, America/New_York)',
 		DATE_IN_PAST: 'Event date must be in the future.',
 		END_BEFORE_START: 'End date must be after start date.',
 		CATEGORY_NOT_FOUND: 'CTF category not found. Please set CTF_CATEGORY_ID in your environment variables.',
@@ -46,7 +48,7 @@ module.exports = {
 
 	// Embed Descriptions
 	EMBEDS: {
-		PING_DESCRIPTION: 'Measures the bot\'s response time.',
+		PING_DESCRIPTION: "Measures the bot's response time.",
 		HELP_DESCRIPTION: 'Available commands for CTFBot',
 		EVENT_SCHEDULED: 'Event has been successfully scheduled.',
 		CTF_WELCOME: 'Welcome to {name}!',

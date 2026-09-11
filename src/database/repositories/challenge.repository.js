@@ -2,7 +2,7 @@ const { getConnection, runInTransaction } = require('../connection');
 const { syntheticUserId } = require('../../lib/platform/syntheticUser');
 
 const challengeOperations = {
-	upsertChallenge: (data) => {
+	upsertChallenge: data => {
 		const db = getConnection();
 		const stmt = db.prepare(`
 			INSERT INTO ctf_challenges (ctf_id, chal_name, chal_category, points, created_by)
@@ -14,7 +14,7 @@ const challengeOperations = {
 		return stmt.run(data);
 	},
 
-	addChallenge: (data) => {
+	addChallenge: data => {
 		const db = getConnection();
 		const stmt = db.prepare(`
 			INSERT INTO ctf_challenges (ctf_id, chal_name, chal_category, created_by)
@@ -24,7 +24,7 @@ const challengeOperations = {
 		return result.lastInsertRowid;
 	},
 
-	getChallengesByCTF: (ctfId) => {
+	getChallengesByCTF: ctfId => {
 		const db = getConnection();
 		const stmt = db.prepare('SELECT * FROM ctf_challenges WHERE ctf_id = ? ORDER BY chal_category, chal_name');
 		return stmt.all(ctfId);
@@ -56,7 +56,7 @@ const challengeOperations = {
 		return stmt.run(points, challengeId);
 	},
 
-	getChallengeSolvers: (challengeId) => {
+	getChallengeSolvers: challengeId => {
 		const db = getConnection();
 		const stmt = db.prepare('SELECT * FROM ctf_challenge_solves WHERE challenge_id = ? ORDER BY solved_at ASC');
 		return stmt.all(challengeId);
@@ -89,12 +89,16 @@ const challengeOperations = {
 		const db = getConnection();
 		const pendingUserId = syntheticUserId(platformId, ctfdUserId);
 
-		const pendingSolves = db.prepare(`
+		const pendingSolves = db
+			.prepare(
+				`
 			SELECT s.id, s.challenge_id
 			FROM ctf_challenge_solves s
 			JOIN ctf_challenges c ON s.challenge_id = c.id
 			WHERE s.user_id = ? AND c.ctf_id = ?
-		`).all(pendingUserId, ctfId);
+		`
+			)
+			.all(pendingUserId, ctfId);
 
 		// The whole transfer is one transaction: every pending solve is claimed
 		// or none is, so a failure partway through cannot leave a partially
@@ -106,8 +110,10 @@ const challengeOperations = {
 
 			for (const solve of pendingSolves) {
 				try {
-					db.prepare('UPDATE ctf_challenge_solves SET user_id = ?, ctfd_username = NULL WHERE id = ?')
-						.run(discordUserId, solve.id);
+					db.prepare('UPDATE ctf_challenge_solves SET user_id = ?, ctfd_username = NULL WHERE id = ?').run(
+						discordUserId,
+						solve.id
+					);
 					transferred++;
 				} catch (err) {
 					if (err.message.includes('UNIQUE constraint')) {
@@ -123,7 +129,7 @@ const challengeOperations = {
 		});
 	},
 
-	deleteChallenge: (challengeId) => {
+	deleteChallenge: challengeId => {
 		const db = getConnection();
 		const stmt = db.prepare('DELETE FROM ctf_challenges WHERE id = ?');
 		return stmt.run(challengeId);

@@ -95,7 +95,9 @@ async function pollReminders() {
 			try {
 				const channel = await clientRef.channels.fetch(reminder.channel_id);
 				if (!channel) {
-					container.logger.warn(`Reminder channel ${reminder.channel_id} not found; suppressing reminder ${reminder.id}`);
+					container.logger.warn(
+						`Reminder channel ${reminder.channel_id} not found; suppressing reminder ${reminder.id}`
+					);
 					taskRepository.releaseReminder(reminder.id, 'Reminder channel not found', true);
 					continue;
 				}
@@ -106,23 +108,26 @@ async function pollReminders() {
 				await channel.send({
 					content: `⏰ **Reminder** ${userMention}`,
 					allowedMentions: { users: [reminder.assigned_to] },
-					embeds: [{
-						color: 0xE67E22,
-						title: reminder.title,
-						description: reminder.description || 'No description',
-						fields: [
-							{ name: 'Deadline', value: deadlineStr, inline: true },
-							{ name: 'Task ID', value: `\`${reminder.task_id}\``, inline: false }
-						],
-						timestamp: new Date().toISOString()
-					}]
+					embeds: [
+						{
+							color: 0xe67e22,
+							title: reminder.title,
+							description: reminder.description || 'No description',
+							fields: [
+								{ name: 'Deadline', value: deadlineStr, inline: true },
+								{ name: 'Task ID', value: `\`${reminder.task_id}\``, inline: false }
+							],
+							timestamp: new Date().toISOString()
+						}
+					]
 				});
 
 				taskRepository.markReminderSent(reminder.id);
 				container.logger.info(`Sent reminder for task ${reminder.task_id}`);
 			} catch (err) {
 				container.logger.error(`Failed to send reminder ${reminder.id}:`, err);
-				const permanent = [403, 404].includes(err.code) || /Missing Access|Cannot send messages/i.test(err.message || '');
+				const permanent =
+					[403, 404].includes(err.code) || /Missing Access|Cannot send messages/i.test(err.message || '');
 				taskRepository.releaseReminder(reminder.id, err.message, permanent);
 				container.logger.warn(`Reminder ${reminder.id} will be retried after delivery failure`);
 			}
@@ -182,9 +187,7 @@ function _formatTaskGroup(group) {
 	if (group.length === 0) {
 		return '✅ No pending tasks.';
 	}
-	return group
-		.map(t => `• **${t.title}** - <@${t.assigned_to}> - <t:${t.deadline}:R>`)
-		.join('\n');
+	return group.map(t => `• **${t.title}** - <@${t.assigned_to}> - <t:${t.deadline}:R>`).join('\n');
 }
 
 /**
@@ -233,9 +236,7 @@ async function _sendDigest(channel, { title, color, description, footer, mention
 		const groups = _groupTasksForFields(section.tasks);
 		groups.forEach((group, i) => {
 			fieldGroups.push({
-				heading: groups.length > 1
-					? `${section.heading} (${i + 1}/${groups.length})`
-					: section.heading,
+				heading: groups.length > 1 ? `${section.heading} (${i + 1}/${groups.length})` : section.heading,
 				tasks: group
 			});
 		});
@@ -404,7 +405,7 @@ async function pollWeeklyDigest() {
 		if (channel?.isTextBased()) {
 			await _sendDigest(channel, {
 				title: `📋 Weekly Task Digest - Week ${currentWeek}`,
-				color: 0x9B59B6,
+				color: 0x9b59b6,
 				description: 'Good morning! Here is an overview of pending tasks.',
 				footer: `Sent Monday ${nowJakarta.toLocaleString(DateTime.DATE_HUGE)} at 5AM Jakarta time`,
 				mentionLabel: '📋 **Weekly Task Digest**',
@@ -446,7 +447,12 @@ async function pollDailyDigest() {
 	// Only send at/after 4:00 AM Jakarta time, once per day (Asia/Jakarta date)
 	const digestKey = `daily:${nowJakarta.toISODate()}`;
 	const weeklyDigestAlreadySent = nowJakarta.weekday === 1 && lastDigestWeek === nowJakarta.weekNumber;
-	if (nowJakarta.hour < 4 || nowJakarta.toISODate() === lastDigestDate || weeklyDigestSentThisCycle || weeklyDigestAlreadySent) {
+	if (
+		nowJakarta.hour < 4 ||
+		nowJakarta.toISODate() === lastDigestDate ||
+		weeklyDigestSentThisCycle ||
+		weeklyDigestAlreadySent
+	) {
 		return false;
 	}
 	// If the persisted daily digest was already sent (from a prior process cycle),
@@ -473,14 +479,12 @@ async function pollDailyDigest() {
 		if (channel?.isTextBased()) {
 			await _sendDigest(channel, {
 				title: `📅 Daily Task Digest - ${nowJakarta.toISODate()}`,
-				color: 0x3498DB,
+				color: 0x3498db,
 				description: 'Good morning! Here are the tasks for today until the end of this week.',
 				footer: `Sent ${nowJakarta.toLocaleString(DateTime.DATE_HUGE)} at 4AM Jakarta time`,
 				mentionLabel: '📅 **Daily Task Digest**',
 				digestKey,
-				sections: [
-					{ heading: `🗓️ Today → End of Week (${tasks.length} tasks)`, tasks }
-				]
+				sections: [{ heading: `🗓️ Today → End of Week (${tasks.length} tasks)`, tasks }]
 			});
 			taskRepository.markDigestSent(digestKey);
 			container.logger.info(`Daily digest sent (${lastDigestDate})`);

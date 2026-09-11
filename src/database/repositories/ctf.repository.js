@@ -13,7 +13,7 @@ const PLATFORM_DEFAULTS = {
 };
 
 const ctfOperations = {
-	createCTF: (data) => {
+	createCTF: data => {
 		const db = getConnection();
 		const stmt = db.prepare(`
 			INSERT INTO ctfs (guild_id, channel_id, event_id, ctf_name, ctf_base_url, ctf_date, description, banner_url, api_token, platform, api_base_url, platform_division_id, team_mode, created_by)
@@ -57,45 +57,47 @@ const ctfOperations = {
 		return stmt.run(...values, channelId).changes;
 	},
 
-	getCTFByChannelId: (channelId) => {
+	getCTFByChannelId: channelId => {
 		const db = getConnection();
 		const stmt = db.prepare('SELECT * FROM ctfs WHERE channel_id = ?');
 		return stmt.get(channelId);
 	},
 
-	getCTFById: (id) => {
+	getCTFById: id => {
 		const db = getConnection();
 		const stmt = db.prepare('SELECT * FROM ctfs WHERE id = ?');
 		return stmt.get(id);
 	},
 
-	getCTFsByGuild: (guildId) => {
+	getCTFsByGuild: guildId => {
 		const db = getConnection();
 		const stmt = db.prepare('SELECT * FROM ctfs WHERE guild_id = ? ORDER BY ctf_date DESC');
 		return stmt.all(guildId);
 	},
 
-	deleteCTF: (id) => {
+	deleteCTF: id => {
 		const db = getConnection();
 		const stmt = db.prepare('DELETE FROM ctfs WHERE id = ?');
 		return stmt.run(id);
 	},
 
-	archiveCTF: (channelId) => {
+	archiveCTF: channelId => {
 		const db = getConnection();
 		const stmt = db.prepare('UPDATE ctfs SET archived = 1 WHERE channel_id = ?');
 		return stmt.run(channelId);
 	},
 
-	unarchiveCTF: (channelId) => {
+	unarchiveCTF: channelId => {
 		const db = getConnection();
 		const stmt = db.prepare('UPDATE ctfs SET archived = 0 WHERE channel_id = ?');
 		return stmt.run(channelId);
 	},
 
-	getCTFSummaryStats: (ctfId) => {
+	getCTFSummaryStats: ctfId => {
 		const db = getConnection();
-		const registrations = db.prepare(`
+		const registrations = db
+			.prepare(
+				`
 			SELECT
 				r.user_id,
 				r.username,
@@ -106,12 +108,17 @@ const ctfOperations = {
 			FROM ctf_registrations r
 			LEFT JOIN pacts p ON r.user_id = p.user_id
 			WHERE r.ctf_id = ?
-		`).all(ctfId);
+		`
+			)
+			.all(ctfId);
 
 		const userIds = registrations.map(r => r.user_id);
 
-		const solves = userIds.length > 0
-			? db.prepare(`
+		const solves =
+			userIds.length > 0
+				? db
+						.prepare(
+							`
 					SELECT
 						s.user_id,
 						COUNT(s.id) as solve_count,
@@ -120,24 +127,28 @@ const ctfOperations = {
 					LEFT JOIN ctf_challenges c ON s.challenge_id = c.id AND c.ctf_id = ?
 					WHERE s.user_id IN (${userIds.map(() => '?').join(', ')})
 					GROUP BY s.user_id
-				`).all([ctfId, ...userIds])
-			: [];
+				`
+						)
+						.all([ctfId, ...userIds])
+				: [];
 
 		const userIdToSolves = new Map(solves.map(s => [s.user_id, s]));
 
-		return registrations.map(r => {
-			const solveData = userIdToSolves.get(r.user_id) || { solve_count: 0, total_points: 0 };
-			return {
-				user_id: r.user_id,
-				username: r.username,
-				team_name: r.team_name,
-				ctfd_team_name: r.ctfd_team_name,
-				real_name: r.real_name,
-				nrp: r.nrp,
-				solve_count: solveData.solve_count,
-				total_points: solveData.total_points
-			};
-		}).sort((a, b) => b.total_points - a.total_points);
+		return registrations
+			.map(r => {
+				const solveData = userIdToSolves.get(r.user_id) || { solve_count: 0, total_points: 0 };
+				return {
+					user_id: r.user_id,
+					username: r.username,
+					team_name: r.team_name,
+					ctfd_team_name: r.ctfd_team_name,
+					real_name: r.real_name,
+					nrp: r.nrp,
+					solve_count: solveData.solve_count,
+					total_points: solveData.total_points
+				};
+			})
+			.sort((a, b) => b.total_points - a.total_points);
 	}
 };
 

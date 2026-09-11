@@ -24,39 +24,42 @@ class DocumentCommand extends Command {
 	}
 
 	registerApplicationCommands(registry) {
-		registry.registerChatInputCommand((builder) =>
-			builder
-				.setName(this.name)
-				.setDescription(this.description)
+		registry.registerChatInputCommand(
+			builder =>
+				builder
+					.setName(this.name)
+					.setDescription(this.description)
 
-				// ── subcommand: add ──
-				.addSubcommand(sub =>
-					sub
-						.setName('add')
-						.setDescription('Anchor a document or file to the blockchain')
-						.addStringOption(opt =>
-							opt.setName('title').setDescription('Document title').setRequired(true)
-						)
-						.addStringOption(opt =>
-							opt.setName('content').setDescription('Document content (plain text) — ignored if a file is attached')
-						)
-						.addAttachmentOption(opt =>
-							opt.setName('file').setDescription('File to anchor (optional — max 8 MB)')
-						)
-				)
+					// ── subcommand: add ──
+					.addSubcommand(sub =>
+						sub
+							.setName('add')
+							.setDescription('Anchor a document or file to the blockchain')
+							.addStringOption(opt =>
+								opt.setName('title').setDescription('Document title').setRequired(true)
+							)
+							.addStringOption(opt =>
+								opt
+									.setName('content')
+									.setDescription('Document content (plain text) — ignored if a file is attached')
+							)
+							.addAttachmentOption(opt =>
+								opt.setName('file').setDescription('File to anchor (optional — max 8 MB)')
+							)
+					)
 
-				// ── subcommand: get ──
-				.addSubcommand(sub =>
-					sub
-						.setName('get')
-						.setDescription('Retrieve an anchored document or file by ID')
-						.addStringOption(opt =>
-							opt.setName('doc_id').setDescription('Document UUID').setRequired(true)
-						)
-				),
-		{
-			idHints: require('../lib/utils/commandIds').getIdHints('document')
-		}
+					// ── subcommand: get ──
+					.addSubcommand(sub =>
+						sub
+							.setName('get')
+							.setDescription('Retrieve an anchored document or file by ID')
+							.addStringOption(opt =>
+								opt.setName('doc_id').setDescription('Document UUID').setRequired(true)
+							)
+					),
+			{
+				idHints: require('../lib/utils/commandIds').getIdHints('document')
+			}
 		);
 	}
 
@@ -78,7 +81,11 @@ class DocumentCommand extends Command {
 
 	async _add(interaction) {
 		// Require Manage Messages for adding documents
-		const cancelled = await checkPermissionReply(interaction, PermissionFlagsBits.ManageMessages, 'Manage Messages');
+		const cancelled = await checkPermissionReply(
+			interaction,
+			PermissionFlagsBits.ManageMessages,
+			'Manage Messages'
+		);
 		if (cancelled) {
 			return;
 		}
@@ -171,7 +178,7 @@ class DocumentCommand extends Command {
 
 			// Build success embed
 			const embed = new EmbedBuilder()
-				.setColor(0x9B59B6)
+				.setColor(0x9b59b6)
 				.setTitle('📄 Document Anchored')
 				.setDescription(`**${title}** has been anchored to the blockchain.`)
 				.addFields(
@@ -186,9 +193,7 @@ class DocumentCommand extends Command {
 				);
 			}
 
-			embed.addFields(
-				{ name: 'Document ID', value: `\`${docId}\``, inline: false }
-			);
+			embed.addFields({ name: 'Document ID', value: `\`${docId}\``, inline: false });
 
 			embed.setTimestamp();
 
@@ -224,7 +229,7 @@ class DocumentCommand extends Command {
 				});
 
 				const embed = new EmbedBuilder()
-					.setColor(0x9B59B6)
+					.setColor(0x9b59b6)
 					.setTitle(`📄 ${doc.title}`)
 					.setDescription('📎 File document anchored on the blockchain')
 					.addFields(
@@ -242,11 +247,12 @@ class DocumentCommand extends Command {
 
 			// ── Text document: show content in embed ──
 			const embed = new EmbedBuilder()
-				.setColor(0x9B59B6)
+				.setColor(0x9b59b6)
 				.setTitle(`📄 ${doc.title}`)
-				.setDescription(doc.content && doc.content.length > 2000
-					? doc.content.slice(0, 2000) + '…'
-					: (doc.content || '*No content*')
+				.setDescription(
+					doc.content && doc.content.length > 2000
+						? doc.content.slice(0, 2000) + '…'
+						: doc.content || '*No content*'
 				)
 				.addFields(
 					{ name: 'Author', value: authorStr, inline: true },

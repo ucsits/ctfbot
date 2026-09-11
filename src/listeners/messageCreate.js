@@ -3,7 +3,7 @@ const { awardReputation } = require('../services/reputation');
 
 // Patterns that trigger +1 or -1 when used as a reply
 const UP_PATTERNS = /^(?:\+1|👍)$/;
-const DOWN_PATTERNS = /^(?:\-1|👎)$/;
+const DOWN_PATTERNS = /^(?:-1|👎)$/;
 
 class MessageCreateListener extends Listener {
 	constructor(context, options) {
@@ -14,7 +14,9 @@ class MessageCreateListener extends Listener {
 	}
 
 	async run(message) {
-		if (message.author.bot) return;
+		if (message.author.bot) {
+			return;
+		}
 
 		this.container.logger.debug(`${message.author.tag}: ${message.content}`);
 
@@ -24,8 +26,11 @@ class MessageCreateListener extends Listener {
 			const trimmed = message.content.trim();
 			let amount = null;
 
-			if (UP_PATTERNS.test(trimmed)) amount = 1;
-			else if (DOWN_PATTERNS.test(trimmed)) amount = -1;
+			if (UP_PATTERNS.test(trimmed)) {
+				amount = 1;
+			} else if (DOWN_PATTERNS.test(trimmed)) {
+				amount = -1;
+			}
 
 			if (amount !== null) {
 				await this._handleReplyRep(message, amount);
@@ -38,8 +43,12 @@ class MessageCreateListener extends Listener {
 			const repliedTo = await message.channel.messages.fetch(message.reference.messageId);
 
 			// Guard: no self-rep, no bot-rep
-			if (repliedTo.author.bot) return;
-			if (repliedTo.author.id === message.author.id) return;
+			if (repliedTo.author.bot) {
+				return;
+			}
+			if (repliedTo.author.id === message.author.id) {
+				return;
+			}
 
 			// The daily slot is claimed atomically inside awardReputation before
 			// the chain write, so two rapid replies cannot both append a block.

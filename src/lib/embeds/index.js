@@ -1,11 +1,11 @@
 const { EmbedBuilder } = require('discord.js');
 
 const COLORS = {
-	SUCCESS: 0x00FF00,
-	ERROR: 0xFF0000,
-	INFO: 0x0099FF,
-	WARNING: 0xFFAA00,
-	PRIMARY: 0x0099FF
+	SUCCESS: 0x00ff00,
+	ERROR: 0xff0000,
+	INFO: 0x0099ff,
+	WARNING: 0xffaa00,
+	PRIMARY: 0x0099ff
 };
 
 function createBaseEmbed() {
@@ -13,9 +13,7 @@ function createBaseEmbed() {
 }
 
 function createSuccessEmbed(title, description, fields = []) {
-	const embed = createBaseEmbed()
-		.setColor(COLORS.SUCCESS)
-		.setTitle(`✅ ${title}`);
+	const embed = createBaseEmbed().setColor(COLORS.SUCCESS).setTitle(`✅ ${title}`);
 
 	if (description) {
 		embed.setDescription(description);
@@ -29,9 +27,7 @@ function createSuccessEmbed(title, description, fields = []) {
 }
 
 function createErrorEmbed(title, description, fields = []) {
-	const embed = createBaseEmbed()
-		.setColor(COLORS.ERROR)
-		.setTitle(`❌ ${title}`);
+	const embed = createBaseEmbed().setColor(COLORS.ERROR).setTitle(`❌ ${title}`);
 
 	if (description) {
 		embed.setDescription(description);
@@ -45,9 +41,7 @@ function createErrorEmbed(title, description, fields = []) {
 }
 
 function createInfoEmbed(title, description, fields = []) {
-	const embed = createBaseEmbed()
-		.setColor(COLORS.INFO)
-		.setTitle(`ℹ️ ${title}`);
+	const embed = createBaseEmbed().setColor(COLORS.INFO).setTitle(`ℹ️ ${title}`);
 
 	if (description) {
 		embed.setDescription(description);
@@ -61,9 +55,7 @@ function createInfoEmbed(title, description, fields = []) {
 }
 
 function createWarningEmbed(title, description, fields = []) {
-	const embed = createBaseEmbed()
-		.setColor(COLORS.WARNING)
-		.setTitle(`⚠️ ${title}`);
+	const embed = createBaseEmbed().setColor(COLORS.WARNING).setTitle(`⚠️ ${title}`);
 
 	if (description) {
 		embed.setDescription(description);

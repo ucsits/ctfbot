@@ -2,7 +2,13 @@ const { Command } = require('@sapphire/framework');
 const { PermissionFlagsBits, EmbedBuilder } = require('discord.js');
 const { getIdHints } = require('../lib/utils');
 const { ctfOperations } = require('../database');
-const { createPlatformClient, isKnownPlatform, PLATFORM_CHOICES, DEFAULT_PLATFORM, getPlatform } = require('../lib/platform');
+const {
+	createPlatformClient,
+	isKnownPlatform,
+	PLATFORM_CHOICES,
+	DEFAULT_PLATFORM,
+	getPlatform
+} = require('../lib/platform');
 const { validateURL } = require('../lib/validators');
 const { checkPermissionReply } = require('../lib/middleware/ensurePermission');
 const { ensureCTFChannelReply } = require('../lib/middleware/ensureCTFChannel');
@@ -24,50 +30,55 @@ class SetCTFPlatformCommand extends Command {
 	}
 
 	registerApplicationCommands(registry) {
-		registry.registerChatInputCommand((builder) =>
-			builder
-				.setName(this.name)
-				.setDescription(this.description)
-				.addStringOption(option =>
-					option
-						.setName('platform')
-						.setDescription('Platform to use for this CTF channel')
-						.setRequired(false)
-						.addChoices(...PLATFORM_CHOICES)
-				)
-				.addStringOption(option =>
-					option
-						.setName('api_base_url')
-						.setDescription('API base URL (e.g. https://api-k17ctf.secso.cc). Defaults to the CTF URL.')
-						.setRequired(false)
-				)
-				.addStringOption(option =>
-					option
-						.setName('api_token')
-						.setDescription('Platform API token or bearer token (optional)')
-						.setRequired(false)
-				)
-				.addIntegerOption(option =>
-					option
-						.setName('division_id')
-						.setDescription('Platform division / scoreboard id (optional)')
-						.setRequired(false)
-				)
-				.addBooleanOption(option =>
-					option
-						.setName('show')
-						.setDescription('Show the current platform configuration instead of changing it')
-						.setRequired(false)
-				),
-		{
-			idHints: getIdHints(this.name)
-		}
+		registry.registerChatInputCommand(
+			builder =>
+				builder
+					.setName(this.name)
+					.setDescription(this.description)
+					.addStringOption(option =>
+						option
+							.setName('platform')
+							.setDescription('Platform to use for this CTF channel')
+							.setRequired(false)
+							.addChoices(...PLATFORM_CHOICES)
+					)
+					.addStringOption(option =>
+						option
+							.setName('api_base_url')
+							.setDescription('API base URL (e.g. https://api-k17ctf.secso.cc). Defaults to the CTF URL.')
+							.setRequired(false)
+					)
+					.addStringOption(option =>
+						option
+							.setName('api_token')
+							.setDescription('Platform API token or bearer token (optional)')
+							.setRequired(false)
+					)
+					.addIntegerOption(option =>
+						option
+							.setName('division_id')
+							.setDescription('Platform division / scoreboard id (optional)')
+							.setRequired(false)
+					)
+					.addBooleanOption(option =>
+						option
+							.setName('show')
+							.setDescription('Show the current platform configuration instead of changing it')
+							.setRequired(false)
+					),
+			{
+				idHints: getIdHints(this.name)
+			}
 		);
 	}
 
 	async chatInputRun(interaction) {
 		// Both guards reply directly, so they must run before the deferral.
-		const cancelled = await checkPermissionReply(interaction, PermissionFlagsBits.ManageChannels, 'Manage Channels');
+		const cancelled = await checkPermissionReply(
+			interaction,
+			PermissionFlagsBits.ManageChannels,
+			'Manage Channels'
+		);
 		if (cancelled) {
 			return;
 		}
@@ -121,13 +132,17 @@ class SetCTFPlatformCommand extends Command {
 		const connection = await client.testConnection();
 
 		const embed = new EmbedBuilder()
-			.setColor(connection.ok ? 0x0099FF : 0xFFA500)
+			.setColor(connection.ok ? 0x0099ff : 0xffa500)
 			.setTitle(`CTF Platform for ${ctf.ctf_name}`)
 			.addFields(
 				{ name: 'Platform', value: getPlatform(platformId).label, inline: true },
 				{ name: 'API Base URL', value: apiBaseUrl || 'Not set', inline: false },
 				{ name: 'Token', value: ctf.api_token ? 'Set' : 'Not set', inline: true },
-				{ name: 'Division', value: ctf.platform_division_id ? String(ctf.platform_division_id) : 'Auto', inline: true },
+				{
+					name: 'Division',
+					value: ctf.platform_division_id ? String(ctf.platform_division_id) : 'Auto',
+					inline: true
+				},
 				{ name: 'Connection', value: this._describeConnection(connection), inline: false }
 			)
 			.setTimestamp();
@@ -167,7 +182,8 @@ class SetCTFPlatformCommand extends Command {
 		const previousPlatformId = this._resolvePlatformId(ctf);
 		const apiBaseUrl = apiBaseUrlInput || ctf.api_base_url || ctf.ctf_base_url;
 		const apiToken = apiTokenInput === null || apiTokenInput === undefined ? ctf.api_token : apiTokenInput;
-		const divisionId = divisionInput === null || divisionInput === undefined ? ctf.platform_division_id : divisionInput;
+		const divisionId =
+			divisionInput === null || divisionInput === undefined ? ctf.platform_division_id : divisionInput;
 
 		const client = createPlatformClient(platform, apiBaseUrl, apiToken, { divisionId });
 		const connection = await client.testConnection();
@@ -184,7 +200,7 @@ class SetCTFPlatformCommand extends Command {
 		);
 
 		const embed = new EmbedBuilder()
-			.setColor(connection.ok ? 0x00FF00 : 0xFFA500)
+			.setColor(connection.ok ? 0x00ff00 : 0xffa500)
 			.setTitle('CTF Platform Updated')
 			.setDescription(`**${ctf.ctf_name}** now syncs from **${getPlatform(platform).label}**.`)
 			.addFields(

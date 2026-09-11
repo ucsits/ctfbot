@@ -1,7 +1,7 @@
 const { getConnection } = require('../connection');
 
 const registrationOperations = {
-	registerUser: (data) => {
+	registerUser: data => {
 		const db = getConnection();
 		const stmt = db.prepare(`
 			INSERT INTO ctf_registrations (ctf_id, user_id, username, team_name, ctfd_user_id, ctfd_team_name)
@@ -15,7 +15,7 @@ const registrationOperations = {
 		return stmt.run(data);
 	},
 
-	getRegistrationsByCTF: (ctfId) => {
+	getRegistrationsByCTF: ctfId => {
 		const db = getConnection();
 		const stmt = db.prepare('SELECT * FROM ctf_registrations WHERE ctf_id = ? ORDER BY registered_at ASC');
 		return stmt.all(ctfId);

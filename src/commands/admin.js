@@ -15,40 +15,31 @@ class AdminCommand extends Command {
 	}
 
 	registerApplicationCommands(registry) {
-		registry.registerChatInputCommand((builder) =>
-			builder
-				.setName(this.name)
-				.setDescription(this.description)
-				.addSubcommand(subcommand =>
-					subcommand
-						.setName('add')
-						.setDescription('Add a user as admin')
-						.addUserOption(option =>
-							option
-								.setName('user')
-								.setDescription('User to add as admin')
-								.setRequired(true)
-						)
-				)
-				.addSubcommand(subcommand =>
-					subcommand
-						.setName('remove')
-						.setDescription('Remove a user from admin')
-						.addUserOption(option =>
-							option
-								.setName('user')
-								.setDescription('User to remove from admin')
-								.setRequired(true)
-						)
-				)
-				.addSubcommand(subcommand =>
-					subcommand
-						.setName('list')
-						.setDescription('List all current admins')
-				),
-		{
-			idHints: getIdHints(this.name)
-		}
+		registry.registerChatInputCommand(
+			builder =>
+				builder
+					.setName(this.name)
+					.setDescription(this.description)
+					.addSubcommand(subcommand =>
+						subcommand
+							.setName('add')
+							.setDescription('Add a user as admin')
+							.addUserOption(option =>
+								option.setName('user').setDescription('User to add as admin').setRequired(true)
+							)
+					)
+					.addSubcommand(subcommand =>
+						subcommand
+							.setName('remove')
+							.setDescription('Remove a user from admin')
+							.addUserOption(option =>
+								option.setName('user').setDescription('User to remove from admin').setRequired(true)
+							)
+					)
+					.addSubcommand(subcommand => subcommand.setName('list').setDescription('List all current admins')),
+			{
+				idHints: getIdHints(this.name)
+			}
 		);
 	}
 
@@ -64,14 +55,14 @@ class AdminCommand extends Command {
 
 		try {
 			switch (subcommand) {
-			case 'add':
-				return this.addAdmin(interaction);
-			case 'remove':
-				return this.removeAdmin(interaction);
-			case 'list':
-				return this.listAdmins(interaction);
-			default:
-				return interaction.editReply('Unknown subcommand.');
+				case 'add':
+					return this.addAdmin(interaction);
+				case 'remove':
+					return this.removeAdmin(interaction);
+				case 'list':
+					return this.listAdmins(interaction);
+				default:
+					return interaction.editReply('Unknown subcommand.');
 			}
 		} catch (error) {
 			this.container.logger.error('Error in admin command:', error);
@@ -87,7 +78,9 @@ class AdminCommand extends Command {
 		}
 
 		if (config.admin.isEnvConfigured) {
-			return interaction.editReply('❌ Cannot add admins when ADMIN_IDS environment variable is set. Remove it from .env to use database-based admin management.');
+			return interaction.editReply(
+				'❌ Cannot add admins when ADMIN_IDS environment variable is set. Remove it from .env to use database-based admin management.'
+			);
 		}
 
 		// The insert is atomic (INSERT OR IGNORE), so there is no exists() pre-check
@@ -98,7 +91,7 @@ class AdminCommand extends Command {
 		}
 
 		const embed = new EmbedBuilder()
-			.setColor(0x00FF00)
+			.setColor(0x00ff00)
 			.setTitle('Admin Added')
 			.setDescription(`${user.tag} has been added as an admin.`)
 			.addFields(
@@ -118,7 +111,9 @@ class AdminCommand extends Command {
 		}
 
 		if (config.admin.isEnvConfigured) {
-			return interaction.editReply('❌ Cannot remove admins when ADMIN_IDS environment variable is set. Remove it from .env to use database-based admin management.');
+			return interaction.editReply(
+				'❌ Cannot remove admins when ADMIN_IDS environment variable is set. Remove it from .env to use database-based admin management.'
+			);
 		}
 
 		if (!adminRepository.exists(user.id)) {
@@ -128,7 +123,7 @@ class AdminCommand extends Command {
 		adminRepository.remove(user.id);
 
 		const embed = new EmbedBuilder()
-			.setColor(0xFFA500)
+			.setColor(0xffa500)
 			.setTitle('Admin Removed')
 			.setDescription(`${user.tag} has been removed from admins.`)
 			.addFields(
@@ -146,20 +141,24 @@ class AdminCommand extends Command {
 		let description;
 
 		if (config.admin.isEnvConfigured) {
-			description = 'Admins are configured via `ADMIN_IDS` environment variable.\n\n**Configured IDs:**\n' +
+			description =
+				'Admins are configured via `ADMIN_IDS` environment variable.\n\n**Configured IDs:**\n' +
 				config.admin.ids.map(id => `• <@${id}> (${id})`).join('\n');
 		} else if (admins.length === 0) {
 			description = 'No admins are configured. Add admins using `/admin add`.';
 		} else {
-			description = `Found ${admins.length} admin(s):\n\n` +
-				admins.map(admin => {
-					const addedBy = admin.added_by ? `<@${admin.added_by}>` : 'Unknown';
-					return `• <@${admin.user_id}> (added by ${addedBy} on <t:${Math.floor(new Date(admin.added_at).getTime() / 1000)}:D>)`;
-				}).join('\n');
+			description =
+				`Found ${admins.length} admin(s):\n\n` +
+				admins
+					.map(admin => {
+						const addedBy = admin.added_by ? `<@${admin.added_by}>` : 'Unknown';
+						return `• <@${admin.user_id}> (added by ${addedBy} on <t:${Math.floor(new Date(admin.added_at).getTime() / 1000)}:D>)`;
+					})
+					.join('\n');
 		}
 
 		const embed = new EmbedBuilder()
-			.setColor(0x0099FF)
+			.setColor(0x0099ff)
 			.setTitle('Bot Admins')
 			.setDescription(description)
 			.setTimestamp();

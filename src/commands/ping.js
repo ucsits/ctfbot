@@ -5,7 +5,7 @@ class PingCommand extends Command {
 		super(context, {
 			...options,
 			name: 'ping',
-			description: 'Check the bot\'s response time'
+			description: "Check the bot's response time"
 		});
 	}
 

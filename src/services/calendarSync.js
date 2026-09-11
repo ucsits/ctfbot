@@ -51,7 +51,12 @@ function isEnabled() {
 	}
 
 	// Fall back to env-provided credentials
-	if (constants.GOOGLE_CLIENT_ID && constants.GOOGLE_CLIENT_SECRET && constants.GOOGLE_REFRESH_TOKEN && constants.GOOGLE_CALENDAR_ID) {
+	if (
+		constants.GOOGLE_CLIENT_ID &&
+		constants.GOOGLE_CLIENT_SECRET &&
+		constants.GOOGLE_REFRESH_TOKEN &&
+		constants.GOOGLE_CALENDAR_ID
+	) {
 		return true;
 	}
 
@@ -74,7 +79,12 @@ function resolveCredentials() {
 		};
 	}
 
-	if (constants.GOOGLE_CLIENT_ID && constants.GOOGLE_CLIENT_SECRET && constants.GOOGLE_REFRESH_TOKEN && constants.GOOGLE_CALENDAR_ID) {
+	if (
+		constants.GOOGLE_CLIENT_ID &&
+		constants.GOOGLE_CLIENT_SECRET &&
+		constants.GOOGLE_REFRESH_TOKEN &&
+		constants.GOOGLE_CALENDAR_ID
+	) {
 		return {
 			clientId: constants.GOOGLE_CLIENT_ID,
 			clientSecret: constants.GOOGLE_CLIENT_SECRET,
@@ -191,50 +201,50 @@ async function pushTaskUpdate(task, action) {
 
 	try {
 		switch (action) {
-		case 'create': {
-			// Idempotency first: adopt an event that already exists for this task
-			// rather than creating a second one.
-			const existing = await findEventForTask(creds, task.task_id);
-			if (existing) {
+			case 'create': {
+				// Idempotency first: adopt an event that already exists for this task
+				// rather than creating a second one.
+				const existing = await findEventForTask(creds, task.task_id);
+				if (existing) {
+					calendarRepository.markCalendarSynced({
+						taskId: task.task_id,
+						eventId: existing.id
+					});
+					syncLog.info(`Adopted existing calendar event ${existing.id} for task ${task.task_id}`);
+					return { success: true, eventId: existing.id };
+				}
+
+				const event = calendarApi.taskToCalendarEvent(task);
+				const created = await calendarApi.createEvent(creds, event);
 				calendarRepository.markCalendarSynced({
 					taskId: task.task_id,
-					eventId: existing.id
+					eventId: created.id
 				});
-				syncLog.info(`Adopted existing calendar event ${existing.id} for task ${task.task_id}`);
-				return { success: true, eventId: existing.id };
+				syncLog.info(`Pushed task ${task.task_id} → calendar event ${created.id}`);
+				return { success: true, eventId: created.id };
 			}
-
-			const event = calendarApi.taskToCalendarEvent(task);
-			const created = await calendarApi.createEvent(creds, event);
-			calendarRepository.markCalendarSynced({
-				taskId: task.task_id,
-				eventId: created.id
-			});
-			syncLog.info(`Pushed task ${task.task_id} → calendar event ${created.id}`);
-			return { success: true, eventId: created.id };
-		}
-		case 'delete': {
-			if (!task.calendar_event_id) {
-				syncLog.warn(`Cannot delete calendar event for task ${task.task_id}: no event id`);
+			case 'delete': {
+				if (!task.calendar_event_id) {
+					syncLog.warn(`Cannot delete calendar event for task ${task.task_id}: no event id`);
+					return { success: false };
+				}
+				await calendarApi.deleteEvent(creds, task.calendar_event_id);
+				calendarRepository.clearCalendarEventId(task.task_id);
+				syncLog.info(`Deleted calendar event ${task.calendar_event_id} for task ${task.task_id}`);
+				return { success: true };
+			}
+			case 'cancel': {
+				if (!task.calendar_event_id) {
+					syncLog.warn(`Cannot cancel calendar event for task ${task.task_id}: no event id`);
+					return { success: false };
+				}
+				await calendarApi.patchEvent(creds, task.calendar_event_id, { status: 'cancelled' });
+				syncLog.info(`Cancelled calendar event ${task.calendar_event_id} for task ${task.task_id}`);
+				return { success: true };
+			}
+			default:
+				syncLog.warn(`Unknown calendar push action: ${action}`);
 				return { success: false };
-			}
-			await calendarApi.deleteEvent(creds, task.calendar_event_id);
-			calendarRepository.clearCalendarEventId(task.task_id);
-			syncLog.info(`Deleted calendar event ${task.calendar_event_id} for task ${task.task_id}`);
-			return { success: true };
-		}
-		case 'cancel': {
-			if (!task.calendar_event_id) {
-				syncLog.warn(`Cannot cancel calendar event for task ${task.task_id}: no event id`);
-				return { success: false };
-			}
-			await calendarApi.patchEvent(creds, task.calendar_event_id, { status: 'cancelled' });
-			syncLog.info(`Cancelled calendar event ${task.calendar_event_id} for task ${task.task_id}`);
-			return { success: true };
-		}
-		default:
-			syncLog.warn(`Unknown calendar push action: ${action}`);
-			return { success: false };
 		}
 	} catch (error) {
 		syncLog.error(`Calendar push (${action}) failed for task ${task.task_id}: ${error.message}`);
