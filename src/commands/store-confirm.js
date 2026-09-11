@@ -60,6 +60,21 @@ class StoreConfirmCommand extends Command {
 			return interaction.editReply('❌ That purchase cannot be confirmed.');
 		}
 
+		// Claim the purchase BEFORE anchoring anything. Two rapid confirmations
+		// (or two admins) both used to read `pending` and both appended a
+		// confirmation block while only one row changed. The claim makes the
+		// loser stop here, without touching the chain.
+		if (
+			!activityRepository.claimPurchaseConfirmation({
+				id: purchaseId,
+				claimedBy: interaction.user.id
+			})
+		) {
+			return interaction.editReply(
+				'⏳ That purchase is already being confirmed by another action. Please try again in a moment.'
+			);
+		}
+
 		try {
 			const luce = require('../lib/luce');
 			// 1. Blockchain
@@ -73,12 +88,23 @@ class StoreConfirmCommand extends Command {
 			});
 			const block = await luce.appendBlock({ author: interaction.user.id, data });
 
-			// 2. DB
-			activityRepository.confirmPurchase({
+			// 2. DB. The conditional update is authoritative: if it reports no row
+			// was changed the claim was lost or the purchase moved on, so fail
+			// loudly rather than claiming a success that did not happen.
+			const confirmed = activityRepository.confirmPurchase({
 				id: purchaseId,
 				confirmedBy: interaction.user.id,
 				blockHeight: block.height
 			});
+
+			if (!confirmed) {
+				this.container.logger.warn(
+					`Purchase ${purchaseId} was not confirmed after block #${block.height}; state changed concurrently`
+				);
+				return interaction.editReply(
+					'⚠️ That purchase could not be confirmed because its state changed. Check its status before retrying.'
+				);
+			}
 
 			const embed = new EmbedBuilder()
 				.setColor(0x2ECC71)
@@ -95,6 +121,8 @@ class StoreConfirmCommand extends Command {
 			return interaction.editReply({ embeds: [embed] });
 		} catch (error) {
 			this.container.logger.error('Error confirming purchase:', error);
+			// Nothing usable was written, so hand the claim back for a retry.
+			activityRepository.releasePurchaseConfirmation({ id: purchaseId, claimedBy: interaction.user.id });
 			return interaction.editReply('❌ Failed to confirm purchase. Blockchain error: ' + error.message);
 		}
 	}

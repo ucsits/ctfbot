@@ -276,6 +276,48 @@ function listPendingPurchases() {
 }
 
 /**
+ * Claim a pending purchase for confirmation, before anchoring a block.
+ *
+ * The claim is a conditional update, so exactly one caller can win an
+ * unclaimed (or lease-expired) pending purchase. Without it two admins could
+ * both read `pending`, both anchor a confirmation block, and both report
+ * success while only one row changed.
+ *
+ * @param {object} params
+ * @param {string} params.id - purchase id
+ * @param {string} params.claimedBy - admin Discord ID
+ * @param {number} [params.leaseSeconds=120]
+ * @returns {boolean} true when this caller now holds the claim
+ */
+function claimPurchaseConfirmation({ id, claimedBy, leaseSeconds = 120 }) {
+	const now = Math.floor(Date.now() / 1000);
+	const result = db().prepare(`
+		UPDATE purchases
+		SET confirm_claim_by = ?, confirm_claim_until = ?
+		WHERE id = ? AND status = 'pending'
+		AND (confirm_claim_until IS NULL OR confirm_claim_until < ?)
+	`).run(claimedBy, now + leaseSeconds, id, now);
+	return result.changes > 0;
+}
+
+/**
+ * Release a confirmation claim, e.g. after the blockchain append failed.
+ *
+ * @param {object} params
+ * @param {string} params.id
+ * @param {string} params.claimedBy
+ * @returns {boolean} true when a claim was cleared
+ */
+function releasePurchaseConfirmation({ id, claimedBy }) {
+	const result = db().prepare(`
+		UPDATE purchases
+		SET confirm_claim_by = NULL, confirm_claim_until = NULL
+		WHERE id = ? AND confirm_claim_by = ?
+	`).run(id, claimedBy);
+	return result.changes > 0;
+}
+
+/**
  * Confirm a pending purchase (admin confirms offline Rp payment).
  * @param {object} params
  * @param {string} params.id - purchase id
@@ -287,7 +329,8 @@ function confirmPurchase({ id, confirmedBy, blockHeight }) {
 	const now = Math.floor(Date.now() / 1000);
 	const result = db().prepare(`
 		UPDATE purchases
-		SET status = 'completed', block_height = ?, confirmed_at = ?, confirmed_by = ?
+		SET status = 'completed', block_height = ?, confirmed_at = ?, confirmed_by = ?,
+			confirm_claim_by = NULL, confirm_claim_until = NULL
 		WHERE id = ? AND status = 'pending'
 	`).run(blockHeight, now, confirmedBy, id);
 	return result.changes > 0;
@@ -322,6 +365,8 @@ module.exports = {
 	createPurchase,
 	getPurchase,
 	listPendingPurchases,
+	claimPurchaseConfirmation,
+	releasePurchaseConfirmation,
 	confirmPurchase,
 	getUserPurchases
 };

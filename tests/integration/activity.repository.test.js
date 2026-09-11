@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { mkdtempSync, rmSync, copyFileSync } from 'fs';
+import { mkdtempSync, rmSync, copyFileSync, readFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
@@ -9,6 +9,8 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
  * Swap the process cwd to a temp dir so that getConnection() (which resolves
  * cwd/ctfbot.db) targets an isolated database file, then import the DB modules.
  */
+const repoRoot = process.cwd();
+
 let tmpDir;
 let conn;
 let activityRepository;
@@ -141,5 +143,117 @@ describe('Activity Repository', () => {
 		if (lb.length > 0) {
 			expect(lb[0].balance).toBeGreaterThanOrEqual(lb[lb.length - 1].balance);
 		}
+	});
+});
+
+// ── Purchase confirmation claim (H4) ────────────────────────────────────
+// Confirming a purchase used to read `pending`, append a blockchain block, and
+// then discard the boolean from confirmPurchase. Two rapid invocations both
+// anchored a confirmation block while only one row changed.
+describe('purchase confirmation claim', () => {
+	it('lets exactly one caller claim a pending purchase while the lease is live', () => {
+		activityRepository.createPurchase({
+			id: 'p-claim-1',
+			userId: 'user-3',
+			itemId: 1,
+			paymentMethod: 'rp',
+			status: 'pending',
+			costAp: 0,
+			costRp: 1000
+		});
+
+		expect(
+			activityRepository.claimPurchaseConfirmation({ id: 'p-claim-1', claimedBy: 'admin-a' })
+		).toBe(true);
+		expect(
+			activityRepository.claimPurchaseConfirmation({ id: 'p-claim-1', claimedBy: 'admin-b' })
+		).toBe(false);
+
+		const row = conn.prepare('SELECT * FROM purchases WHERE id = ?').get('p-claim-1');
+		expect(row.confirm_claim_by).toBe('admin-a');
+		expect(row.confirm_claim_until).toBeGreaterThan(Math.floor(Date.now() / 1000));
+	});
+
+	it('refuses to claim a purchase that is not pending', () => {
+		activityRepository.createPurchase({
+			id: 'p-claim-done',
+			userId: 'user-3',
+			itemId: 1,
+			paymentMethod: 'rp',
+			status: 'completed',
+			costAp: 0,
+			costRp: 1000
+		});
+		expect(
+			activityRepository.claimPurchaseConfirmation({ id: 'p-claim-done', claimedBy: 'admin-a' })
+		).toBe(false);
+	});
+
+	it('reclaim after the lease expires and clean up on release', () => {
+		// Force the live claim from the previous test into the past, standing in
+		// for a crashed process whose claim timed out.
+		conn.prepare('UPDATE purchases SET confirm_claim_until = ? WHERE id = ?')
+			.run(Math.floor(Date.now() / 1000) - 10, 'p-claim-1');
+
+		expect(
+			activityRepository.claimPurchaseConfirmation({ id: 'p-claim-1', claimedBy: 'admin-b' })
+		).toBe(true);
+
+		expect(
+			activityRepository.releasePurchaseConfirmation({ id: 'p-claim-1', claimedBy: 'admin-b' })
+		).toBe(true);		const released = conn.prepare('SELECT * FROM purchases WHERE id = ?').get('p-claim-1');
+		expect(released.confirm_claim_by).toBeNull();
+		expect(released.confirm_claim_until).toBeNull();
+
+		// Released, so anyone may claim it again.
+		expect(
+			activityRepository.claimPurchaseConfirmation({ id: 'p-claim-1', claimedBy: 'admin-c' })
+		).toBe(true);
+	});
+
+	it('confirmPurchase clears the claim and only succeeds once', () => {
+		expect(
+			activityRepository.confirmPurchase({
+				id: 'p-claim-1',
+				confirmedBy: 'admin-c',
+				blockHeight: 777
+			})
+		).toBe(true);
+
+		const row = conn.prepare('SELECT * FROM purchases WHERE id = ?').get('p-claim-1');
+		expect(row.status).toBe('completed');
+		expect(row.block_height).toBe(777);
+		expect(row.confirmed_by).toBe('admin-c');
+		expect(row.confirm_claim_by).toBeNull();
+
+		// A second confirmation is a no-op and must report false, which is the
+		// signal /store-confirm now checks before reporting success.
+		expect(
+			activityRepository.confirmPurchase({
+				id: 'p-claim-1',
+				confirmedBy: 'admin-c',
+				blockHeight: 778
+			})
+		).toBe(false);
+	});
+});
+
+// ── /store-confirm ordering (H4) ────────────────────────────────────────
+describe('store-confirm command ordering', () => {
+	it('claims before anchoring and honours the confirmPurchase result', () => {
+		const src = readFileSync(join(repoRoot, 'src/commands/store-confirm.js'), 'utf8');
+
+		const claimAt = src.indexOf('claimPurchaseConfirmation');
+		const appendAt = src.indexOf('luce.appendBlock');
+		const confirmAt = src.indexOf('confirmPurchase');
+
+		expect(claimAt).toBeGreaterThan(-1);
+		expect(appendAt).toBeGreaterThan(-1);
+		// The claim must happen before the block is anchored.
+		expect(claimAt).toBeLessThan(appendAt);
+		expect(appendAt).toBeLessThan(confirmAt);
+		// The boolean result of confirmPurchase must be checked, not discarded.
+		expect(src).toContain('const confirmed = activityRepository.confirmPurchase(');
+		expect(src).toContain('if (!confirmed)');
 	});
 });
