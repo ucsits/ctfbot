@@ -35,13 +35,16 @@ const challengeOperations = {
 		return stmt.get(ctfId, chalName);
 	},
 
-	markChallengeSolved: (challengeId, userId, solvedAt) => {
+	markChallengeSolved: (challengeId, userId, solvedAt, teamKey = null) => {
 		const db = getConnection();
+		// team_key carries the team name for team-mode solves and NULL for
+		// individual solves. The partial unique index on (challenge_id, team_key)
+		// is what actually enforces one solve per team.
 		const stmt = db.prepare(`
-			INSERT INTO ctf_challenge_solves (challenge_id, user_id, solved_at)
-			VALUES (?, ?, COALESCE(?, CURRENT_TIMESTAMP))
+			INSERT INTO ctf_challenge_solves (challenge_id, user_id, solved_at, team_key)
+			VALUES (?, ?, COALESCE(?, CURRENT_TIMESTAMP), ?)
 		`);
-		const result = stmt.run(challengeId, userId, solvedAt || null);
+		const result = stmt.run(challengeId, userId, solvedAt || null, teamKey || null);
 
 		return result.lastInsertRowid;
 	},

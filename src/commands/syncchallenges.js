@@ -176,7 +176,10 @@ class SyncChallengesCommand extends Command {
 						}
 					}
 
-					challengeOperations.markChallengeSolved(localChalId, discordUserId, solve.date);
+					const teamKey = ctf.team_mode ? userRegMap.get(discordUserId)?.team_name || null : null;
+					if (!this._recordSolve(localChalId, discordUserId, solve.date, teamKey)) {
+						continue;
+					}
 					count++;
 					solves.push(`<@${discordUserId}> solved **${chal.name}**`);
 				} else {
@@ -247,7 +250,10 @@ class SyncChallengesCommand extends Command {
 					}
 				}
 
-				challengeOperations.markChallengeSolved(localChalId, reg.user_id, solve.date);
+				const teamKey = ctf.team_mode && reg.team_name ? reg.team_name : null;
+				if (!this._recordSolve(localChalId, reg.user_id, solve.date, teamKey)) {
+					continue;
+				}
 				count++;
 				solves.push(`<@${reg.user_id}> solved **${chalName}**`);
 			}
@@ -256,6 +262,28 @@ class SyncChallengesCommand extends Command {
 		}
 
 		return { count, solves };
+	}
+
+	/**
+	 * Record a synced solve, returning false when it is already covered.
+	 *
+	 * Team mode stores the team name as the solve's team key, so the partial
+	 * unique index on (challenge_id, team_key) is the real guarantee behind the
+	 * one-solve-per-team rule. A collision means another member of the same team
+	 * was already recorded, which is a skip rather than an error.
+	 *
+	 * @returns {boolean} true when a new solve row was written
+	 */
+	_recordSolve(challengeId, userId, solvedAt, teamKey) {
+		try {
+			challengeOperations.markChallengeSolved(challengeId, userId, solvedAt, teamKey);
+			return true;
+		} catch (err) {
+			if (err.message.includes('UNIQUE constraint failed')) {
+				return false;
+			}
+			throw err;
+		}
 	}
 
 	formatSyncResponse(interaction, source, solvesSynced, newChallenges, newSolves) {

@@ -116,9 +116,16 @@ class SolveCTFCommand extends Command {
 				}
 			}
 
-			// Mark challenge as solved
+			// Mark challenge as solved. In team mode the team name is stored as the
+			// team key, so the partial unique index enforces one solve per team and
+			// this cannot be bypassed by two members racing.
 			try {
-				challengeOperations.markChallengeSolved(challenge.id, userId);
+				challengeOperations.markChallengeSolved(
+					challenge.id,
+					userId,
+					null,
+					ctf.team_mode ? registration.team_name : null
+				);
 				this.container.logger.info(`${userTag} solved challenge "${chalName}" in CTF "${ctf.ctf_name}"`);
 
 				// Get all solvers for this challenge
@@ -144,6 +151,11 @@ class SolveCTFCommand extends Command {
 				await interaction.editReply({ embeds: [embed] });
 
 			} catch (dbError) {
+				if (dbError.message.includes('team_key')) {
+					return interaction.editReply(
+						`Your team already has a solve recorded for **${chalName}**. Only one solve per team is allowed.`
+					);
+				}
 				if (dbError.message.includes('UNIQUE constraint failed')) {
 					return interaction.editReply(`You have already marked **${chalName}** as solved.`);
 				}
