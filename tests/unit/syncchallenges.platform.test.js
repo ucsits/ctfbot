@@ -288,8 +288,11 @@ describe('/syncchallenges noCTF integration', () => {
 
 	it('claims a parked solve instead of duplicating it when the link appears later', async () => {
 		const ctf = seedCtf({ platform: 'noctf', api_base_url: API_BASE, platform_division_id: 2 });
-		// A username the platform will not confirm, so the first run leaves the
-		// member unlinked and parks their solve under the synthetic id.
+		// A registered teammate puts their team in scope, which is what makes the
+		// unregistered solver below worth parking. Their own username is one the
+		// platform will not confirm, so the first run leaves the member unlinked and
+		// parks their solve under the synthetic id.
+		seedRegistration(ctf, { userId: 'discord-b', username: 'Teammate', teamName: 'w larp', platformUserId: '1875' });
 		seedRegistration(ctf, { userId: 'discord-a', username: 'Someone Else', platformUserId: null });
 
 		const scoreboard = ['/scoreboard/divisions/2', {
@@ -405,6 +408,9 @@ describe('/syncchallenges noCTF integration', () => {
 
 	it('parks an unregistered noCTF solve under the noctf: prefix', async () => {
 		const ctf = seedCtf({ platform: 'noctf', api_base_url: API_BASE, platform_division_id: 2 });
+		// The registered team is the scope, so the solve below is in it and the
+		// unregistered solver is still worth parking.
+		seedRegistration(ctf, { userId: 'discord-a', username: 'Teammate', teamName: 'w larp', platformUserId: '1654' });
 
 		const calls = stubFetch([
 			['/scoreboard/divisions/2', {
@@ -422,6 +428,7 @@ describe('/syncchallenges noCTF integration', () => {
 					total: 1
 				}
 			}],
+			['/teams/query', { data: { entries: [{ id: 869, name: 'w larp' }] } }],
 			// No name is available for this solver, so the label falls back to the id.
 			['/users/query', { data: { entries: [], total: 0 } }],
 			['/challenges', {
@@ -446,6 +453,7 @@ describe('/syncchallenges noCTF integration', () => {
 
 	it('names an unregistered noCTF solver instead of printing their numeric id', async () => {
 		const ctf = seedCtf({ platform: 'noctf', api_base_url: API_BASE, platform_division_id: 2 });
+		seedRegistration(ctf, { userId: 'discord-a', username: 'Teammate', teamName: 'w larp', platformUserId: '1654' });
 
 		stubFetch([
 			['/scoreboard/divisions/2', {
@@ -463,6 +471,7 @@ describe('/syncchallenges noCTF integration', () => {
 					total: 1
 				}
 			}],
+			['/teams/query', { data: { entries: [{ id: 969, name: 'w larp' }] } }],
 			['/users/query', { data: { entries: [{ id: 1706, name: 'Justher0', team_id: 969 }], total: 1 } }],
 			['/challenges', {
 				data: { challenges: [{ id: 12, slug: 'driveone', title: 'DriveOne', tags: { categories: 'web' }, value: 500 }] }
@@ -480,6 +489,140 @@ describe('/syncchallenges noCTF integration', () => {
 		expect(solves).toHaveLength(1);
 		expect(solves[0].user_id).toBe('noctf:1706');
 		expect(solves[0].ctfd_username).toBe('Justher0');
+	});
+
+	it('ignores solves from a team the channel has no registration for', async () => {
+		const ctf = seedCtf({ platform: 'noctf', api_base_url: API_BASE, platform_division_id: 2 });
+		// One teammate registers, which puts only "w larp" in scope.
+		seedRegistration(ctf, { userId: 'discord-a', username: 'Maverick', teamName: 'w larp', platformUserId: '1875' });
+
+		const calls = stubFetch([
+			['/scoreboard/divisions/2', {
+				data: {
+					entries: [
+						{
+							team_id: 869,
+							rank: 1,
+							score: 500,
+							hidden: false,
+							solves: [{ user_id: 1706, challenge_id: 12, hidden: false, value: 500, created_at: '2026-09-11T10:41:28.840Z' }]
+						},
+						{
+							// Another team in the same division. Its solver is a stranger:
+							// not registered, and not on a team this channel knows.
+							team_id: 999,
+							rank: 2,
+							score: 400,
+							hidden: false,
+							solves: [{ user_id: 31337, challenge_id: 12, hidden: false, value: 400, created_at: '2026-09-11T10:42:00.000Z' }]
+						}
+					],
+					page_size: 100,
+					total: 2
+				}
+			}],
+			['/teams/query', { data: { entries: [{ id: 869, name: 'w larp' }, { id: 999, name: 'strangers' }] } }],
+			['/users/query', { data: { entries: [{ id: 1706, name: 'Justher0', team_id: 869 }], total: 1 } }],
+			['/challenges', {
+				data: { challenges: [{ id: 12, slug: 'driveone', title: 'DriveOne', tags: { categories: 'web' }, value: 500 }] }
+			}]
+		]);
+
+		const { interaction } = await runSync(ctf, 'users');
+
+		const challenge = challengeOperations.getChallengeByName(ctf.id, 'DriveOne');
+		const solves = challengeOperations.getChallengeSolvers(challenge.id);
+		// Only the registered team's solve is kept; the other team's is dropped.
+		expect(solves).toHaveLength(1);
+		expect(solves[0].user_id).toBe('noctf:1706');
+		expect(challengeOperations.hasCtfdUserSolved(challenge.id, 31337, 'noctf')).toBeFalsy();
+
+		const reply = String(lastReply(interaction));
+		expect(reply).toContain('Justher0 (unregistered) solved **DriveOne**');
+		expect(reply).not.toContain('31337');
+
+		// The stranger's name is never looked up, so the division is not walked.
+		const nameCalls = calls.filter(c => c.url.includes('/users/query'));
+		expect(nameCalls).toHaveLength(1);
+		expect(JSON.parse(nameCalls[0].body)).toEqual({ ids: [1706], page_size: 1 });
+	});
+
+	it('parks nothing when the channel has no registration to scope by', async () => {
+		const ctf = seedCtf({ platform: 'noctf', api_base_url: API_BASE, platform_division_id: 2 });
+
+		const calls = stubFetch([
+			['/scoreboard/divisions/2', {
+				data: {
+					entries: [
+						{
+							team_id: 869,
+							rank: 1,
+							score: 500,
+							hidden: false,
+							solves: [{ user_id: 1875, challenge_id: 12, hidden: false, value: 500, created_at: '2026-09-11T10:41:28.840Z' }]
+						}
+					],
+					page_size: 100,
+					total: 1
+				}
+			}],
+			['/challenges', {
+				data: { challenges: [{ id: 12, slug: 'driveone', title: 'DriveOne', tags: { categories: 'web' }, value: 500 }] }
+			}]
+		]);
+
+		const { interaction } = await runSync(ctf, 'users');
+
+		const challenge = challengeOperations.getChallengeByName(ctf.id, 'DriveOne');
+		expect(challengeOperations.getChallengeSolvers(challenge.id)).toHaveLength(0);
+		expect(String(lastReply(interaction))).toMatch(/New solves recorded: 0/);
+
+		// With no registered team there is nothing to compare against, so the
+		// division-wide listing is not even asked for names.
+		expect(calls.some(c => c.url.includes('/teams/query'))).toBe(false);
+		expect(calls.some(c => c.url.includes('/users/query'))).toBe(false);
+	});
+
+	it('parks nothing when the platform cannot resolve team names', async () => {
+		const ctf = seedCtf({ platform: 'noctf', api_base_url: API_BASE, platform_division_id: 2 });
+		seedRegistration(ctf, { userId: 'discord-a', username: 'Maverick', teamName: 'w larp', platformUserId: '1875' });
+
+		const calls = stubFetch([
+			['/scoreboard/divisions/2', {
+				data: {
+					entries: [
+						{
+							team_id: 869,
+							rank: 1,
+							score: 500,
+							hidden: false,
+							solves: [{ user_id: 1706, challenge_id: 12, hidden: false, value: 500, created_at: '2026-09-11T10:41:28.840Z' }]
+						}
+					],
+					page_size: 100,
+					total: 1
+				}
+			}],
+			['/challenges', {
+				data: { challenges: [{ id: 12, slug: 'driveone', title: 'DriveOne', tags: { categories: 'web' }, value: 500 }] }
+			}]
+		]);
+
+		// Without the resolver the client cannot tell a registered team from a
+		// stranger, so nothing may be parked: parking on an unknown scope is what
+		// imported the whole division in the first place.
+		const { NoCTFClient } = require('../../src/lib/noctf/index.js');
+		const original = NoCTFClient.prototype.resolveTeamNames;
+		delete NoCTFClient.prototype.resolveTeamNames;
+		try {
+			await runSync(ctf, 'users');
+		} finally {
+			NoCTFClient.prototype.resolveTeamNames = original;
+		}
+
+		const challenge = challengeOperations.getChallengeByName(ctf.id, 'DriveOne');
+		expect(challengeOperations.getChallengeSolvers(challenge.id)).toHaveLength(0);
+		expect(calls.some(c => c.url.includes('/users/query'))).toBe(false);
 	});
 
 	it('keeps the ctfd: prefix for unregistered CTFd solves', async () => {
@@ -560,10 +703,12 @@ describe('/syncchallenges noCTF integration', () => {
 		const ctf = seedCtf({ platform: 'noctf', api_base_url: API_BASE, platform_division_id: 2 });
 		// The platform has no user by this exact name, so findUser's first-result
 		// fallback must not be trusted with someone else's solves.
+		seedRegistration(ctf, { userId: 'discord-b', username: 'Teammate', teamName: 'w larp', platformUserId: '1654' });
 		seedRegistration(ctf, { userId: 'discord-a', username: 'JustherO', platformUserId: null });
 
 		stubFetch([
 			['/users/query', { data: { entries: [{ id: 1706, name: 'Justher0', team_id: null }] } }],
+			['/teams/query', { data: { entries: [{ id: 969, name: 'w larp' }] } }],
 			['/scoreboard/divisions/2', {
 				data: {
 					entries: [

@@ -48,6 +48,11 @@
  * @property {(userIds: Array<number|string>) => Promise<Map<string, string>>} [resolveUserNames]
  *   Optional. Resolves platform user ids to display names in one call. Present
  *   on noCTF, absent on CTFd, so callers must guard before using it.
+ * @property {(teamIds: Array<number|string>) => Promise<Map<string, string>>} [resolveTeamNames]
+ *   Optional. Resolves platform team ids to team names in one call, keyed by
+ *   the String form of the id. Present on noCTF, absent on CTFd, so callers
+ *   must guard before using it. A caller that treats a missing name as "not my
+ *   team" has to fail closed when the resolver is unavailable.
  * @property {() => Promise<{ok: boolean, platform: string, apiBaseUrl: string, details: Object}>} testConnection
  *
  * @module platform

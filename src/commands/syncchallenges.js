@@ -11,6 +11,13 @@ const { createPlatformClient } = require('../lib/platform');
  * endpoint omits user_id entirely). The scoreboard endpoint is the only noCTF
  * source that attributes a solve to a user, so the 'users' source prefers it and
  * falls back to the per-user walk when the platform offers no bulk listing.
+ *
+ * That noCTF scoreboard is division-wide, and the credential cannot narrow it:
+ * the platform grants scoreboard and user reads publicly and never filters by
+ * the caller's membership. Scope therefore comes from the registrations in this
+ * channel. Solves belonging to a registered Discord user are always recorded,
+ * and an unregistered solver is only parked when their platform team is one of
+ * the registered teams, so a sync never imports the rest of the division.
  */
 class SyncChallengesCommand extends Command {
 	constructor(context, options) {
@@ -274,6 +281,15 @@ class SyncChallengesCommand extends Command {
 	 * Only noCTF offers this. It is the accurate path there because the
 	 * per-challenge endpoint drops user_id.
 	 *
+	 * The listing is division-wide, so the solves it returns are filtered against
+	 * the teams this channel has registrations for. A solver linked to a Discord
+	 * account is recorded regardless of team, because their registration is the
+	 * scope. An unlinked solver is only parked (and only named) when their team is
+	 * one of the registered ones; everyone else in the division is ignored. When
+	 * the platform cannot resolve team names the scope is empty and nothing
+	 * unregistered is parked, which fails closed rather than importing the
+	 * division.
+	 *
 	 * @returns {Promise<{count: number, solves: string[]}|null>} null when the
 	 *   platform does not support it, so the caller falls back
 	 */
@@ -320,17 +336,44 @@ class SyncChallengesCommand extends Command {
 		let count = 0;
 		const newSolves = [];
 
+		// The listing covers the whole division, so the teams that matter have to
+		// be worked out before anything is written. A team id is a candidate only
+		// when it carries a solve from someone who is not linked to a Discord
+		// account, since a linked solver is recorded on their registration alone.
+		const unlinkedTeamIds = new Set();
+		for (const solve of solves) {
+			if (solve.userId === null || solve.userId === undefined) {
+				continue;
+			}
+			if (solve.teamId === null || solve.teamId === undefined) {
+				continue;
+			}
+			if (!platformChallengeMap.has(solve.challengeId)) {
+				continue;
+			}
+			const platformUserId = String(parseInt(solve.userId, 10));
+			if (!platformUserMap.has(platformUserId)) {
+				unlinkedTeamIds.add(String(solve.teamId));
+			}
+		}
+
+		const scopedTeamIds = await this._scopedTeamIds(client, userRegMap, unlinkedTeamIds);
+
 		// The bulk listing identifies a solver by a numeric user id only. Resolve
-		// the names for the solvers who are not linked to a Discord account, once,
-		// so the announcement and the stored row can name a person instead of a
-		// number. Solvers whose challenge is not visible are excluded because their
-		// solve is skipped below and the lookup would be wasted.
+		// the names for the solvers who are not linked to a Discord account and are
+		// in scope, once, so the announcement and the stored row can name a person
+		// instead of a number. Solvers whose challenge is not visible, or whose team
+		// is outside the channel, are excluded because their solve is skipped below
+		// and the lookup would be wasted.
 		const unresolvedIds = new Set();
 		for (const solve of solves) {
 			if (solve.userId === null || solve.userId === undefined) {
 				continue;
 			}
 			if (!platformChallengeMap.has(solve.challengeId)) {
+				continue;
+			}
+			if (!scopedTeamIds.has(String(solve.teamId))) {
 				continue;
 			}
 			const platformUserId = String(parseInt(solve.userId, 10));
@@ -374,6 +417,12 @@ class SyncChallengesCommand extends Command {
 					newSolves.push(message);
 				}
 			} else if (platformUserId) {
+				// Someone in the division who is not registered here. Only the teams
+				// this channel actually has registrations for are in scope; the rest of
+				// the scoreboard is not this CTF's business.
+				if (!scopedTeamIds.has(String(solve.teamId))) {
+					continue;
+				}
 				if (challengeOperations.hasCtfdUserSolved(challenge.localId, platformUserId, ctf.platform)) {
 					continue;
 				}
@@ -392,6 +441,80 @@ class SyncChallengesCommand extends Command {
 		}
 
 		return { count, solves: newSolves };
+	}
+
+	/**
+	 * The platform team ids that belong to this channel's registrations.
+	 *
+	 * The division-wide bulk listing reports a solve's team by id only, so the
+	 * ids have to be translated to names before they can be compared with what
+	 * members registered. Only the ids whose name matches a registered team come
+	 * back, so the caller can treat membership in the result as "in scope".
+	 *
+	 * An empty result means nothing is in scope, which is also what an unavailable
+	 * resolver produces: without a name to compare, an unregistered solver must
+	 * not be parked, so this fails closed.
+	 *
+	 * @param {Object} client - Platform client
+	 * @param {Map<string, Object>} userRegMap - Registrations by Discord user id
+	 * @param {Set<string>} candidateTeamIds - Team ids to test
+	 * @returns {Promise<Set<string>>} Team ids whose name is registered
+	 */
+	async _scopedTeamIds(client, userRegMap, candidateTeamIds) {
+		const scoped = new Set();
+		const registeredTeams = this._registeredTeamNames(userRegMap);
+
+		if (registeredTeams.size === 0 || candidateTeamIds.size === 0) {
+			return scoped;
+		}
+
+		if (typeof client.resolveTeamNames !== 'function') {
+			this.container.logger.warn(
+				`Platform "${client.platform}" cannot resolve team names; not parking any unregistered solve`
+			);
+			return scoped;
+		}
+
+		try {
+			const teamNames = await client.resolveTeamNames([...candidateTeamIds]);
+			for (const [teamId, teamName] of teamNames) {
+				if (registeredTeams.has(teamName)) {
+					scoped.add(teamId);
+				}
+			}
+		} catch (error) {
+			// Unlike the adapter, which reports a name failure by omission, a client
+			// that throws leaves scope undetermined. Parking on an unknown scope is
+			// what imported the whole division, so an error means nothing is parked.
+			this.container.logger.warn(
+				`Could not scope solves to the registered teams: ${error.message}`
+			);
+		}
+
+		return scoped;
+	}
+
+	/**
+	 * Every team name this channel's registrations claim.
+	 *
+	 * Both columns are collected and compared exactly, which is the same rule
+	 * _findRegisteredMember applies: team_name is what the member typed and
+	 * ctfd_team_name is what the platform reported, and either can be the one that
+	 * matches.
+	 *
+	 * @param {Map<string, Object>} userRegMap - Registrations by Discord user id
+	 * @returns {Set<string>} Non-empty team names
+	 */
+	_registeredTeamNames(userRegMap) {
+		const names = new Set();
+		for (const reg of userRegMap.values()) {
+			for (const candidate of [reg.team_name, reg.ctfd_team_name]) {
+				if (candidate) {
+					names.add(candidate);
+				}
+			}
+		}
+		return names;
 	}
 
 	/**

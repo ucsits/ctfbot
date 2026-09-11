@@ -265,7 +265,13 @@ class NoCTFClient {
 	 * it is the accurate source. Solves the platform marks hidden (recorded
 	 * outside the competition window) are skipped, as are hidden teams.
 	 *
-	 * @returns {Promise<Array>} Flattened normalized solves
+	 * The listing is DIVISION-WIDE: it carries every visible team's solves, and
+	 * the credential does not narrow it, because noCTF grants `scoreboard.get`
+	 * publicly and the route never filters by the caller's membership. A caller
+	 * that only cares about its own teams must therefore scope the result itself
+	 * (the solve below carries the team id for exactly that).
+	 *
+	 * @returns {Promise<Array>} Flattened normalized solves, every visible team
 	 */
 	async getAllSolves() {
 		const divisionId = await this.resolveDivisionId();
@@ -331,12 +337,24 @@ class NoCTFClient {
 	/**
 	 * Resolve team names for a list of team ids, in batches the API accepts.
 	 *
-	 * @private
-	 * @param {Array<number>} teamIds
-	 * @returns {Promise<Map<number, string>>}
+	 * The bulk scoreboard listing identifies a solve's team by numeric id only, so
+	 * this is how a caller decides whether a team is one of its own. Keys are the
+	 * String form of the id, matching resolveUserNames, because the scoreboard
+	 * entry's team_id and the query's response id are not guaranteed to share a
+	 * JavaScript type.
+	 *
+	 * A chunk that fails is logged and skipped rather than throwing, so one bad
+	 * batch cannot fail a sync. A caller for which a missing name means "not my
+	 * team" therefore has to treat an empty result as un-scoped and fail closed.
+	 *
+	 * @param {Array<number|string>} teamIds
+	 * @returns {Promise<Map<string, string>>} Map of String(team id) to team name
 	 */
-	async _resolveTeamNames(teamIds) {
-		const unique = [...new Set(teamIds.filter(id => id !== null && id !== undefined))];
+	async resolveTeamNames(teamIds) {
+		const unique = [...new Set((teamIds || [])
+			.filter(id => id !== null && id !== undefined && id !== '')
+			.map(id => Number(id))
+			.filter(id => Number.isFinite(id)))];
 		const names = new Map();
 
 		for (let i = 0; i < unique.length; i += TEAM_ID_CHUNK_SIZE) {
@@ -347,7 +365,7 @@ class NoCTFClient {
 					body: { ids: chunk, page_size: chunk.length }
 				});
 				for (const team of (data && data.entries) || []) {
-					names.set(team.id, team.name);
+					names.set(String(team.id), team.name);
 				}
 			} catch (error) {
 				this.log.warn(`Could not resolve ${chunk.length} team name(s): ${error.message}`);
@@ -425,10 +443,10 @@ class NoCTFClient {
 		}
 
 		const visible = entries.filter(entry => !entry.hidden);
-		const names = await this._resolveTeamNames(visible.map(entry => entry.team_id));
+		const names = await this.resolveTeamNames(visible.map(entry => entry.team_id));
 
 		return visible.map(entry => ({
-			name: names.get(entry.team_id) || `team-${entry.team_id}`,
+			name: names.get(String(entry.team_id)) || `team-${entry.team_id}`,
 			pos: entry.rank,
 			score: entry.score
 		}));

@@ -108,13 +108,23 @@ used.
 | Category | `category` field | Derived from `tags.categories`, taking the first comma separated entry, falling back to `uncategorized` |
 | Solve attribution | Per user via `/api/v1/challenges/:id/solves` | Team scoped. `/challenges/:id/solves` returns a team id only, so the scoreboard endpoint is used to recover the user id |
 | Scoreboard | `/api/v1/scoreboard` | `/scoreboard/divisions/:id`, which is why a division id is required |
-| Bulk solve listing | Not available | `/scoreboard/divisions/:id` carries every solve |
+| Bulk solve listing | Not available | `/scoreboard/divisions/:id` carries every solve in the division, not just the bot's teams |
 
 When noCTF reports a solve for a team, the sync attributes it to a registered
 member of that team. If no member is registered yet, the solve is parked under a
 per-platform synthetic user id (`noctf:<id>` or `ctfd:<id>`) and `/registerctf`
 claims it later. The prefix is per platform so a numeric id from one platform can
 never be claimed by a registration on the other.
+
+That noCTF bulk listing is division-wide, and the token cannot narrow it: the
+platform serves the scoreboard and `/users/query` publicly and never filters by
+the caller's membership. Scope therefore comes from the registrations in the
+channel. A solve belonging to a registered Discord user is always recorded, and
+an unregistered solver is only parked when their team matches a team someone has
+already registered, so a sync never imports the rest of the division. One
+consequence is worth knowing: because scope is the registered teams, a solve is
+only parked once at least one teammate has run `/registerctf`. The first member
+of a team to register has nothing waiting to be claimed.
 
 ### Adding another platform
 

@@ -204,16 +204,39 @@ function seedNoCTFCtf() {
 	return ctfOperations.getCTFById(id);
 }
 
+/**
+ * Register a linked teammate, which is what puts their team in the sync's scope.
+ *
+ * The bulk solve listing is division-wide, so the sync only records solves from
+ * teams the channel already has registrations for. Their platform user id never
+ * appears in the stubbed scoreboard, so they never own the solve under test.
+ */
+function seedTeammate(ctf, { userId, username, platformUserId, teamName }) {
+	registrationOperations.registerUser({
+		ctf_id: ctf.id,
+		user_id: userId,
+		username,
+		team_name: teamName,
+		ctfd_user_id: String(platformUserId),
+		ctfd_team_name: teamName
+	});
+}
+
 describe('noCTF end to end: sync then register', () => {
 	it('parks an unregistered solve under noctf: and lets /registerctf claim it', async () => {
 		const ctf = seedNoCTFCtf();
+		// The sync is scoped to the teams this channel has registrations for, so a
+		// teammate is registered up front. Their solve is never in the scoreboard
+		// below, which leaves the parked solve to be claimed by /registerctf.
+		seedTeammate(ctf, { userId: 'discord-teammate', username: 'Teammate', platformUserId: 1481, teamName: 'w larp' });
 
-		// 1. Sync before anyone registers. The bulk listing is the only source
+		// 1. Sync before the solver registers. The bulk listing is the only source
 		//    that attributes the solve to a user, so that is the path under test.
 		//    The name lookup is what lets the report name the solver rather than
 		//    print their numeric platform id.
 		stubFetch([
 			['/scoreboard/divisions/2', scoreboardWithSolve()],
+			['/teams/query', { data: { entries: [{ id: 869, name: 'w larp' }] } }],
 			['/users/query', { data: { entries: [{ id: PLATFORM_USER_ID, name: 'Maverick', team_id: 869 }] } }],
 			['/challenges', challengesPayload()]
 		]);
@@ -266,9 +289,11 @@ describe('noCTF end to end: sync then register', () => {
 
 	it('does not let a CTFd registration claim a noCTF parked solve', async () => {
 		const ctf = seedNoCTFCtf();
+		seedTeammate(ctf, { userId: 'discord-teammate', username: 'Teammate', platformUserId: 1481, teamName: 'w larp' });
 
 		stubFetch([
 			['/scoreboard/divisions/2', scoreboardWithSolve()],
+			['/teams/query', { data: { entries: [{ id: 869, name: 'w larp' }] } }],
 			['/users/query', { data: { entries: [{ id: PLATFORM_USER_ID, name: 'Maverick', team_id: 869 }] } }],
 			['/challenges', challengesPayload()]
 		]);
