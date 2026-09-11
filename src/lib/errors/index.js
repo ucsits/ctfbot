@@ -48,7 +48,7 @@ class DatabaseError extends CTFBotError {
 }
 
 /**
- * Error for external API failures (e.g., CTFd)
+ * Error for external API failures (e.g., a CTF platform)
  */
 class ExternalAPIError extends CTFBotError {
 	constructor(message, options = {}) {
