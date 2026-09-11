@@ -53,10 +53,23 @@ describe('/task add input hardening', () => {
 		expect(taskCommand).toContain('description.slice(0, 1024)');
 	});
 
-	it('writes to blockchain before DB so no orphan tasks exist', () => {
-		// appendBlock must appear before createTask in the method body
+	it('writes the task and its reminders through one transactional path', () => {
 		const addMethod = taskCommand.slice(taskCommand.indexOf('async _add'), taskCommand.indexOf('async _list'));
-		expect(addMethod.indexOf('luce.appendBlock')).toBeLessThan(addMethod.indexOf('taskRepository.createTask'));
+
+		// The task row and every reminder commit together via
+		// createTaskWithReminders, so a partial schedule cannot be left behind.
+		// This replaces an earlier assertion that only checked block-before-DB
+		// ordering and wrongly described that ordering as orphan prevention: a
+		// block-first order turns a would-be orphan task row into an orphan
+		// blockchain block, which is not prevention.
+		expect(addMethod).toContain('taskRepository.createTaskWithReminders');
+		expect(addMethod).not.toContain('taskRepository.createTask(');
+		expect(addMethod).not.toContain('taskRepository.createReminder(');
+
+		// The blockchain write still precedes the database write.
+		expect(addMethod.indexOf('luce.appendBlock')).toBeLessThan(
+			addMethod.indexOf('taskRepository.createTaskWithReminders')
+		);
 	});
 
 	it('creates reminders with unique timestamps to avoid duplicate notifications', () => {

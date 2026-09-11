@@ -90,11 +90,12 @@ class AdminCommand extends Command {
 			return interaction.editReply('❌ Cannot add admins when ADMIN_IDS environment variable is set. Remove it from .env to use database-based admin management.');
 		}
 
-		if (adminRepository.exists(user.id)) {
+		// The insert is atomic (INSERT OR IGNORE), so there is no exists() pre-check
+		// that could race with a concurrent /admin add. A zero result means the user
+		// was already an admin.
+		if (adminRepository.add(user.id, interaction.user.id) === 0) {
 			return interaction.editReply(`❌ ${user.tag} is already an admin.`);
 		}
-
-		adminRepository.add(user.id, interaction.user.id);
 
 		const embed = new EmbedBuilder()
 			.setColor(0x00FF00)

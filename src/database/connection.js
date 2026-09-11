@@ -9,6 +9,12 @@ function getConnection() {
 		dbInstance = new Database(dbPath);
 
 		dbInstance.pragma('foreign_keys = ON');
+		// WAL lets readers proceed while a writer is active, and busy_timeout makes
+		// a concurrent writer wait for the lock instead of failing immediately with
+		// SQLITE_BUSY. Harmless for the current single-process deployment and
+		// required if the bot is ever run as more than one process.
+		dbInstance.pragma('journal_mode = WAL');
+		dbInstance.pragma('busy_timeout = 5000');
 	}
 
 	return dbInstance;
