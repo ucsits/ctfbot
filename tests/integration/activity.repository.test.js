@@ -257,3 +257,74 @@ describe('store-confirm command ordering', () => {
 		expect(src).toContain('if (!confirmed)');
 	});
 });
+
+// ── Debit guard inside the transaction (M6) ─────────────────────────────
+// completeApPurchase and spendPoints used to call getBalance() before opening
+// their transaction and then debit unconditionally. The guard is now part of the
+// debit statement itself, so the check cannot go stale against the write.
+describe('AP debit guard', () => {
+	it('rejects an unaffordable debit and writes nothing', () => {
+		activityRepository.grantPoints({ userId: 'guard-1', amount: 25, grantedBy: 'admin', blockHeight: 1 });
+
+		const ledgerBefore = conn.prepare('SELECT COUNT(*) AS n FROM activity_ledger WHERE user_id = ?').get('guard-1').n;
+
+		expect(
+			activityRepository.completeApPurchase({
+				purchaseId: 'guard-p1',
+				userId: 'guard-1',
+				itemId: 1,
+				apCost: 26,
+				blockHeight: 2
+			})
+		).toBeNull();
+
+		expect(activityRepository.getBalance('guard-1')).toBe(25);
+		expect(conn.prepare('SELECT COUNT(*) AS n FROM activity_ledger WHERE user_id = ?').get('guard-1').n).toBe(ledgerBefore);
+		expect(activityRepository.getPurchase('guard-p1')).toBeUndefined();
+	});
+
+	it('allows a debit exactly equal to the balance and leaves zero', () => {
+		activityRepository.grantPoints({ userId: 'guard-2', amount: 40, grantedBy: 'admin', blockHeight: 3 });
+
+		const result = activityRepository.completeApPurchase({
+			purchaseId: 'guard-p2',
+			userId: 'guard-2',
+			itemId: 1,
+			apCost: 40,
+			blockHeight: 4
+		});
+
+		expect(result).toBe(0);
+		expect(activityRepository.getBalance('guard-2')).toBe(0);
+		expect(activityRepository.getPurchase('guard-p2').status).toBe('completed');
+	});
+
+	it('spendPoints rejects an unaffordable spend and leaves the ledger alone', () => {
+		activityRepository.grantPoints({ userId: 'guard-3', amount: 5, grantedBy: 'admin', blockHeight: 5 });
+		const ledgerBefore = conn.prepare('SELECT COUNT(*) AS n FROM activity_ledger WHERE user_id = ?').get('guard-3').n;
+
+		expect(
+			activityRepository.spendPoints({ userId: 'guard-3', amount: 6, purchaseId: 'guard-sp1', blockHeight: 6 })
+		).toBeNull();
+
+		expect(activityRepository.getBalance('guard-3')).toBe(5);
+		expect(conn.prepare('SELECT COUNT(*) AS n FROM activity_ledger WHERE user_id = ?').get('guard-3').n).toBe(ledgerBefore);
+	});
+
+	it('never reads the balance before opening the transaction', () => {
+		const src = readFileSync(join(repoRoot, 'src/database/repositories/activity.repository.js'), 'utf8');
+
+		for (const fn of ['function completeApPurchase', 'function spendPoints']) {
+			const body = src.slice(src.indexOf(fn), src.indexOf('\n}', src.indexOf(fn)) + 2);
+			const txAt = body.indexOf('db().transaction(');
+			const balanceAt = body.indexOf('getBalance(');
+
+			expect(txAt).toBeGreaterThan(-1);
+			expect(body).toContain('balance >= ?');
+			// If getBalance appears at all, it must be inside the transaction.
+			if (balanceAt !== -1) {
+				expect(balanceAt).toBeGreaterThan(txAt);
+			}
+		}
+	});
+});

@@ -287,22 +287,27 @@ function releaseStaleApReservations({ olderThanSeconds = 900 } = {}) {
  * @returns {number|null} new balance, or null if insufficient funds
  */
 function completeApPurchase({ purchaseId, userId, itemId, apCost, blockHeight }) {
-	const current = getBalance(userId);
-	if (current < apCost) {
-		return null;
-	}
-
 	const now = Math.floor(Date.now() / 1000);
 
 	const tx = db().transaction(() => {
+		// The affordability guard IS the debit. A separate getBalance() read
+		// outside the transaction could go stale between the check and the write,
+		// which is exactly the hole that would allow a negative balance if a
+		// second writer ever appeared. Zero changed rows means the user could not
+		// afford it, and nothing else is written.
+		const debit = db().prepare(`
+			UPDATE activity_balances SET balance = balance - ?
+			WHERE user_id = ? AND balance >= ?
+		`).run(apCost, userId, apCost);
+
+		if (debit.changes === 0) {
+			return null;
+		}
+
 		db().prepare(`
 			INSERT INTO activity_ledger (user_id, amount, kind, reference_id, block_height, created_at)
 			VALUES (?, ?, 'purchase', ?, ?, ?)
 		`).run(userId, -apCost, purchaseId, blockHeight, now);
-
-		db().prepare(`
-			UPDATE activity_balances SET balance = balance - ? WHERE user_id = ?
-		`).run(apCost, userId);
 
 		db().prepare(`
 			INSERT INTO purchases (id, user_id, item_id, payment_method, status, cost_ap, cost_rp, block_height, created_at)
@@ -327,22 +332,24 @@ function completeApPurchase({ purchaseId, userId, itemId, apCost, blockHeight })
  * @returns {number|null}
  */
 function spendPoints({ userId, amount, purchaseId, blockHeight }) {
-	const current = getBalance(userId);
-	if (current < amount) {
-		return null;
-	}
-
 	const now = Math.floor(Date.now() / 1000);
 
 	const tx = db().transaction(() => {
+		// Same pattern as completeApPurchase: the conditional debit is the guard,
+		// so it cannot be separated from the write by a stale read.
+		const debit = db().prepare(`
+			UPDATE activity_balances SET balance = balance - ?
+			WHERE user_id = ? AND balance >= ?
+		`).run(amount, userId, amount);
+
+		if (debit.changes === 0) {
+			return null;
+		}
+
 		db().prepare(`
 			INSERT INTO activity_ledger (user_id, amount, kind, reference_id, block_height, created_at)
 			VALUES (?, ?, 'purchase', ?, ?, ?)
 		`).run(userId, -amount, purchaseId, blockHeight, now);
-
-		db().prepare(`
-			UPDATE activity_balances SET balance = balance - ? WHERE user_id = ?
-		`).run(amount, userId);
 
 		return getBalance(userId);
 	});
