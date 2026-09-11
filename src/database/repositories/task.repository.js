@@ -30,10 +30,37 @@ function createReminder({ taskId, channelId, remindAt }) {
 		.prepare(
 			`
 		INSERT INTO task_reminders (task_id, channel_id, remind_at)
-		VALUES (?, ?, ?)
+			VALUES (?, ?, ?)
 	`
 		)
 		.run(taskId, channelId, remindAt);
+}
+
+/**
+ * Insert a task and all of its reminders in one transaction.
+ *
+ * The task row and its reminder rows used to be written separately, so a
+ * failure while scheduling the second reminder left a task with a partial
+ * reminder set even though the anchoring block described the full schedule.
+ * Either the task and every reminder are written, or nothing is.
+ *
+ * @param {object} params
+ * @param {object} params.task - fields accepted by createTask
+ * @param {Array<{channelId: string, remindAt: number}>} params.reminders
+ */
+function createTaskWithReminders({ task, reminders }) {
+	const tx = db().transaction(() => {
+		createTask(task);
+		for (const reminder of reminders) {
+			createReminder({
+				taskId: task.taskId,
+				channelId: reminder.channelId,
+				remindAt: reminder.remindAt
+			});
+		}
+	});
+
+	return tx();
 }
 
 /**
@@ -252,6 +279,7 @@ function markDigestPartSent(digestKey) {
 
 module.exports = {
 	createTask,
+	createTaskWithReminders,
 	createReminder,
 	completeTask,
 	cancelTask,

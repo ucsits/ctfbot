@@ -257,26 +257,17 @@ class TaskCommand extends Command {
 				data
 			});
 
-			// 2. Write to DB
-			taskRepository.createTask({
-				taskId,
-				title,
-				description,
-				assignedTo: assignTo.id,
-				createdBy: interaction.user.id,
-				deadline: deadlineUnix,
-				blockHeight: block.height
-			});
-
-			// 3. Create reminders. Keep timestamps unique so short deadlines do not
-			// create duplicate notifications.
+			// 2. Write the task and all of its reminders in one transaction so a
+			// failure cannot leave a task with only part of its schedule recorded.
+			// Keep timestamps unique so short deadlines do not create duplicate
+			// notifications.
 			const reminderTimes = new Set();
 			const remindAt = deadlineUnix - 3600;
 			if (remindAt > Math.floor(Date.now() / 1000)) {
 				reminderTimes.add(remindAt);
 			}
 
-			// 4. Create day-before reminder (9:00 AM Jakarta time, day before deadline)
+			// Day-before reminder (9:00 AM Jakarta time, day before deadline)
 			const deadlineJakarta = DateTime.fromSeconds(deadlineUnix).setZone('Asia/Jakarta');
 			const dayBefore9am = deadlineJakarta
 				.minus({ days: 1 })
@@ -285,13 +276,22 @@ class TaskCommand extends Command {
 			if (dayBeforeRemindAt > Math.floor(Date.now() / 1000)) {
 				reminderTimes.add(dayBeforeRemindAt);
 			}
-			for (const remindAt of reminderTimes) {
-				taskRepository.createReminder({
+
+			taskRepository.createTaskWithReminders({
+				task: {
 					taskId,
+					title,
+					description,
+					assignedTo: assignTo.id,
+					createdBy: interaction.user.id,
+					deadline: deadlineUnix,
+					blockHeight: block.height
+				},
+				reminders: [...reminderTimes].map(at => ({
 					channelId: constants.REMINDER_CHANNEL_ID,
-					remindAt
-				});
-			}
+					remindAt: at
+				}))
+			});
 
 			// 5. Push to Google Calendar (best-effort, never blocks the response)
 			const sync = _syncService();

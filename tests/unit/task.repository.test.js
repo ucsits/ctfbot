@@ -267,3 +267,57 @@ describe('migration upgrades', () => {
 		expect(result.skipped.length).toBeGreaterThanOrEqual(2);
 	});
 });
+
+// ── createTaskWithReminders: all-or-nothing task + schedule write ───────
+describe('createTaskWithReminders', () => {
+	it('writes the task and every reminder together', () => {
+		repo.createTaskWithReminders({
+			task: {
+				taskId: 'tx-task-1',
+				title: 'Transactional task',
+				description: 'with reminders',
+				assignedTo: 'assignee-tx',
+				createdBy: 'creator-tx',
+				deadline: 2000000100,
+				blockHeight: 42
+			},
+			reminders: [
+				{ channelId: 'ch-tx', remindAt: 2000000000 },
+				{ channelId: 'ch-tx', remindAt: 2000000050 }
+			]
+		});
+
+		const task = repo.getTask('tx-task-1');
+		expect(task).toBeTruthy();
+		expect(task.title).toBe('Transactional task');
+		expect(task.block_height).toBe(42);
+
+		const reminders = db.prepare('SELECT * FROM task_reminders WHERE task_id = ? ORDER BY remind_at').all('tx-task-1');
+		expect(reminders.length).toBe(2);
+		expect(reminders.map(r => r.remind_at)).toEqual([2000000000, 2000000050]);
+		expect(reminders.every(r => r.channel_id === 'ch-tx')).toBe(true);
+	});
+
+	it('rolls back the task when a reminder cannot be written', () => {
+		// A NULL remind_at violates NOT NULL, so the transaction must abort and
+		// leave neither the task nor any reminder behind.
+		expect(() =>
+			repo.createTaskWithReminders({
+				task: {
+					taskId: 'tx-task-rollback',
+					title: 'Should not survive',
+					description: null,
+					assignedTo: 'assignee-tx',
+					createdBy: 'creator-tx',
+					deadline: 2000000200,
+					blockHeight: 43
+				},
+				reminders: [{ channelId: 'ch-tx', remindAt: 2000000150 }, { channelId: 'ch-tx', remindAt: null }]
+			})
+		).toThrow();
+
+		expect(repo.getTask('tx-task-rollback')).toBeUndefined();
+		const reminders = db.prepare('SELECT COUNT(*) AS n FROM task_reminders WHERE task_id = ?').get('tx-task-rollback');
+		expect(reminders.n).toBe(0);
+	});
+});
