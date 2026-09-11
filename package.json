@@ -11,6 +11,7 @@
     "format": "prettier --write \"src/**/*.js\"",
     "format:check": "prettier --check \"src/**/*.js\"",
     "test": "vitest run",
+    "test:live": "K17_LIVE=1 vitest run tests/live",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"
   },

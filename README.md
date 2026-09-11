@@ -24,16 +24,17 @@ powered by [Luce](https://github.com/ucsits/Luce).
 ## Commands
 
 ### CTF Commands
-- `/schedule` — Schedule custom events with timezone support
-- `/createctf` — Create a CTF text channel and schedule its event
-- `/registerctf` — Register your participation for the CTF in the current channel
-- `/addchalctf` — Add challenges to a CTF
-- `/solvectf` — Mark a challenge as solved
-- `/archivectf` — Archive a completed CTF
-- `/chalpts` — View challenge points
-- `/summarizectf` — View CTF summary
-- `/syncchallenges` — Sync challenges from CTFd
-- `/pact` — Manage pacts
+- `/schedule`: Schedule custom events with timezone support
+- `/createctf`: Create a CTF text channel and schedule its event
+- `/registerctf`: Register your participation for the CTF in the current channel
+- `/addchalctf`: Add challenges to a CTF
+- `/solvectf`: Mark a challenge as solved
+- `/archivectf`: Archive a completed CTF
+- `/chalpts`: View challenge points
+- `/summarizectf`: View CTF summary
+- `/syncchallenges`: Sync challenges and solves from the configured platform
+- `/setctfplatform`: Select the CTF platform for this channel and set its API details
+- `/pact`: Manage pacts
 
 ### Task Commands
 - `/task add` — Create a new task (title, description, assignee, deadline, optional timezone)
@@ -68,6 +69,63 @@ You can also give rep by:
 ### Utility Commands
 - `/ping` — Check bot responsiveness
 - `/help` — List all available commands
+
+## CTF Platform Support
+
+Every CTF channel is bound to exactly one platform. The binding is stored on the
+`ctfs` row so commands never have to guess:
+
+| Column | Purpose |
+| --- | --- |
+| `platform` | Adapter id, either `ctfd` or `noctf`. Defaults to `ctfd` for every pre-existing row. |
+| `api_base_url` | API origin to talk to. Needed because noCTF serves its API from a different origin than its web UI. Falls back to the CTF URL when unset. |
+| `platform_division_id` | Scoreboard division, required by noCTF and unused by CTFd. |
+
+The token is still stored in `ctfs.api_token`. CTFd sends it as
+`Authorization: Token <api_token>`, while noCTF sends it as
+`Authorization: Bearer <token>` and expects a copied session token. A noCTF
+session token lasts 7 days and has no refresh endpoint, so it has to be replaced
+periodically with `/setctfplatform`.
+
+### Choosing a platform
+
+```
+/setctfplatform platform:noctf api_base_url:https://api-k17ctf.secso.cc api_token:<token> division_id:2
+/setctfplatform show:true
+```
+
+`/setctfplatform` needs the Manage Channels permission, and admins and
+governance users bypass that check like every other privileged command. The
+command probes the platform before it persists anything, and it reports whether
+the API answered, whether the CTF is currently active, and which division it
+used.
+
+### Behaviour differences
+
+| Concern | CTFd | noCTF |
+| --- | --- | --- |
+| Challenge listing | `/api/v1/challenges` | `/challenges`, gated on the competition being active unless the token carries admin policies |
+| Category | `category` field | Derived from `tags.categories`, taking the first comma separated entry, falling back to `uncategorized` |
+| Solve attribution | Per user via `/api/v1/challenges/:id/solves` | Team scoped. `/challenges/:id/solves` returns a team id only, so the scoreboard endpoint is used to recover the user id |
+| Scoreboard | `/api/v1/scoreboard` | `/scoreboard/divisions/:id`, which is why a division id is required |
+| Bulk solve listing | Not available | `/scoreboard/divisions/:id` carries every solve |
+
+When noCTF reports a solve for a team, the sync attributes it to a registered
+member of that team. If no member is registered yet, the solve is parked under a
+per-platform synthetic user id (`noctf:<id>` or `ctfd:<id>`) and `/registerctf`
+claims it later. The prefix is per platform so a numeric id from one platform can
+never be claimed by a registration on the other.
+
+### Adding another platform
+
+1. Add an entry to `PLATFORMS` in `src/lib/constants/platforms.js`. The `id` is
+   persisted in `ctfs.platform`, so treat it as stable.
+2. Add a factory to `FACTORIES` in `src/lib/platform/index.js` that returns the
+   normalized client interface documented at the top of that file.
+3. Add a prefix to `PREFIX_BY_PLATFORM` in `src/lib/platform/syntheticUser.js`.
+
+Commands only ever call `createPlatformClient`, so they pick the new platform up
+without further changes.
 
 ## Quick Start
 
@@ -139,6 +197,8 @@ src/
 ├── commands/              # Slash command implementations
 │   ├── createctf.js       # Create CTF channels and events
 │   ├── registerctf.js     # User registration for CTFs
+│   ├── setctfplatform.js  # Pick the CTF platform for a channel
+│   ├── syncchallenges.js  # Sync challenges and solves from the platform
 │   ├── schedule.js        # Generic event scheduling
 │   ├── task.js            # Blockchain-backed task management
 │   ├── rep.js             # Reputation command (ephemeral)
@@ -156,6 +216,12 @@ src/
 ├── lib/
 │   ├── luce/
 │   │   └── index.js       # Luce blockchain RPC client
+│   ├── platform/          # Platform registry and normalized client interface
+│   │   ├── index.js       # createPlatformClient and platform lookup
+│   │   ├── ctfd.adapter.js  # Wraps the existing CTFd client
+│   │   └── syntheticUser.js  # Pending-solve user id prefixes per platform
+│   ├── noctf/
+│   │   └── index.js       # noCTF client (separate API origin, Bearer auth)
 │   ├── constants/
 │   ├── embeds/
 │   ├── errors/
@@ -179,6 +245,7 @@ src/
 
 **Core tables (existing):**
 - `ctfs` — Stores CTF competition details
+- `ctfs.platform`, `ctfs.api_base_url`, `ctfs.platform_division_id`: Which platform a CTF channel syncs from, and how to reach it
 - `ctf_registrations` — Stores user registrations
 - `ctf_challenges` — Stores CTF challenges
 - `ctf_challenge_solves` — Tracks challenge solves
@@ -535,6 +602,27 @@ The bot is built using the [@sapphire/framework](https://www.sapphirejs.dev/) wh
 ```bash
 pnpm test
 ```
+
+The suite is fully offline. The platform adapters are exercised against the real
+clients with only `globalThis.fetch` faked, so no credentials and no network are
+needed.
+
+There is also an opt-in live probe that talks to a real noCTF deployment. It is
+read-only (it never registers, solves or writes) and skipped by default:
+
+```bash
+K17_LIVE=1 \
+K17_API_TOKEN=<session token> \
+K17_DIVISION_ID=2 \
+K17_API_USERNAME=<username> \
+pnpm test:live
+```
+
+`K17_API_BASE_URL` defaults to `https://api-k17ctf.secso.cc`. The token is
+optional: while the competition is active, anonymous reads are enough for every
+assertion. Set `K17_API_TOKEN` when the deployment gates the routes (before the
+start, or when hidden challenges matter), and `K17_API_USERNAME` to exercise the
+user lookup.
 
 ### Code Style
 

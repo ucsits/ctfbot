@@ -46,7 +46,7 @@ class CreateCTFCommand extends Command {
 				.addStringOption(option =>
 					option
 						.setName('api_token')
-						.setDescription('CTFd API token for automatic registration integration (optional)')
+						.setDescription('Platform API token for automatic registration integration (optional)')
 						.setRequired(false)
 				)
 				.addStringOption(option =>

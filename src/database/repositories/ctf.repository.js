@@ -1,14 +1,60 @@
 const { getConnection } = require('../connection');
 
+/**
+ * Platform fields are optional for callers that predate multi-platform support.
+ * better-sqlite3 throws when a named parameter is missing from the bound object,
+ * so the defaults are merged in rather than relying on the SQL DEFAULT clause
+ * (which only applies when the column is omitted from the INSERT entirely).
+ */
+const PLATFORM_DEFAULTS = {
+	platform: 'ctfd',
+	api_base_url: null,
+	platform_division_id: null
+};
+
 const ctfOperations = {
 	createCTF: (data) => {
 		const db = getConnection();
 		const stmt = db.prepare(`
-			INSERT INTO ctfs (guild_id, channel_id, event_id, ctf_name, ctf_base_url, ctf_date, description, banner_url, api_token, team_mode, created_by)
-			VALUES (@guild_id, @channel_id, @event_id, @ctf_name, @ctf_base_url, @ctf_date, @description, @banner_url, @api_token, @team_mode, @created_by)
+			INSERT INTO ctfs (guild_id, channel_id, event_id, ctf_name, ctf_base_url, ctf_date, description, banner_url, api_token, platform, api_base_url, platform_division_id, team_mode, created_by)
+			VALUES (@guild_id, @channel_id, @event_id, @ctf_name, @ctf_base_url, @ctf_date, @description, @banner_url, @api_token, @platform, @api_base_url, @platform_division_id, @team_mode, @created_by)
 		`);
-		const result = stmt.run(data);
+		const result = stmt.run({ ...PLATFORM_DEFAULTS, ...data });
 		return result.lastInsertRowid;
+	},
+
+	/**
+	 * Point a CTF channel at a platform configuration.
+	 *
+	 * Only the fields actually supplied are written, so an operator can rotate a
+	 * token without restating the platform, and can switch platform without
+	 * clearing a division that is still valid for the new one.
+	 *
+	 * @param {string} channelId - Discord channel id of the CTF
+	 * @param {Object} fields
+	 * @param {string} [fields.platform] - Platform id (e.g. 'ctfd', 'noctf')
+	 * @param {string} [fields.apiBaseUrl] - API origin when it differs from ctf_base_url
+	 * @param {string} [fields.apiToken] - Platform credential
+	 * @param {number} [fields.divisionId] - Platform division/scoreboard id
+	 * @returns {number} Number of rows changed (0 when nothing was provided)
+	 */
+	setCTFPlatform: (channelId, fields = {}) => {
+		const columns = [
+			['platform', fields.platform],
+			['api_base_url', fields.apiBaseUrl],
+			['api_token', fields.apiToken],
+			['platform_division_id', fields.divisionId]
+		].filter(([, value]) => value !== undefined);
+
+		if (columns.length === 0) {
+			return 0;
+		}
+
+		const db = getConnection();
+		const assignments = columns.map(([column]) => `${column} = ?`).join(', ');
+		const values = columns.map(([, value]) => value);
+		const stmt = db.prepare(`UPDATE ctfs SET ${assignments} WHERE channel_id = ?`);
+		return stmt.run(...values, channelId).changes;
 	},
 
 	getCTFByChannelId: (channelId) => {

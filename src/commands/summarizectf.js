@@ -2,7 +2,7 @@ const { Command } = require('@sapphire/framework');
 const { EmbedBuilder, AttachmentBuilder } = require('discord.js');
 const { getIdHints } = require('../lib/utils');
 const { ctfOperations } = require('../database');
-const { createCTFdClient } = require('../lib/ctfd');
+const { createPlatformClient } = require('../lib/platform');
 
 class SummarizeCTFCommand extends Command {
 	constructor(context, options) {
@@ -62,26 +62,44 @@ class SummarizeCTFCommand extends Command {
 				}
 			}
 
-			// Fetch scoreboard if API token is available
-			let scoreboard = [];
-			if (ctf.ctf_base_url && ctf.api_token) {
-				try {
-					const client = createCTFdClient(ctf.ctf_base_url, ctf.api_token);
-					scoreboard = await client.getScoreboard();
-				} catch (error) {
-					this.container.logger.error('Failed to fetch scoreboard:', error);
-				}
-			}
-
 			if (format === 'tsv') {
 				return this.handleTSVOutput(interaction, stats, ctf);
-			} else {
-				return this.handlePrettyOutput(interaction, stats, ctf, isMultiTeam, scoreboard);
 			}
+
+			// Only the embed shows the leaderboard rank, so the TSV export above
+			// deliberately returns before this call is made.
+			const scoreboard = await this.fetchScoreboard(ctf);
+			return this.handlePrettyOutput(interaction, stats, ctf, isMultiTeam, scoreboard);
 
 		} catch (error) {
 			this.container.logger.error('Error generating summary:', error);
 			return interaction.editReply('❌ Failed to generate summary.');
+		}
+	}
+
+	/**
+	 * Fetch the leaderboard from whichever platform the channel is bound to.
+	 *
+	 * A failure here only costs the rank column, so it is logged and the summary
+	 * is still produced from the local data.
+	 *
+	 * @param {Object} ctf - The CTF row
+	 * @returns {Promise<Array>} Normalized scoreboard entries, empty when unavailable
+	 */
+	async fetchScoreboard(ctf) {
+		const apiBaseUrl = ctf.api_base_url || ctf.ctf_base_url;
+		if (!apiBaseUrl || !ctf.api_token) {
+			return [];
+		}
+
+		try {
+			const client = createPlatformClient(ctf.platform, apiBaseUrl, ctf.api_token, {
+				divisionId: ctf.platform_division_id
+			});
+			return await client.getScoreboard();
+		} catch (error) {
+			this.container.logger.error('Failed to fetch scoreboard:', error);
+			return [];
 		}
 	}
 

@@ -33,8 +33,8 @@ class RegisterCTFCommand extends Command {
 				)
 				.addStringOption(option =>
 					option
-						.setName('ctfd_url')
-						.setDescription('CTFd instance URL (e.g., https://ctf.example.com)')
+						.setName('platform_url')
+						.setDescription('CTF platform URL (e.g., https://ctf.example.com)')
 						.setRequired(false)
 				),
 		{
@@ -54,7 +54,7 @@ class RegisterCTFCommand extends Command {
 		const channel = interaction.channel;
 		const username = interaction.options.getString('username');
 		const teamName = interaction.options.getString('team_name');
-		const ctfdUrl = interaction.options.getString('ctfd_url');
+		const platformUrl = interaction.options.getString('platform_url');
 		const userId = interaction.user.id;
 		const userTag = interaction.user.tag;
 
@@ -66,36 +66,38 @@ class RegisterCTFCommand extends Command {
 			}
 
 			// Check if team name is required for team-based CTF
-			if (ctf.team_mode && !teamName && !ctfdUrl) {
+			if (ctf.team_mode && !teamName && !platformUrl) {
 				return interaction.editReply('This is a team-based CTF. Please provide your team name using the `team_name` parameter.');
 			}
 
-			// If CTFd URL is provided AND API token exists, attempt to fetch user details
-			let ctfdData = null;
-			const effectiveCtfdUrl = ctfdUrl || ctf.ctf_base_url;
+			// When an API token is configured the username is verified against the
+			// platform. Without a token there is nothing to verify against: CTFd
+			// needs one for user lookups, and noCTF refuses anonymous reads before
+			// the event starts. The registration is accepted unverified rather than
+			// blocked, matching the behaviour before multi-platform support.
+			let platformData = null;
+			const effectivePlatformUrl = platformUrl || ctf.api_base_url || ctf.ctf_base_url;
 			const hasApiToken = ctf.api_token && ctf.api_token.trim() !== '';
 
-			if (effectiveCtfdUrl && hasApiToken) {
+			if (effectivePlatformUrl && hasApiToken) {
 				try {
-					// Note: CTFd integration requires authentication token
-					// Pass the CTF object to access api_token
-					ctfdData = await this.fetchCTFdUserData(effectiveCtfdUrl, username, ctf);
+					platformData = await this.fetchPlatformUserData(ctf, username, platformUrl);
 				} catch (error) {
-					this.container.logger.warn(`Failed to fetch CTFd data: ${error.message}`);
-					// Return error to user if CTFd verification fails
+					this.container.logger.warn(`Failed to fetch platform data: ${error.message}`);
+					// Return error to user if platform verification fails
 					return interaction.editReply({
-						content: `Failed to verify user on CTFd platform.\n**Error:** ${error.message}\n\nPlease check your username and try again.`
+						content: `Failed to verify user on the CTF platform.\n**Error:** ${error.message}\n\nPlease check your username and try again.`
 					});
 				}
-			} else if (effectiveCtfdUrl && !hasApiToken) {
-				this.container.logger.info(`Skipping CTFd verification for ${username} - no API token configured`);
+			} else if (effectivePlatformUrl && !hasApiToken) {
+				this.container.logger.info(`Skipping platform verification for ${username} - no API token configured`);
 			}
 
-			// Store the registration and claim any pending CTFd solves in ONE
+			// Store the registration and claim any pending platform solves in ONE
 			// transaction. Registering without claiming the solves would leave them
-			// orphaned under the ctfd: id, so the two must commit or roll back
-			// together. transferPendingSolves opens its own (nested) transaction,
-			// which better-sqlite3 promotes to a savepoint.
+			// orphaned under the synthetic platform user id, so the two must commit or
+			// roll back together. transferPendingSolves opens its own (nested)
+			// transaction, which better-sqlite3 promotes to a savepoint.
 			let pendingSolvesResult = null;
 			try {
 				runInTransaction(() => {
@@ -103,20 +105,21 @@ class RegisterCTFCommand extends Command {
 						ctf_id: ctf.id,
 						user_id: userId,
 						username: username,
-						team_name: teamName || ctfdData?.teamName || null,
-						ctfd_user_id: ctfdData?.userId || null,
-						ctfd_team_name: ctfdData?.teamName || null
+						team_name: teamName || platformData?.teamName || null,
+						ctfd_user_id: platformData?.userId || null,
+						ctfd_team_name: platformData?.teamName || null
 					});
 
-					if (ctfdData?.userId) {
+					if (platformData?.userId) {
 						pendingSolvesResult = challengeOperations.transferPendingSolves(
 							ctf.id,
-							ctfdData.userId,
-							userId
+							platformData.userId,
+							userId,
+							ctf.platform
 						);
 					}
 				});
-				this.container.logger.info(`Registered ${userTag} for CTF "${ctf.ctf_name}" (team: ${teamName || ctfdData?.teamName || 'individual'})`);
+				this.container.logger.info(`Registered ${userTag} for CTF "${ctf.ctf_name}" (team: ${teamName || platformData?.teamName || 'individual'})`);
 				if (pendingSolvesResult && pendingSolvesResult.transferred > 0) {
 					this.container.logger.info(`Transferred ${pendingSolvesResult.transferred} pending solves for ${username}`);
 				}
@@ -136,13 +139,13 @@ class RegisterCTFCommand extends Command {
 				.setTimestamp()
 				.setFooter({ text: `User ID: ${userId}` });
 
-			if (ctfdData) {
+			if (platformData) {
 				embed.addFields(
-					{ name: 'CTFd User ID', value: ctfdData.userId.toString(), inline: true },
-					{ name: 'Team', value: ctfdData.teamName || 'No team', inline: true }
+					{ name: 'Platform User ID', value: platformData.userId.toString(), inline: true },
+					{ name: 'Team', value: platformData.teamName || 'No team', inline: true }
 				);
 			} else if (teamName) {
-				// Show team name from manual input if CTFd data not available
+				// Show team name from manual input if platform data not available
 				embed.addFields(
 					{ name: 'Team', value: teamName, inline: true }
 				);
@@ -150,7 +153,7 @@ class RegisterCTFCommand extends Command {
 
 			if (pendingSolvesResult && pendingSolvesResult.transferred > 0) {
 				embed.addFields(
-					{ name: 'Solves Claimed', value: `${pendingSolvesResult.transferred} solve${pendingSolvesResult.transferred !== 1 ? 's' : ''} transferred from CTFd`, inline: true }
+					{ name: 'Solves Claimed', value: `${pendingSolvesResult.transferred} solve${pendingSolvesResult.transferred !== 1 ? 's' : ''} transferred from the platform`, inline: true }
 				);
 			}
 
@@ -175,66 +178,60 @@ class RegisterCTFCommand extends Command {
 	}
 
 	/**
-	 * Fetch user data from CTFd instance
-	 * @param {string} ctfdUrl - The CTFd instance URL
+	 * Verify a username against the CTF's configured platform.
+	 *
+	 * The client comes from the platform registry, so this works for CTFd and
+	 * noCTF alike. Both adapters throw when the user cannot be found.
+	 *
+	 * @param {Object} ctf - The CTF object from the database
 	 * @param {string} username - The username to look up
-	 * @param {Object} ctf - The CTF object from database
+	 * @param {string|null} [platformUrlOverride] - Per-registration URL override
 	 * @returns {Promise<Object>} User data including userId and teamName
 	 */
-	async fetchCTFdUserData(ctfdUrl, username, ctf) {
-		const { CTFdClient } = require('../lib/ctfd');
+	async fetchPlatformUserData(ctf, username, platformUrlOverride = null) {
+		const { createPlatformClient } = require('../lib/platform');
 
 		// Get API token from CTF record
 		const apiToken = ctf.api_token;
 
 		if (!apiToken) {
-			throw new Error('CTFd API token not configured. Please provide api_token when creating this CTF with /createctf.');
+			throw new Error('Platform API token not configured. Set one with /setctfplatform before registering.');
 		}
 
+		const apiBaseUrl = platformUrlOverride || ctf.api_base_url || ctf.ctf_base_url;
+
 		try {
-			// Initialize CTFd client
-			const ctfd = new CTFdClient(ctfdUrl, apiToken);
+			const client = createPlatformClient(ctf.platform, apiBaseUrl, apiToken, {
+				divisionId: ctf.platform_division_id
+			});
 
-			// Search for user by username
-			this.container.logger.info(`Searching for user "${username}" on CTFd: ${ctfdUrl}`);
-			const users = await ctfd.getUsers({ q: username });
+			this.container.logger.info(`Searching for user "${username}" on the CTF platform: ${client.apiBaseUrl}`);
+			const user = await client.findUser(username);
 
-			if (!users || users.length === 0) {
-				throw new Error(`User "${username}" not found on CTFd platform. Make sure you're using the exact username from your CTFd account.`);
+			if (!user) {
+				throw new Error(`User "${username}" not found on the CTF platform. Make sure you are using the exact username from your account.`);
 			}
 
-			// Find exact match (case-insensitive)
-			const user = users.find(u => u.name.toLowerCase() === username.toLowerCase()) || users[0];
-			this.container.logger.info(`Found CTFd user: ${user.name} (ID: ${user.id})`);
+			this.container.logger.info(`Found platform user: ${user.username} (ID: ${user.userId})`);
 
-			let teamName = null;
-
-			// Fetch team if user has one
-			if (user.team_id) {
-				try {
-					const team = await ctfd.getTeam(user.team_id);
-					teamName = team.name;
-					this.container.logger.info(`User is in team: ${teamName} (ID: ${user.team_id})`);
-				} catch (teamError) {
-					this.container.logger.warn(`Failed to fetch team info: ${teamError.message}`);
-					// Don't fail registration if team fetch fails
-				}
+			if (user.teamName) {
+				this.container.logger.info(`User is in team: ${user.teamName}`);
 			}
 
 			return {
-				userId: user.id,
-				teamName: teamName
+				userId: user.userId,
+				username: user.username,
+				teamName: user.teamName || null
 			};
 		} catch (error) {
-			// Re-throw with more helpful error message
+			// Re-throw with a more helpful error message
 			if (error.message.includes('not found')) {
 				throw error; // Already has a good message
 			}
 			if (error.status) {
-				// HTTP error from CTFd API
-				throw new Error(`CTFd API error (${error.status}): Failed to connect to CTFd`);
+				throw new Error(`CTF platform API error (${error.status}): ${error.message}`);
 			}
-			throw new Error(`Failed to verify on CTFd: ${error.message}`);
+			throw new Error(`Failed to verify on the CTF platform: ${error.message}`);
 		}
 	}
 }

@@ -24,7 +24,7 @@ module.exports = {
 		REGISTRATION_FAILED: 'Failed to register. Please try again later.',
 		INVALID_URL: 'Invalid URL format. Please provide a valid URL starting with http:// or https://',
 		DATABASE_ERROR: 'A database error occurred. Please contact an administrator.',
-		CTFD_FETCH_FAILED: 'Could not fetch CTFd data, but registration was successful.',
+		PLATFORM_FETCH_FAILED: 'Could not fetch platform data, but registration was successful.',
 		GENERIC_ERROR: 'An error occurred. Please try again later.'
 	},
 
@@ -41,7 +41,7 @@ module.exports = {
 		PROCESSING: 'Processing your request...',
 		CREATING_CHANNEL: 'Creating CTF channel...',
 		CREATING_EVENT: 'Scheduling event...',
-		FETCHING_CTFD_DATA: 'Fetching CTFd data...'
+		FETCHING_PLATFORM_DATA: 'Fetching platform data...'
 	},
 
 	// Embed Descriptions
@@ -87,7 +87,7 @@ module.exports = {
 		REGISTRATION: 'Register',
 		DISCORD_USER: 'Discord User',
 		CTF_USERNAME: 'CTF Username',
-		CTFD_USER_ID: 'CTFd User ID',
+		PLATFORM_USER_ID: 'Platform User ID',
 		TEAM_NAME: 'Team Name',
 		VIEW_EVENT: 'Event'
 	}

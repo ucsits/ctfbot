@@ -188,7 +188,19 @@ describe('migration runner resilience', () => {
 		expect(ctfsColumns).toContain('api_token');
 		expect(ctfsColumns).toContain('team_mode');
 		expect(ctfsColumns).toContain('archived');
+		expect(ctfsColumns).toContain('platform');
+		expect(ctfsColumns).toContain('api_base_url');
+		expect(ctfsColumns).toContain('platform_division_id');
 		expect(columnsOf(conn, 'ctf_registrations')).toContain('team_name');
+
+		// A row that predates multi-platform support must come out bound to the
+		// default platform, otherwise every legacy channel would need a manual
+		// /setctfplatform before it could sync again. The default lives on the
+		// column itself, so ALTER TABLE backfills existing rows with it.
+		const platformColumn = conn
+			.prepare('SELECT dflt_value FROM pragma_table_info(\'ctfs\') WHERE name = \'platform\'')
+			.get();
+		expect(platformColumn.dflt_value).toBe('\'ctfd\'');
 
 		// The regression: createCTF binds @api_token even for a non-CTFd
 		// organizer (api_token: null, no banner).
@@ -213,6 +225,9 @@ describe('migration runner resilience', () => {
 		expect(row).toBeTruthy();
 		expect(row.ctf_name).toBe('Non-CTFd Open');
 		expect(row.api_token).toBeNull();
+		// createCTF never binds platform, so the column default is what keeps a
+		// CTFd-era deployment working without any operator action.
+		expect(row.platform).toBe('ctfd');
 	});
 
 	it('recovers from partial drift instead of aborting the migration chain', async () => {
@@ -261,6 +276,9 @@ describe('migration runner resilience', () => {
 			'api_token',
 			'team_mode',
 			'archived',
+			'platform',
+			'api_base_url',
+			'platform_division_id',
 			'created_at',
 			'created_by'
 		];

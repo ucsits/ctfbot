@@ -6,9 +6,11 @@
 const messages = require('./messages');
 const config = require('./config');
 const permissions = require('./permissions');
+const platforms = require('./platforms');
 
 module.exports = {
 	...messages,
 	...config,
-	...permissions
+	...permissions,
+	...platforms
 };

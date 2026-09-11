@@ -1,14 +1,23 @@
 const { Command } = require('@sapphire/framework');
 const { getIdHints } = require('../lib/utils');
 const { ctfOperations, challengeOperations, registrationOperations } = require('../database');
-const { createCTFdClient } = require('../lib/ctfd');
+const { createPlatformClient } = require('../lib/platform');
 
+/**
+ * Sync challenges and solves from whichever CTF platform the channel is bound to.
+ *
+ * The two platforms differ in one way that shapes this command: CTFd reports
+ * solves per user, while noCTF reports them per team (its per-challenge solve
+ * endpoint omits user_id entirely). The scoreboard endpoint is the only noCTF
+ * source that attributes a solve to a user, so the 'users' source prefers it and
+ * falls back to the per-user walk when the platform offers no bulk listing.
+ */
 class SyncChallengesCommand extends Command {
 	constructor(context, options) {
 		super(context, {
 			...options,
 			name: 'syncchallenges',
-			description: 'Sync challenges and solves from CTFd to the local database'
+			description: 'Sync challenges and solves from the configured CTF platform'
 		});
 	}
 
@@ -45,16 +54,25 @@ class SyncChallengesCommand extends Command {
 			});
 		}
 
-		if (!ctf.api_token || !ctf.ctf_base_url) {
-			return interaction.editReply('CTFd API token or Base URL is not configured for this CTF.');
+		if (!ctf.api_token || !(ctf.api_base_url || ctf.ctf_base_url)) {
+			return interaction.editReply(
+				'The platform API token or base URL is not configured for this CTF. Set them with `/setctfplatform`.'
+			);
 		}
 
 		try {
-			const client = createCTFdClient(ctf.ctf_base_url, ctf.api_token);
+			const client = createPlatformClient(
+				ctf.platform,
+				ctf.api_base_url || ctf.ctf_base_url,
+				ctf.api_token,
+				{ divisionId: ctf.platform_division_id }
+			);
 			const newChallenges = [];
 
 			const nameToLocalIdMap = await this.loadExistingChallenges(ctf);
 
+			// The 'users' source is the fallback for when the challenge listing
+			// is unusable, so it deliberately does not require it.
 			let challenges = [];
 			if (source !== 'users') {
 				challenges = await this.syncChallenges(interaction, ctf, client, nameToLocalIdMap, newChallenges);
@@ -62,7 +80,15 @@ class SyncChallengesCommand extends Command {
 				await interaction.editReply('Syncing solves from users...');
 			}
 
-			const { solvesSynced, newSolves } = await this.syncSolves(interaction, ctf, client, source, nameToLocalIdMap, challenges);
+			const { solvesSynced, newSolves } = await this.syncSolves(
+				interaction,
+				ctf,
+				client,
+				source,
+				nameToLocalIdMap,
+				challenges,
+				newChallenges
+			);
 
 			return this.formatSyncResponse(interaction, source, solvesSynced, newChallenges, newSolves);
 
@@ -81,8 +107,13 @@ class SyncChallengesCommand extends Command {
 		return nameToLocalIdMap;
 	}
 
+	/**
+	 * Upsert every challenge the platform reports.
+	 *
+	 * @returns {Promise<Array>} Normalized challenges, with platform ids intact
+	 */
 	async syncChallenges(interaction, ctf, client, nameToLocalIdMap, newChallenges) {
-		await interaction.editReply('Fetching challenges from CTFd...');
+		await interaction.editReply('Fetching challenges from the platform...');
 		const challenges = await client.getChallenges();
 
 		for (const chal of challenges) {
@@ -95,7 +126,7 @@ class SyncChallengesCommand extends Command {
 				ctf_id: ctf.id,
 				chal_name: chal.name,
 				chal_category: chal.category,
-				points: chal.value,
+				points: chal.points,
 				created_by: interaction.user.id
 			});
 
@@ -108,23 +139,36 @@ class SyncChallengesCommand extends Command {
 		return challenges;
 	}
 
-	async syncSolves(interaction, ctf, client, source, nameToLocalIdMap, challenges = []) {
+	async syncSolves(interaction, ctf, client, source, nameToLocalIdMap, challenges = [], newChallenges = []) {
 		const registrations = registrationOperations.getRegistrationsByCTF(ctf.id);
-		const ctfdUserMap = this.buildUserMap(registrations);
+		const platformUserMap = this.buildUserMap(registrations);
 		const userRegMap = new Map(registrations.map(r => [r.user_id, r]));
 
 		let solvesSynced = 0;
 		const newSolves = [];
 
-		if (source === 'direct') {
-			for (const chal of challenges) {
-				const result = await this.syncSolvesForChallenge(ctf, client, chal, ctfdUserMap, nameToLocalIdMap, userRegMap);
+		if (source === 'users') {
+			const bulk = await this.syncSolvesFromBulkListing(
+				ctf,
+				client,
+				platformUserMap,
+				nameToLocalIdMap,
+				userRegMap,
+				newChallenges
+			);
+
+			if (bulk) {
+				return { solvesSynced: bulk.count, newSolves: bulk.solves };
+			}
+
+			for (const reg of registrations) {
+				const result = await this.syncSolvesForUser(ctf, client, reg, nameToLocalIdMap, userRegMap);
 				solvesSynced += result.count;
 				newSolves.push(...result.solves);
 			}
 		} else {
-			for (const reg of registrations) {
-				const result = await this.syncSolvesForUser(ctf, client, reg, nameToLocalIdMap, userRegMap);
+			for (const chal of challenges) {
+				const result = await this.syncSolvesForChallenge(ctf, client, chal, platformUserMap, nameToLocalIdMap, userRegMap);
 				solvesSynced += result.count;
 				newSolves.push(...result.solves);
 			}
@@ -133,17 +177,124 @@ class SyncChallengesCommand extends Command {
 		return { solvesSynced, newSolves };
 	}
 
+	/**
+	 * Map platform user ids onto Discord ids.
+	 *
+	 * ctfd_user_id stores whatever the platform reported, which may have been
+	 * written as a float by SQLite's TEXT affinity, so it is normalised through
+	 * parseInt on both sides of the lookup.
+	 */
 	buildUserMap(registrations) {
-		const ctfdUserMap = new Map();
+		const platformUserMap = new Map();
 		for (const reg of registrations) {
-			if (reg.ctfd_user_id) {
-				ctfdUserMap.set(String(parseInt(reg.ctfd_user_id)), reg.user_id);
+			if (reg.ctfd_user_id === null || reg.ctfd_user_id === undefined || reg.ctfd_user_id === '') {
+				continue;
 			}
+			platformUserMap.set(String(parseInt(reg.ctfd_user_id, 10)), reg.user_id);
 		}
-		return ctfdUserMap;
+		return platformUserMap;
 	}
 
-	async syncSolvesForChallenge(ctf, client, chal, ctfdUserMap, nameToLocalIdMap, userRegMap) {
+	/**
+	 * Solve attribution through the platform's bulk listing.
+	 *
+	 * Only noCTF offers this. It is the accurate path there because the
+	 * per-challenge endpoint drops user_id.
+	 *
+	 * @returns {Promise<{count: number, solves: string[]}|null>} null when the
+	 *   platform does not support it, so the caller falls back
+	 */
+	async syncSolvesFromBulkListing(ctf, client, platformUserMap, nameToLocalIdMap, userRegMap, newChallenges) {
+		let solves;
+		try {
+			solves = await client.getAllSolves();
+		} catch (error) {
+			this.container.logger.info(
+				`Bulk solve listing unavailable (${error.message}); falling back to per-user sync`
+			);
+			return null;
+		}
+
+		// The bulk listing carries platform challenge ids only, so the challenge
+		// list is needed to translate them. A challenge missing from it was not
+		// visible to this credential, and its solves cannot be attributed.
+		const challenges = await client.getChallenges();
+		const platformChallengeMap = new Map();
+		for (const chal of challenges) {
+			let localId = nameToLocalIdMap.get(chal.name);
+
+			if (!localId) {
+				challengeOperations.upsertChallenge({
+					ctf_id: ctf.id,
+					chal_name: chal.name,
+					chal_category: chal.category,
+					points: chal.points,
+					created_by: 'platform_sync'
+				});
+				const dbChal = challengeOperations.getChallengeByName(ctf.id, chal.name);
+				localId = dbChal ? dbChal.id : null;
+				if (localId) {
+					nameToLocalIdMap.set(chal.name, localId);
+					newChallenges.push(chal.name);
+				}
+			}
+
+			if (localId) {
+				platformChallengeMap.set(chal.id, { localId, name: chal.name });
+			}
+		}
+
+		let count = 0;
+		const newSolves = [];
+
+		for (const solve of solves) {
+			const challenge = platformChallengeMap.get(solve.challengeId);
+			if (!challenge) {
+				continue;
+			}
+
+			const platformUserId = solve.userId === null || solve.userId === undefined
+				? null
+				: String(parseInt(solve.userId, 10));
+			const discordUserId = platformUserId ? platformUserMap.get(platformUserId) : null;
+
+			if (discordUserId) {
+				const message = this._recordForRegisteredUser(
+					ctf,
+					challenge.localId,
+					discordUserId,
+					solve,
+					userRegMap,
+					challenge.name
+				);
+				if (message) {
+					count++;
+					newSolves.push(message);
+				}
+			} else if (platformUserId) {
+				if (challengeOperations.hasCtfdUserSolved(challenge.localId, platformUserId, ctf.platform)) {
+					continue;
+				}
+				challengeOperations.markChallengeSolvedForCtfdUser(
+					challenge.localId,
+					platformUserId,
+					null,
+					solve.solvedAt,
+					ctf.platform
+				);
+				count++;
+				newSolves.push(`platform user ${platformUserId} (unregistered) solved **${challenge.name}**`);
+			}
+		}
+
+		return { count, solves: newSolves };
+	}
+
+	/**
+	 * Solve attribution per challenge. CTFd reports the solver; noCTF reports the
+	 * team, which is matched back to a registered member.
+	 */
+	async syncSolvesForChallenge(ctf, client, chal, platformUserMap, nameToLocalIdMap, userRegMap) {
 		const localChalId = nameToLocalIdMap.get(chal.name);
 		if (!localChalId) {
 			return { count: 0, solves: [] };
@@ -155,42 +306,60 @@ class SyncChallengesCommand extends Command {
 		try {
 			const challengeSolves = await client.getChallengeSolves(chal.id);
 			for (const solve of challengeSolves) {
-				const ctfdUserId = String(parseInt(solve.user_id));
-				const discordUserId = ctfdUserMap.get(ctfdUserId);
+				if (solve.userId !== null && solve.userId !== undefined) {
+					const platformUserId = String(parseInt(solve.userId, 10));
+					const discordUserId = platformUserMap.get(platformUserId);
 
-				if (discordUserId) {
-					if (challengeOperations.hasUserSolved(localChalId, discordUserId)) {
-						continue;
-					}
-
-					if (ctf.team_mode) {
-						const reg = userRegMap.get(discordUserId);
-						if (reg && reg.team_name) {
-							const teamMembers = registrationOperations.getTeamMembers(ctf.id, reg.team_name);
-							const alreadySolved = teamMembers.some(m =>
-								m.user_id !== discordUserId && challengeOperations.hasUserSolved(localChalId, m.user_id)
-							);
-							if (alreadySolved) {
-								continue;
-							}
+					if (discordUserId) {
+						const message = this._recordForRegisteredUser(
+							ctf,
+							localChalId,
+							discordUserId,
+							solve,
+							userRegMap,
+							chal.name
+						);
+						if (message) {
+							count++;
+							solves.push(message);
 						}
+					} else {
+						if (challengeOperations.hasCtfdUserSolved(localChalId, platformUserId, ctf.platform)) {
+							continue;
+						}
+						const label = solve.username || `platform user ${platformUserId}`;
+						challengeOperations.markChallengeSolvedForCtfdUser(
+							localChalId,
+							platformUserId,
+							solve.username,
+							solve.solvedAt,
+							ctf.platform
+						);
+						count++;
+						solves.push(`${label} (unregistered) solved **${chal.name}**`);
 					}
+					continue;
+				}
 
-					const teamKey = ctf.team_mode ? userRegMap.get(discordUserId)?.team_name || null : null;
-					if (!this._recordSolve(localChalId, discordUserId, solve.date, teamKey)) {
-						continue;
-					}
-					count++;
-					solves.push(`<@${discordUserId}> solved **${chal.name}**`);
-				} else {
-					if (challengeOperations.hasCtfdUserSolved(localChalId, ctfdUserId)) {
-						continue;
-					}
+				// Team-level solve: resolve the team, then attribute it to a
+				// registered member of that team.
+				const teamName = await client.resolveTeamName(solve.teamId);
+				const member = this._findRegisteredMember(teamName, userRegMap);
+				if (!member) {
+					continue;
+				}
 
-					const ctfdUsername = solve.user?.name || 'Unknown';
-					challengeOperations.markChallengeSolvedForCtfdUser(localChalId, ctfdUserId, ctfdUsername, solve.date);
+				const message = this._recordForRegisteredUser(
+					ctf,
+					localChalId,
+					member.user_id,
+					solve,
+					userRegMap,
+					chal.name
+				);
+				if (message) {
 					count++;
-					solves.push(`${ctfdUsername} (unregistered) solved **${chal.name}**`);
+					solves.push(message);
 				}
 			}
 		} catch (err) {
@@ -200,8 +369,19 @@ class SyncChallengesCommand extends Command {
 		return { count, solves };
 	}
 
-	async syncSolvesForUser(ctf, client, reg, nameToLocalIdMap, _userRegMap) {
+	/**
+	 * Per-user solve walk. This is the CTFd path, which needs the raw client
+	 * because the normalized interface has no per-user endpoint (noCTF has none).
+	 */
+	async syncSolvesForUser(ctf, client, reg, nameToLocalIdMap, userRegMap) {
 		if (!reg.ctfd_user_id) {
+			return { count: 0, solves: [] };
+		}
+
+		if (!client.raw || typeof client.raw.getUserSolves !== 'function') {
+			this.container.logger.warn(
+				`Platform "${ctf.platform}" has no per-user solve listing; skipping ${reg.username}`
+			);
 			return { count: 0, solves: [] };
 		}
 
@@ -209,7 +389,7 @@ class SyncChallengesCommand extends Command {
 		const solves = [];
 
 		try {
-			const userSolves = await client.getUserSolves(parseInt(reg.ctfd_user_id));
+			const userSolves = await client.raw.getUserSolves(parseInt(reg.ctfd_user_id, 10));
 			for (const solve of userSolves) {
 				if (solve.type && solve.type !== 'correct') {
 					continue;
@@ -227,7 +407,7 @@ class SyncChallengesCommand extends Command {
 						chal_name: chalName,
 						chal_category: solve.challenge.category || 'Unknown',
 						points: solve.challenge.value || 0,
-						created_by: 'ctfd_sync'
+						created_by: 'platform_sync'
 					});
 					const dbChal = challengeOperations.getChallengeByName(ctf.id, chalName);
 					if (dbChal) {
@@ -236,32 +416,77 @@ class SyncChallengesCommand extends Command {
 					}
 				}
 
-				if (!localChalId || challengeOperations.hasUserSolved(localChalId, reg.user_id)) {
+				if (!localChalId) {
 					continue;
 				}
 
-				if (ctf.team_mode && reg.team_name) {
-					const teamMembers = registrationOperations.getTeamMembers(ctf.id, reg.team_name);
-					const alreadySolved = teamMembers.some(m =>
-						m.user_id !== reg.user_id && challengeOperations.hasUserSolved(localChalId, m.user_id)
-					);
-					if (alreadySolved) {
-						continue;
-					}
+				const message = this._recordForRegisteredUser(
+					ctf,
+					localChalId,
+					reg.user_id,
+					{ solvedAt: solve.date },
+					userRegMap,
+					chalName
+				);
+				if (message) {
+					count++;
+					solves.push(message);
 				}
-
-				const teamKey = ctf.team_mode && reg.team_name ? reg.team_name : null;
-				if (!this._recordSolve(localChalId, reg.user_id, solve.date, teamKey)) {
-					continue;
-				}
-				count++;
-				solves.push(`<@${reg.user_id}> solved **${chalName}**`);
 			}
 		} catch (err) {
 			this.container.logger.error(`Failed to fetch solves for user ${reg.ctfd_user_id}:`, err);
 		}
 
 		return { count, solves };
+	}
+
+	/**
+	 * Find the registration belonging to a platform team name.
+	 *
+	 * team_name is what the member typed; ctfd_team_name is what the platform
+	 * reported. Either can be the one that matches.
+	 */
+	_findRegisteredMember(teamName, userRegMap) {
+		if (!teamName) {
+			return null;
+		}
+		for (const reg of userRegMap.values()) {
+			if (reg.team_name === teamName || reg.ctfd_team_name === teamName) {
+				return reg;
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * Record a solve for a Discord user, honouring the one-solve-per-team rule.
+	 *
+	 * @returns {string|null} Announcement line, or null when the solve was
+	 *   already covered by this user or another member of their team
+	 */
+	_recordForRegisteredUser(ctf, challengeId, discordUserId, solve, userRegMap, chalName) {
+		if (challengeOperations.hasUserSolved(challengeId, discordUserId)) {
+			return null;
+		}
+
+		const reg = userRegMap.get(discordUserId);
+
+		if (ctf.team_mode && reg && reg.team_name) {
+			const teamMembers = registrationOperations.getTeamMembers(ctf.id, reg.team_name);
+			const alreadySolved = teamMembers.some(m =>
+				m.user_id !== discordUserId && challengeOperations.hasUserSolved(challengeId, m.user_id)
+			);
+			if (alreadySolved) {
+				return null;
+			}
+		}
+
+		const teamKey = ctf.team_mode && reg ? reg.team_name || null : null;
+		if (!this._recordSolve(challengeId, discordUserId, solve.solvedAt, teamKey)) {
+			return null;
+		}
+
+		return `<@${discordUserId}> solved **${chalName}**`;
 	}
 
 	/**

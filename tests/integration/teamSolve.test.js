@@ -135,8 +135,27 @@ describe('command wiring', () => {
 
 	it('passes team_name as the team key from both sync paths', () => {
 		const src = readFileSync(join(repoRoot, 'src/commands/syncchallenges.js'), 'utf8');
-		expect(src).toContain("userRegMap.get(discordUserId)?.team_name || null");
-		expect(src).toContain('ctf.team_mode && reg.team_name ? reg.team_name : null');
-		expect(src).toContain('_recordSolve(');
+
+		// Both solve paths funnel through one helper. That is stronger than the
+		// original two inline expressions, because the team key can no longer be
+		// computed differently on the direct path and the users path.
+		const helperStart = src.indexOf('_recordForRegisteredUser(ctf, challengeId');
+		const helperEnd = src.indexOf('_recordSolve(challengeId, userId, solvedAt, teamKey)');
+		expect(helperStart).toBeGreaterThan(-1);
+		expect(helperEnd).toBeGreaterThan(helperStart);
+
+		const helper = src.slice(helperStart, helperEnd);
+		expect(helper).toContain('const teamKey = ctf.team_mode && reg ? reg.team_name || null : null;');
+		expect(helper).toContain('this._recordSolve(challengeId, discordUserId, solve.solvedAt, teamKey)');
+
+		const directStart = src.indexOf('async syncSolvesForChallenge');
+		const usersStart = src.indexOf('async syncSolvesForUser');
+		const helperLookupStart = src.indexOf('\t_findRegisteredMember(teamName, userRegMap) {');
+		expect(directStart).toBeGreaterThan(-1);
+		expect(usersStart).toBeGreaterThan(directStart);
+		expect(helperLookupStart).toBeGreaterThan(usersStart);
+
+		expect(src.slice(directStart, usersStart)).toContain('_recordForRegisteredUser(');
+		expect(src.slice(usersStart, helperLookupStart)).toContain('_recordForRegisteredUser(');
 	});
 });

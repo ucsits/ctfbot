@@ -1,4 +1,5 @@
 const { getConnection, runInTransaction } = require('../connection');
+const { syntheticUserId } = require('../../lib/platform/syntheticUser');
 
 const challengeOperations = {
 	upsertChallenge: (data) => {
@@ -67,9 +68,9 @@ const challengeOperations = {
 		return stmt.get(challengeId, userId);
 	},
 
-	markChallengeSolvedForCtfdUser: (challengeId, ctfdUserId, ctfdUsername, solvedAt) => {
+	markChallengeSolvedForCtfdUser: (challengeId, ctfdUserId, ctfdUsername, solvedAt, platformId = 'ctfd') => {
 		const db = getConnection();
-		const userId = `ctfd:${ctfdUserId}`;
+		const userId = syntheticUserId(platformId, ctfdUserId);
 		const stmt = db.prepare(`
 			INSERT INTO ctf_challenge_solves (challenge_id, user_id, ctfd_username, solved_at)
 			VALUES (?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))
@@ -77,16 +78,16 @@ const challengeOperations = {
 		return stmt.run(challengeId, userId, ctfdUsername, solvedAt || null);
 	},
 
-	hasCtfdUserSolved: (challengeId, ctfdUserId) => {
+	hasCtfdUserSolved: (challengeId, ctfdUserId, platformId = 'ctfd') => {
 		const db = getConnection();
-		const userId = `ctfd:${ctfdUserId}`;
+		const userId = syntheticUserId(platformId, ctfdUserId);
 		const stmt = db.prepare('SELECT * FROM ctf_challenge_solves WHERE challenge_id = ? AND user_id = ?');
 		return stmt.get(challengeId, userId);
 	},
 
-	transferPendingSolves: (ctfId, ctfdUserId, discordUserId) => {
+	transferPendingSolves: (ctfId, ctfdUserId, discordUserId, platformId = 'ctfd') => {
 		const db = getConnection();
-		const pendingUserId = `ctfd:${ctfdUserId}`;
+		const pendingUserId = syntheticUserId(platformId, ctfdUserId);
 
 		const pendingSolves = db.prepare(`
 			SELECT s.id, s.challenge_id
