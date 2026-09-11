@@ -145,7 +145,7 @@ class GiveApBulkCommand extends Command {
 
 		if (valid.length !== entries.length) {
 			return interaction.editReply(
-				`❌ ${entries.length - valid.length} row(s) were invalid (missing discord_id or non-positive points). No points were granted — fix the CSV and retry.`
+				`❌ ${entries.length - valid.length} row(s) were invalid (missing discord_id or non-positive points). No points were granted, so fix the CSV and retry.`
 			);
 		}
 
@@ -170,22 +170,23 @@ class GiveApBulkCommand extends Command {
 				data
 			});
 
-			// 2. Apply each grant in the DB
-			const results = [];
-			for (const entry of valid) {
-				const newBalance = activityRepository.grantPoints({
-					userId: entry.discord_id,
-					amount: entry.points,
-					grantedBy: interaction.user.id,
-					note: 'bulk grant',
-					blockHeight: block.height
-				});
-				results.push({ discord_id: entry.discord_id, points: entry.points, balance: newBalance });
+			// 2. Apply the whole batch in one transaction, idempotent on the
+			// interaction id so a retry cannot double-grant the CSV.
+			const { applied, balances } = activityRepository.grantPointsMany({
+				batchKey: interaction.id,
+				entries: valid,
+				grantedBy: interaction.user.id,
+				note: 'bulk grant',
+				blockHeight: block.height
+			});
+
+			if (!applied) {
+				return interaction.editReply('These points were already granted for this action; nothing was changed.');
 			}
 
-			const granted = results.filter(r => r.balance >= 0).length;
-			const preview = results.slice(0, 10)
-				.map(r => `<@${r.discord_id}> — **+${r.points} AP**`)
+			const granted = balances.length;
+			const preview = valid.slice(0, 10)
+				.map(e => `<@${e.discord_id}> gets **+${e.points} AP**`)
 				.join('\n');
 
 			const embed = new EmbedBuilder()
@@ -200,10 +201,10 @@ class GiveApBulkCommand extends Command {
 				)
 				.setTimestamp();
 
-			if (results.length > 0) {
+			if (valid.length > 0) {
 				embed.addFields({
 					name: 'Preview',
-					value: preview + (results.length > 10 ? `\n… and ${results.length - 10} more` : ''),
+					value: preview + (valid.length > 10 ? `\n… and ${valid.length - 10} more` : ''),
 					inline: false
 				});
 			}

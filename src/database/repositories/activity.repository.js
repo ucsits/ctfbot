@@ -68,6 +68,64 @@ function grantPoints({ userId, amount, grantedBy, note, blockHeight }) {
 }
 
 /**
+ * Grant APs to many users as a single all-or-nothing batch.
+ *
+ * A role grant or a CSV bulk grant is anchored by one blockchain block, so the
+ * database half has to behave like one unit: every recipient is credited or
+ * none is. The batch key makes a retry safe, because the block and the batch
+ * both carry the same interaction id and the second attempt is reported as
+ * already applied instead of double-crediting.
+ *
+ * @param {object} params
+ * @param {string} params.batchKey - idempotency key, normally the Discord interaction id
+ * @param {Array<{discord_id: string, points: number, note?: string}>} params.entries
+ * @param {string} params.grantedBy - admin Discord ID
+ * @param {string} [params.note] - ledger note applied to every entry
+ * @param {number} params.blockHeight - Luce block height anchoring the batch
+ * @returns {{applied: boolean, balances: Array<{discord_id: string, balance: number}>}}
+ *   `applied` is false when this batch key was already processed
+ */
+function grantPointsMany({ batchKey, entries, grantedBy, note, blockHeight }) {
+	const now = Math.floor(Date.now() / 1000);
+
+	const tx = db().transaction(() => {
+		const claim = db()
+			.prepare(
+				`
+			INSERT OR IGNORE INTO ap_grant_batches (batch_key, block_height, created_at)
+			VALUES (?, ?, ?)
+		`
+			)
+			.run(batchKey, blockHeight, now);
+
+		if (claim.changes === 0) {
+			return { applied: false, balances: [] };
+		}
+
+		const insertLedger = db().prepare(`
+			INSERT INTO activity_ledger (user_id, amount, kind, granted_by, note, block_height, created_at)
+			VALUES (?, ?, 'grant', ?, ?, ?, ?)
+		`);
+		const upsertBalance = db().prepare(`
+			INSERT INTO activity_balances (user_id, balance)
+			VALUES (?, ?)
+			ON CONFLICT(user_id) DO UPDATE SET balance = balance + excluded.balance
+		`);
+
+		const balances = [];
+		for (const entry of entries) {
+			insertLedger.run(entry.discord_id, entry.points, grantedBy, entry.note || note || null, blockHeight, now);
+			upsertBalance.run(entry.discord_id, entry.points);
+			balances.push({ discord_id: entry.discord_id, balance: getBalance(entry.discord_id) });
+		}
+
+		return { applied: true, balances };
+	});
+
+	return tx();
+}
+
+/**
  * Complete an AP purchase atomically: spend the points (with an insufficient-
  * funds guard) and create the completed purchase row in one DB transaction.
  * Returns the new balance, or null if the user cannot afford it.
@@ -256,6 +314,7 @@ module.exports = {
 	getBalance,
 	getLeaderboard,
 	grantPoints,
+	grantPointsMany,
 	spendPoints,
 	completeApPurchase,
 	getStoreItems,

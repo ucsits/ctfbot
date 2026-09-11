@@ -84,12 +84,20 @@ class GiveApCommand extends Command {
 
 			const block = await luce.appendBlock({ author: interaction.user.id, data });
 
-			const newBalance = activityRepository.grantPoints({
-				userId: user.id,
-				amount: points,
+			// One all-or-nothing batch, idempotent on the interaction id, so a retry
+			// of this same invocation cannot credit the user twice.
+			const { applied, balances } = activityRepository.grantPointsMany({
+				batchKey: interaction.id,
+				entries: [{ discord_id: user.id, points }],
 				grantedBy: interaction.user.id,
 				blockHeight: block.height
 			});
+
+			if (!applied) {
+				return interaction.editReply('⚠️ These points were already granted for this action; nothing was changed.');
+			}
+
+			const newBalance = balances[0].balance;
 
 			const embed = new EmbedBuilder()
 				.setColor(0x9B59B6)
@@ -145,15 +153,18 @@ class GiveApCommand extends Command {
 
 			const block = await luce.appendBlock({ author: interaction.user.id, data });
 
-			// 2. Apply each grant in the DB
-			for (const entry of entries) {
-				activityRepository.grantPoints({
-					userId: entry.discord_id,
-					amount: entry.points,
-					grantedBy: interaction.user.id,
-					note: `role grant: ${role.name}`,
-					blockHeight: block.height
-				});
+			// 2. Apply the whole batch in one transaction, idempotent on the
+			// interaction id so a retry cannot double-credit the role.
+			const { applied } = activityRepository.grantPointsMany({
+				batchKey: interaction.id,
+				entries,
+				grantedBy: interaction.user.id,
+				note: `role grant: ${role.name}`,
+				blockHeight: block.height
+			});
+
+			if (!applied) {
+				return interaction.editReply('⚠️ These points were already granted for this action; nothing was changed.');
 			}
 
 			const embed = new EmbedBuilder()
