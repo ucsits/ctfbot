@@ -210,8 +210,11 @@ describe('noCTF end to end: sync then register', () => {
 
 		// 1. Sync before anyone registers. The bulk listing is the only source
 		//    that attributes the solve to a user, so that is the path under test.
+		//    The name lookup is what lets the report name the solver rather than
+		//    print their numeric platform id.
 		stubFetch([
 			['/scoreboard/divisions/2', scoreboardWithSolve()],
+			['/users/query', { data: { entries: [{ id: PLATFORM_USER_ID, name: 'Maverick', team_id: 869 }] } }],
 			['/challenges', challengesPayload()]
 		]);
 
@@ -225,6 +228,7 @@ describe('noCTF end to end: sync then register', () => {
 		const parked = challengeOperations.getChallengeSolvers(challenge.id);
 		expect(parked).toHaveLength(1);
 		expect(parked[0].user_id).toBe(`noctf:${PLATFORM_USER_ID}`);
+		expect(String(syncInteraction.edits[syncInteraction.edits.length - 1])).toContain('Maverick (unregistered)');
 		expect(registrationOperations.getUserRegistration(ctf.id, 'discord-1')).toBeFalsy();
 
 		// 2. The player registers. The lookup has to return the same platform
@@ -265,6 +269,7 @@ describe('noCTF end to end: sync then register', () => {
 
 		stubFetch([
 			['/scoreboard/divisions/2', scoreboardWithSolve()],
+			['/users/query', { data: { entries: [{ id: PLATFORM_USER_ID, name: 'Maverick', team_id: 869 }] } }],
 			['/challenges', challengesPayload()]
 		]);
 

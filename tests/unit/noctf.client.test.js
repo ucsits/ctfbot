@@ -397,6 +397,90 @@ describe('noCTF user lookup', () => {
 	});
 });
 
+describe('noCTF user name resolution', () => {
+	it('maps platform user ids to names in one query', async () => {
+		const calls = stubFetch([
+			{
+				data: {
+					entries: [
+						{ id: 1654, name: '0x4COZ', team_id: 948 },
+						{ id: 1706, name: 'Justher0', team_id: 969 }
+					],
+					page_size: 2,
+					total: 2
+				}
+			}
+		]);
+
+		const names = await makeClient().resolveUserNames([1706, 1654]);
+
+		expect(names).toBeInstanceOf(Map);
+		expect(names.size).toBe(2);
+		expect(names.get('1706')).toBe('Justher0');
+		expect(names.get('1654')).toBe('0x4COZ');
+		expect(calls[0].method).toBe('POST');
+		expect(calls[0].url).toBe(`${API_BASE}/users/query`);
+		expect(JSON.parse(calls[0].body)).toEqual({ ids: [1706, 1654], page_size: 2 });
+	});
+
+	it('chunks the id list into groups of 50', async () => {
+		const ids = Array.from({ length: 120 }, (_, i) => i + 1);
+		const calls = stubFetch([
+			{ data: { entries: [], total: 0 } },
+			{ data: { entries: [], total: 0 } },
+			{ data: { entries: [], total: 0 } }
+		]);
+
+		const names = await makeClient().resolveUserNames(ids);
+
+		expect(names.size).toBe(0);
+		expect(calls).toHaveLength(3);
+		const bodies = calls.map(c => JSON.parse(c.body));
+		expect(bodies[0].ids).toHaveLength(50);
+		expect(bodies[1].ids).toHaveLength(50);
+		expect(bodies[2].ids).toHaveLength(20);
+		expect(bodies[0].ids[0]).toBe(1);
+		expect(bodies[1].ids[0]).toBe(51);
+		expect(bodies[2].ids[0]).toBe(101);
+		// The API caps the page by the number of ids asked for.
+		expect(bodies.map(b => b.page_size)).toEqual([50, 50, 20]);
+	});
+
+	it('skips a failed chunk and still resolves the rest', async () => {
+		const ids = Array.from({ length: 51 }, (_, i) => i + 1);
+		const calls = stubFetch([
+			// The first chunk exhausts the 5xx retry budget (3 attempts).
+			{ __status: 500, __body: 'down' },
+			{ __status: 500, __body: 'down' },
+			{ __status: 500, __body: 'down' },
+			{ data: { entries: [{ id: 51, name: 'Last' }], total: 1 } }
+		]);
+
+		const names = await makeClient().resolveUserNames(ids);
+
+		expect(names.get('51')).toBe('Last');
+		expect(calls).toHaveLength(4);
+	});
+
+	it('drops duplicate and unusable ids before asking', async () => {
+		const calls = stubFetch([{ data: { entries: [{ id: 7, name: 'solo' }], total: 1 } }]);
+
+		const names = await makeClient().resolveUserNames([7, 7, '7', null, undefined, '']);
+
+		expect(JSON.parse(calls[0].body).ids).toEqual([7]);
+		expect(names.get('7')).toBe('solo');
+	});
+
+	it('makes no request when there is nothing to resolve', async () => {
+		const calls = stubFetch([]);
+
+		const names = await makeClient().resolveUserNames([]);
+
+		expect(names.size).toBe(0);
+		expect(calls).toHaveLength(0);
+	});
+});
+
 describe('noCTF scoreboard', () => {
 	it('maps rank and score, resolving team names in one query', async () => {
 		const calls = stubFetch([

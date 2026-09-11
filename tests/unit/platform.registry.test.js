@@ -205,6 +205,16 @@ describe('CTFd adapter', () => {
 		await expect(makeCTFdAdapter().getAllSolves()).rejects.toThrow(/does not support bulk solve listing/);
 	});
 
+	it('offers no user name resolver, so unregistered labels stay id based', async () => {
+		const calls = stubFetch([]);
+
+		const names = await makeCTFdAdapter().resolveUserNames([1, 2, 3]);
+
+		expect(names).toBeInstanceOf(Map);
+		expect(names.size).toBe(0);
+		expect(calls).toHaveLength(0);
+	});
+
 	it('sends the CTFd token scheme', async () => {
 		const calls = stubFetch([{ success: true, data: [] }]);
 

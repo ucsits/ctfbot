@@ -66,6 +66,15 @@ function createCTFdAdapter(baseUrl, apiToken = null) {
 			};
 		},
 
+		/**
+		 * CTFd's user listing is admin-only and returns full user objects, so there
+		 * is no cheap id to name lookup to offer here. Returning an empty map lets
+		 * callers keep one code path: they fall back to the id-based label.
+		 */
+		async resolveUserNames() {
+			return new Map();
+		},
+
 		async getScoreboard() {
 			const entries = await client.getScoreboard();
 			return (entries || []).map(entry => ({

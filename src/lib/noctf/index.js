@@ -358,6 +358,48 @@ class NoCTFClient {
 	}
 
 	/**
+	 * Resolve user names for a list of user ids.
+	 *
+	 * The bulk scoreboard listing identifies a solver by numeric user id only, so
+	 * this is the only way to label a solve belonging to someone who has not
+	 * linked a Discord account. It shares TEAM_ID_CHUNK_SIZE because the API
+	 * applies the same per-query id cap to both resources.
+	 *
+	 * A chunk that fails is logged and skipped rather than throwing: a missing
+	 * name degrades the announcement label, which is never worth failing a sync
+	 * over.
+	 *
+	 * @param {Array<number|string>} userIds
+	 * @returns {Promise<Map<string, string>>} Map of String(user id) to name
+	 */
+	async resolveUserNames(userIds) {
+		const unique = [...new Set((userIds || [])
+			.filter(id => id !== null && id !== undefined && id !== '')
+			.map(id => Number(id))
+			.filter(id => Number.isFinite(id)))];
+		const names = new Map();
+
+		for (let i = 0; i < unique.length; i += TEAM_ID_CHUNK_SIZE) {
+			const chunk = unique.slice(i, i + TEAM_ID_CHUNK_SIZE);
+			try {
+				const data = await this.request('/users/query', {
+					method: 'POST',
+					body: { ids: chunk, page_size: chunk.length }
+				});
+				for (const user of (data && data.entries) || []) {
+					if (user && user.name !== undefined && user.name !== null) {
+						names.set(String(user.id), String(user.name));
+					}
+				}
+			} catch (error) {
+				this.log.warn(`Could not resolve ${chunk.length} user name(s): ${error.message}`);
+			}
+		}
+
+		return names;
+	}
+
+	/**
 	 * Scoreboard for the resolved division.
 	 *
 	 * @returns {Promise<Array>} Normalized entries with name, pos and score

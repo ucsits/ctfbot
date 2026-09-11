@@ -45,6 +45,9 @@
  * @property {(username: string) => Promise<{userId: string, username: string, teamName: string|null, teamId: number|string|null}>} findUser
  * @property {() => Promise<NormalizedScoreboardEntry[]>} getScoreboard
  * @property {(teamId: number|string) => Promise<string|null>} resolveTeamName
+ * @property {(userIds: Array<number|string>) => Promise<Map<string, string>>} [resolveUserNames]
+ *   Optional. Resolves platform user ids to display names in one call. Present
+ *   on noCTF, absent on CTFd, so callers must guard before using it.
  * @property {() => Promise<{ok: boolean, platform: string, apiBaseUrl: string, details: Object}>} testConnection
  *
  * @module platform

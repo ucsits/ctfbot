@@ -141,6 +141,16 @@ class SyncChallengesCommand extends Command {
 
 	async syncSolves(interaction, ctf, client, source, nameToLocalIdMap, challenges = [], newChallenges = []) {
 		const registrations = registrationOperations.getRegistrationsByCTF(ctf.id);
+
+		// Registrations made before a platform credential existed have no platform
+		// user id, so their solves can never be matched. Repair those links before
+		// the lookup map is built, otherwise the whole run treats those members as
+		// strangers.
+		const linked = await this.linkUnlinkedRegistrations(ctf, client, registrations);
+		if (linked > 0) {
+			this.container.logger.info(`Linked ${linked} registration(s) to their platform account`);
+		}
+
 		const platformUserMap = this.buildUserMap(registrations);
 		const userRegMap = new Map(registrations.map(r => [r.user_id, r]));
 
@@ -196,6 +206,69 @@ class SyncChallengesCommand extends Command {
 	}
 
 	/**
+	 * Resolve the platform account for registrations that do not have one yet.
+	 *
+	 * A registration is only linked when the platform returns the exact username
+	 * that was registered: both adapters fall back to the first fuzzy match when
+	 * nothing matches exactly, and linking the wrong person would attribute their
+	 * solves to a Discord user who never solved them. A failed or inexact lookup
+	 * is skipped, never fatal, so one bad registration cannot block the sync.
+	 *
+	 * The registrations array is mutated in place so buildUserMap, which runs
+	 * next, sees the link without a second database read.
+	 *
+	 * @returns {Promise<number>} How many registrations were linked
+	 */
+	async linkUnlinkedRegistrations(ctf, client, registrations) {
+		const unlinked = registrations.filter(reg => !reg.ctfd_user_id);
+		if (unlinked.length === 0) {
+			return 0;
+		}
+
+		let linked = 0;
+		for (const reg of unlinked) {
+			let user;
+			try {
+				user = await client.findUser(reg.username);
+			} catch (error) {
+				this.container.logger.warn(
+					`Could not link ${reg.username} to the platform: ${error.message}`
+				);
+				continue;
+			}
+
+			if (!user || user.userId === null || user.userId === undefined) {
+				continue;
+			}
+
+			const wanted = String(reg.username || '').trim().toLowerCase();
+			const found = String(user.username || '').trim().toLowerCase();
+			if (!wanted || found !== wanted) {
+				this.container.logger.warn(
+					`Platform user "${user.username}" does not match registration "${reg.username}"; leaving it unlinked`
+				);
+				continue;
+			}
+
+			const teamName = user.teamName || null;
+			registrationOperations.updatePlatformLink(ctf.id, reg.user_id, {
+				ctfd_user_id: user.userId,
+				ctfd_team_name: teamName
+			});
+
+			// Solves already parked under the synthetic platform id now belong to a
+			// known Discord user, so claim them instead of leaving duplicates behind.
+			challengeOperations.transferPendingSolves(ctf.id, user.userId, reg.user_id, ctf.platform);
+
+			reg.ctfd_user_id = String(user.userId);
+			reg.ctfd_team_name = teamName;
+			linked += 1;
+		}
+
+		return linked;
+	}
+
+	/**
 	 * Solve attribution through the platform's bulk listing.
 	 *
 	 * Only noCTF offers this. It is the accurate path there because the
@@ -247,6 +320,34 @@ class SyncChallengesCommand extends Command {
 		let count = 0;
 		const newSolves = [];
 
+		// The bulk listing identifies a solver by a numeric user id only. Resolve
+		// the names for the solvers who are not linked to a Discord account, once,
+		// so the announcement and the stored row can name a person instead of a
+		// number. Solvers whose challenge is not visible are excluded because their
+		// solve is skipped below and the lookup would be wasted.
+		const unresolvedIds = new Set();
+		for (const solve of solves) {
+			if (solve.userId === null || solve.userId === undefined) {
+				continue;
+			}
+			if (!platformChallengeMap.has(solve.challengeId)) {
+				continue;
+			}
+			const platformUserId = String(parseInt(solve.userId, 10));
+			if (!platformUserMap.has(platformUserId)) {
+				unresolvedIds.add(platformUserId);
+			}
+		}
+
+		let userNames = new Map();
+		if (unresolvedIds.size > 0 && typeof client.resolveUserNames === 'function') {
+			try {
+				userNames = await client.resolveUserNames([...unresolvedIds]);
+			} catch (error) {
+				this.container.logger.warn(`Could not resolve unregistered solver names: ${error.message}`);
+			}
+		}
+
 		for (const solve of solves) {
 			const challenge = platformChallengeMap.get(solve.challengeId);
 			if (!challenge) {
@@ -265,7 +366,8 @@ class SyncChallengesCommand extends Command {
 					discordUserId,
 					solve,
 					userRegMap,
-					challenge.name
+					challenge.name,
+					platformUserId
 				);
 				if (message) {
 					count++;
@@ -275,15 +377,17 @@ class SyncChallengesCommand extends Command {
 				if (challengeOperations.hasCtfdUserSolved(challenge.localId, platformUserId, ctf.platform)) {
 					continue;
 				}
+				const platformUsername = userNames.get(platformUserId) || null;
 				challengeOperations.markChallengeSolvedForCtfdUser(
 					challenge.localId,
 					platformUserId,
-					null,
+					platformUsername,
 					solve.solvedAt,
 					ctf.platform
 				);
 				count++;
-				newSolves.push(`platform user ${platformUserId} (unregistered) solved **${challenge.name}**`);
+				const label = platformUsername || `platform user ${platformUserId}`;
+				newSolves.push(`${label} (unregistered) solved **${challenge.name}**`);
 			}
 		}
 
@@ -317,7 +421,8 @@ class SyncChallengesCommand extends Command {
 							discordUserId,
 							solve,
 							userRegMap,
-							chal.name
+							chal.name,
+							platformUserId
 						);
 						if (message) {
 							count++;
@@ -426,7 +531,8 @@ class SyncChallengesCommand extends Command {
 					reg.user_id,
 					{ solvedAt: solve.date },
 					userRegMap,
-					chalName
+					chalName,
+					reg.ctfd_user_id
 				);
 				if (message) {
 					count++;
@@ -461,12 +567,30 @@ class SyncChallengesCommand extends Command {
 	/**
 	 * Record a solve for a Discord user, honouring the one-solve-per-team rule.
 	 *
+	 * @param {string|null} [platformUserId] - Platform id of the solver when known.
+	 *   Supplied so a solve that was already parked under `<prefix>:<id>` can be
+	 *   claimed instead of duplicated once the member's link is known.
 	 * @returns {string|null} Announcement line, or null when the solve was
 	 *   already covered by this user or another member of their team
 	 */
-	_recordForRegisteredUser(ctf, challengeId, discordUserId, solve, userRegMap, chalName) {
+	_recordForRegisteredUser(ctf, challengeId, discordUserId, solve, userRegMap, chalName, platformUserId = null) {
 		if (challengeOperations.hasUserSolved(challengeId, discordUserId)) {
 			return null;
+		}
+
+		// The platform recorded this same solve earlier, under the synthetic id,
+		// because no registration was linked at the time. Move that row over
+		// instead of inserting a second one for the same solve. The id is
+		// normalised through parseInt because a registration written before the
+		// link repair can hold a float-shaped string such as '1706.0'.
+		const normalisedPlatformUserId = platformUserId === null || platformUserId === undefined
+			? null
+			: String(parseInt(platformUserId, 10));
+		if (normalisedPlatformUserId && challengeOperations.hasCtfdUserSolved(challengeId, normalisedPlatformUserId, ctf.platform)) {
+			challengeOperations.transferPendingSolves(ctf.id, normalisedPlatformUserId, discordUserId, ctf.platform);
+			if (challengeOperations.hasUserSolved(challengeId, discordUserId)) {
+				return null;
+			}
 		}
 
 		const reg = userRegMap.get(discordUserId);

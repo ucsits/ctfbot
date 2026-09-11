@@ -248,6 +248,95 @@ describe('/syncchallenges noCTF integration', () => {
 		expect(String(lastReply(second.interaction))).toMatch(/New solves recorded: 0/);
 	});
 
+	it('reports nothing new on a second bulk run and keeps one row per solve', async () => {
+		const ctf = seedCtf({ platform: 'noctf', api_base_url: API_BASE, platform_division_id: 2 });
+		seedRegistration(ctf, { userId: 'discord-a', username: 'Maverick', platformUserId: '1875' });
+
+		const routes = () => [
+			['/scoreboard/divisions/2', {
+				data: {
+					entries: [
+						{
+							team_id: 869,
+							rank: 1,
+							score: 500,
+							hidden: false,
+							solves: [{ user_id: 1875, challenge_id: 12, hidden: false, value: 500, created_at: '2026-09-11T10:41:28.840Z' }]
+						}
+					],
+					page_size: 50,
+					total: 1
+				}
+			}],
+			['/challenges', {
+				data: { challenges: [{ id: 12, slug: 'driveone', title: 'DriveOne', tags: { categories: 'web' }, value: 500 }] }
+			}]
+		];
+
+		stubFetch(routes());
+		const first = await runSync(ctf, 'users');
+		stubFetch(routes());
+		const second = await runSync(ctf, 'users');
+
+		const challenge = challengeOperations.getChallengeByName(ctf.id, 'DriveOne');
+		expect(challengeOperations.getChallengeSolvers(challenge.id)).toHaveLength(1);
+		expect(String(lastReply(first.interaction))).toMatch(/New solves recorded: 1/);
+		expect(String(lastReply(second.interaction))).toMatch(/New solves recorded: 0/);
+		// A clean run must not re-announce the same solves.
+		expect(String(lastReply(second.interaction))).not.toContain('**New Solves:**');
+	});
+
+	it('claims a parked solve instead of duplicating it when the link appears later', async () => {
+		const ctf = seedCtf({ platform: 'noctf', api_base_url: API_BASE, platform_division_id: 2 });
+		// A username the platform will not confirm, so the first run leaves the
+		// member unlinked and parks their solve under the synthetic id.
+		seedRegistration(ctf, { userId: 'discord-a', username: 'Someone Else', platformUserId: null });
+
+		const scoreboard = ['/scoreboard/divisions/2', {
+			data: {
+				entries: [
+					{
+						team_id: 969,
+						rank: 1,
+						score: 500,
+						hidden: false,
+						solves: [{ user_id: 1706, challenge_id: 12, hidden: false, value: 500, created_at: '2026-09-11T10:41:28.840Z' }]
+					}
+				],
+				page_size: 50,
+				total: 1
+			}
+		}];
+		const challenges = ['/challenges', {
+			data: { challenges: [{ id: 12, slug: 'driveone', title: 'DriveOne', tags: { categories: 'web' }, value: 500 }] }
+		}];
+
+		stubFetch([
+			scoreboard,
+			['/users/query', { data: { entries: [{ id: 1706, name: 'Justher0', team_id: 969 }], total: 1 } }],
+			['/teams/query', { data: { entries: [{ id: 969, name: 'w larp' }] } }],
+			challenges
+		]);
+		await runSync(ctf, 'users');
+
+		const challenge = challengeOperations.getChallengeByName(ctf.id, 'DriveOne');
+		const parked = challengeOperations.getChallengeSolvers(challenge.id);
+		expect(parked).toHaveLength(1);
+		expect(parked[0].user_id).toBe('noctf:1706');
+
+		// The link is repaired, as the sync does for a matching username, and the
+		// next run must move the parked row rather than insert a second one.
+		registrationOperations.updatePlatformLink(ctf.id, 'discord-a', { ctfd_user_id: 1706, ctfd_team_name: null });
+
+		stubFetch([scoreboard, challenges]);
+		const { interaction } = await runSync(ctf, 'users');
+
+		const solves = challengeOperations.getChallengeSolvers(challenge.id);
+		expect(solves).toHaveLength(1);
+		expect(solves[0].user_id).toBe('discord-a');
+		expect(String(lastReply(interaction))).toMatch(/New solves recorded: 0/);
+	});
+
 	it('uses the bulk listing for the users source when the platform supports it', async () => {
 		const ctf = seedCtf({ platform: 'noctf', api_base_url: API_BASE, platform_division_id: 2 });
 		seedRegistration(ctf, { userId: 'discord-a', username: 'Maverick', platformUserId: '1875' });
@@ -278,6 +367,8 @@ describe('/syncchallenges noCTF integration', () => {
 		expect(calls.some(c => c.url.includes('/scoreboard/divisions/2'))).toBe(true);
 		// The bulk path never needs the per-user endpoint.
 		expect(calls.some(c => c.url.includes('/api/v1/'))).toBe(false);
+		// Every solver is registered, so there is no name to look up.
+		expect(calls.some(c => c.url.includes('/users/query'))).toBe(false);
 
 		const challenge = challengeOperations.getChallengeByName(ctf.id, 'DriveOne');
 		const solves = challengeOperations.getChallengeSolvers(challenge.id);
@@ -315,7 +406,7 @@ describe('/syncchallenges noCTF integration', () => {
 	it('parks an unregistered noCTF solve under the noctf: prefix', async () => {
 		const ctf = seedCtf({ platform: 'noctf', api_base_url: API_BASE, platform_division_id: 2 });
 
-		stubFetch([
+		const calls = stubFetch([
 			['/scoreboard/divisions/2', {
 				data: {
 					entries: [
@@ -331,17 +422,64 @@ describe('/syncchallenges noCTF integration', () => {
 					total: 1
 				}
 			}],
+			// No name is available for this solver, so the label falls back to the id.
+			['/users/query', { data: { entries: [], total: 0 } }],
 			['/challenges', {
 				data: { challenges: [{ id: 12, slug: 'driveone', title: 'DriveOne', tags: { categories: 'web' }, value: 500 }] }
 			}]
 		]);
 
-		await runSync(ctf, 'users');
+		const { interaction } = await runSync(ctf, 'users');
 
 		const challenge = challengeOperations.getChallengeByName(ctf.id, 'DriveOne');
 		const solves = challengeOperations.getChallengeSolvers(challenge.id);
 		expect(solves).toHaveLength(1);
 		expect(solves[0].user_id).toBe('noctf:1875');
+		expect(solves[0].ctfd_username).toBeNull();
+		expect(String(lastReply(interaction))).toContain('platform user 1875 (unregistered) solved **DriveOne**');
+
+		// The id is asked for in one batched lookup, not one request per solve.
+		const nameCalls = calls.filter(c => c.url.includes('/users/query'));
+		expect(nameCalls).toHaveLength(1);
+		expect(JSON.parse(nameCalls[0].body)).toEqual({ ids: [1875], page_size: 1 });
+	});
+
+	it('names an unregistered noCTF solver instead of printing their numeric id', async () => {
+		const ctf = seedCtf({ platform: 'noctf', api_base_url: API_BASE, platform_division_id: 2 });
+
+		stubFetch([
+			['/scoreboard/divisions/2', {
+				data: {
+					entries: [
+						{
+							team_id: 969,
+							rank: 1,
+							score: 500,
+							hidden: false,
+							solves: [{ user_id: 1706, challenge_id: 12, hidden: false, value: 500, created_at: '2026-09-11T10:41:28.840Z' }]
+						}
+					],
+					page_size: 50,
+					total: 1
+				}
+			}],
+			['/users/query', { data: { entries: [{ id: 1706, name: 'Justher0', team_id: 969 }], total: 1 } }],
+			['/challenges', {
+				data: { challenges: [{ id: 12, slug: 'driveone', title: 'DriveOne', tags: { categories: 'web' }, value: 500 }] }
+			}]
+		]);
+
+		const { interaction } = await runSync(ctf, 'users');
+
+		const reply = String(lastReply(interaction));
+		expect(reply).toContain('Justher0 (unregistered) solved **DriveOne**');
+		expect(reply).not.toContain('platform user 1706');
+
+		const challenge = challengeOperations.getChallengeByName(ctf.id, 'DriveOne');
+		const solves = challengeOperations.getChallengeSolvers(challenge.id);
+		expect(solves).toHaveLength(1);
+		expect(solves[0].user_id).toBe('noctf:1706');
+		expect(solves[0].ctfd_username).toBe('Justher0');
 	});
 
 	it('keeps the ctfd: prefix for unregistered CTFd solves', async () => {
@@ -373,6 +511,89 @@ describe('/syncchallenges noCTF integration', () => {
 		expect(calls).toHaveLength(0);
 		expect(String(lastReply(interaction))).toMatch(/not configured/i);
 		expect(String(lastReply(interaction))).toMatch(/setctfplatform/);
+	});
+
+	it('links a registration that predates the platform credential and claims its solves', async () => {
+		const ctf = seedCtf({ platform: 'noctf', api_base_url: API_BASE, platform_division_id: 2 });
+		// Registered before /setctfplatform, so no platform user id was stored.
+		seedRegistration(ctf, { userId: 'discord-a', username: 'Justher0', platformUserId: null });
+
+		stubFetch([
+			['/users/query', { data: { entries: [{ id: 1706, name: 'Justher0', team_id: 969 }] } }],
+			['/teams/query', { data: { entries: [{ id: 969, name: 'w larp' }] } }],
+			['/scoreboard/divisions/2', {
+				data: {
+					entries: [
+						{
+							team_id: 969,
+							rank: 1,
+							score: 500,
+							hidden: false,
+							solves: [{ user_id: 1706, challenge_id: 12, hidden: false, value: 500, created_at: '2026-09-11T10:41:28.840Z' }]
+						}
+					],
+					page_size: 50,
+					total: 1
+				}
+			}],
+			['/challenges', {
+				data: { challenges: [{ id: 12, slug: 'driveone', title: 'DriveOne', tags: { categories: 'web' }, value: 500 }] }
+			}]
+		]);
+
+		const { interaction } = await runSync(ctf, 'users');
+
+		// The link is persisted, so the next sync starts from a known mapping.
+		const registration = registrationOperations.getUserRegistration(ctf.id, 'discord-a');
+		expect(String(registration.ctfd_user_id)).toBe('1706');
+		expect(registration.ctfd_team_name).toBe('w larp');
+
+		const challenge = challengeOperations.getChallengeByName(ctf.id, 'DriveOne');
+		const solves = challengeOperations.getChallengeSolvers(challenge.id);
+		expect(solves).toHaveLength(1);
+		expect(solves[0].user_id).toBe('discord-a');
+		expect(String(lastReply(interaction))).toMatch(/New solves recorded: 1/);
+		expect(String(lastReply(interaction))).toContain('<@discord-a> solved **DriveOne**');
+	});
+
+	it('refuses to link a registration when the platform match is only fuzzy', async () => {
+		const ctf = seedCtf({ platform: 'noctf', api_base_url: API_BASE, platform_division_id: 2 });
+		// The platform has no user by this exact name, so findUser's first-result
+		// fallback must not be trusted with someone else's solves.
+		seedRegistration(ctf, { userId: 'discord-a', username: 'JustherO', platformUserId: null });
+
+		stubFetch([
+			['/users/query', { data: { entries: [{ id: 1706, name: 'Justher0', team_id: null }] } }],
+			['/scoreboard/divisions/2', {
+				data: {
+					entries: [
+						{
+							team_id: 969,
+							rank: 1,
+							score: 500,
+							hidden: false,
+							solves: [{ user_id: 1706, challenge_id: 12, hidden: false, value: 500, created_at: '2026-09-11T10:41:28.840Z' }]
+						}
+					],
+					page_size: 50,
+					total: 1
+				}
+			}],
+			['/challenges', {
+				data: { challenges: [{ id: 12, slug: 'driveone', title: 'DriveOne', tags: { categories: 'web' }, value: 500 }] }
+			}]
+		]);
+
+		const { interaction } = await runSync(ctf, 'users');
+
+		const registration = registrationOperations.getUserRegistration(ctf.id, 'discord-a');
+		expect(registration.ctfd_user_id).toBeNull();
+
+		const challenge = challengeOperations.getChallengeByName(ctf.id, 'DriveOne');
+		const solves = challengeOperations.getChallengeSolvers(challenge.id);
+		expect(solves).toHaveLength(1);
+		expect(solves[0].user_id).toBe('noctf:1706');
+		expect(String(lastReply(interaction))).not.toContain('<@discord-a>');
 	});
 
 	it('no longer references the CTFd client factory', async () => {
