@@ -145,6 +145,39 @@ function forceResync() {
  * @param {string} action - 'create' | 'delete' | 'cancel'
  * @returns {Promise<{ success: boolean, eventId?: string }>}
  */
+/**
+ * Find a calendar event that was already created for a task.
+ *
+ * Used to make the 'create' push idempotent: an earlier push may have created
+ * the event but failed to record the linkage, and the reconciliation cycle
+ * selects tasks with a null calendar_event_id, so without this check it would
+ * create a duplicate event on every pass.
+ *
+ * The lookup runs a FULL sync (no syncToken), because Google rejects
+ * privateExtendedProperty when it is combined with a syncToken.
+ *
+ * @param {object} creds
+ * @param {string} taskId
+ * @returns {Promise<object|null>} the matching event, or null
+ */
+async function findEventForTask(creds, taskId) {
+	const result = await calendarApi.listAllEvents(creds, {
+		privateExtendedProperty: `xCtfbotTaskId=${taskId}`
+	});
+
+	if (result.tokenExpired) {
+		return null;
+	}
+
+	// The API filter is advisory; confirm the marker before adopting.
+	return (
+		result.items.find(event => {
+			const patch = calendarApi.calendarEventToTaskPatch(event);
+			return patch.isBotOwned && patch.taskId === taskId;
+		}) || null
+	);
+}
+
 async function pushTaskUpdate(task, action) {
 	if (!isEnabled()) {
 		return { success: false };
@@ -159,6 +192,18 @@ async function pushTaskUpdate(task, action) {
 	try {
 		switch (action) {
 		case 'create': {
+			// Idempotency first: adopt an event that already exists for this task
+			// rather than creating a second one.
+			const existing = await findEventForTask(creds, task.task_id);
+			if (existing) {
+				calendarRepository.markCalendarSynced({
+					taskId: task.task_id,
+					eventId: existing.id
+				});
+				syncLog.info(`Adopted existing calendar event ${existing.id} for task ${task.task_id}`);
+				return { success: true, eventId: existing.id };
+			}
+
 			const event = calendarApi.taskToCalendarEvent(task);
 			const created = await calendarApi.createEvent(creds, event);
 			calendarRepository.markCalendarSynced({
@@ -372,6 +417,7 @@ module.exports = {
 	_pullCalendarChanges,
 	_cancelTaskDirectly,
 	_updateTaskFromCalendar,
+	findEventForTask,
 	isEnabled,
 	resolveCredentials
 };

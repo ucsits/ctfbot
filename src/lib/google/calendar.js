@@ -80,7 +80,10 @@ async function listEvents(creds, opts = {}) {
 		orderBy: 'startTime',
 		maxResults: String(opts.maxResults || 250),
 		...(opts.syncToken ? { syncToken: opts.syncToken } : {}),
-		...(opts.pageToken ? { pageToken: opts.pageToken } : {})
+		...(opts.pageToken ? { pageToken: opts.pageToken } : {}),
+		// Google expects `key=value`; used to find an event already created for
+		// a given task so a push can adopt it instead of creating a duplicate.
+		...(opts.privateExtendedProperty ? { privateExtendedProperty: opts.privateExtendedProperty } : {})
 	});
 
 	const url = `${BASE}/calendars/${encodeURIComponent(creds.calendarId)}/events?${params}`;
@@ -109,9 +112,14 @@ async function listEvents(creds, opts = {}) {
  * When a syncToken is provided and still valid, returns only the incremental
  * changes. When no syncToken is provided, returns the full event set.
  *
+ * Note: `privateExtendedProperty` is only valid on a FULL sync. Google
+ * rejects it together with a syncToken, so callers that filter must not pass a
+ * syncToken at the same time.
+ *
  * @param {object} creds
  * @param {object} [opts]
  * @param {string} [opts.syncToken]
+ * @param {string} [opts.privateExtendedProperty] - e.g. `xCtfbotTaskId=<uuid>`
  * @returns {Promise<{ items: object[], nextSyncToken: string|null, tokenExpired: boolean }>}
  */
 async function listAllEvents(creds, opts = {}) {
@@ -123,7 +131,8 @@ async function listAllEvents(creds, opts = {}) {
 		const result = await listEvents(creds, {
 			syncToken: opts.syncToken,
 			pageToken,
-			maxResults: 250
+			maxResults: 250,
+			privateExtendedProperty: opts.privateExtendedProperty
 		});
 
 		if (result.tokenExpired) {
