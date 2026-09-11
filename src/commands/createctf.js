@@ -100,6 +100,7 @@ class CreateCTFCommand extends Command {
 		// than leaving an orphan channel, orphan event, or both behind.
 		let ctfChannel = null;
 		let scheduledEvent = null;
+		let ctfId = null;
 
 		try {
 			const dates = this.parseDates(options);
@@ -116,13 +117,13 @@ class CreateCTFCommand extends Command {
 			// The success reply must be unreachable until the CTF is persisted.
 			// saveToDatabase rethrows on failure, so a database error lands in the
 			// catch below and triggers the rollback.
-			await this.saveToDatabase(interaction, ctfChannel, scheduledEvent, options, dates);
+			ctfId = await this.saveToDatabase(interaction, ctfChannel, scheduledEvent, options, dates);
 
 			return this.sendConfirmation(interaction, ctfChannel, scheduledEvent, options);
 
 		} catch (error) {
 			this.container.logger.error('Error creating CTF:', error);
-			await this._compensateCreate(interaction, ctfChannel, scheduledEvent);
+			await this._compensateCreate(interaction, ctfChannel, scheduledEvent, ctfId);
 			return interaction.editReply(
 				'Failed to create CTF. The partial setup was rolled back. Please check permissions and try again.'
 			);
@@ -137,11 +138,27 @@ class CreateCTFCommand extends Command {
 	 * admin had no way to clean up from Discord. Each step is guarded so a missing
 	 * object or a Discord error cannot mask the original failure.
 	 *
+	 * The database row is removed first. saveToDatabase runs before
+	 * sendConfirmation, so a failure in the confirmation step would otherwise
+	 * leave a permanent ctfs row pointing at a channel and event that were just
+	 * deleted. Deleting the row before the Discord objects keeps the database from
+	 * outliving the objects it references.
+	 *
 	 * @param {import('discord.js').ChatInputCommandInteraction} interaction
 	 * @param {object|null} ctfChannel
 	 * @param {object|null} scheduledEvent
+	 * @param {number|bigint|null} [ctfId] Row id returned by saveToDatabase
 	 */
-	async _compensateCreate(interaction, ctfChannel, scheduledEvent) {
+	async _compensateCreate(interaction, ctfChannel, scheduledEvent, ctfId = null) {
+		if (ctfId !== null && ctfId !== undefined) {
+			try {
+				ctfOperations.deleteCTF(ctfId);
+				this.container.logger.info(`Rolled back CTF row ${ctfId}`);
+			} catch (error) {
+				this.container.logger.warn(`Could not roll back CTF row ${ctfId}: ${error.message}`);
+			}
+		}
+
 		if (scheduledEvent) {
 			try {
 				await interaction.guild.scheduledEvents.delete(scheduledEvent.id);
@@ -314,14 +331,14 @@ class CreateCTFCommand extends Command {
 	}
 
 	sendConfirmation(interaction, channel, event, options) {
-		const interpretation = formatDateInterpretation(options.dateStr, options.timezone, new Date(event.scheduledStartTime));
+		const interpretation = formatDateInterpretation(options.dateStr, options.timezone, event.scheduledStartAt);
 		const embed = new EmbedBuilder()
 			.setColor(0x00FF00)
 			.setTitle('CTF Created Successfully')
 			.setDescription(`**${options.ctfName}** has been set up!\n\n${interpretation}`)
 			.addFields(
 				{ name: 'Channel', value: `${channel}`, inline: true },
-				{ name: 'Start Time', value: `<t:${Math.floor(event.scheduledStartTime.getTime() / 1000)}:F>`, inline: false }
+				{ name: 'Start Time', value: `<t:${Math.floor(event.scheduledStartAt.getTime() / 1000)}:F>`, inline: false }
 			)
 			.setTimestamp();
 

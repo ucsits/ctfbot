@@ -68,7 +68,7 @@ describe('createctf compensation', () => {
 		expect(saveAt).toBeLessThan(confirmAt);
 
 		// The catch compensates instead of reporting success.
-		expect(run).toContain('await this._compensateCreate(interaction, ctfChannel, scheduledEvent);');
+		expect(run).toContain('await this._compensateCreate(interaction, ctfChannel, scheduledEvent, ctfId);');
 		const catchAt = run.indexOf('} catch (error) {');
 		expect(run.indexOf('_compensateCreate')).toBeGreaterThan(catchAt);
 
@@ -87,6 +87,55 @@ describe('createctf compensation', () => {
 		expect(run).toContain('let scheduledEvent = null;');
 		expect(run).toContain('ctfChannel = await this.createChannel(');
 		expect(run).toContain('scheduledEvent = await this.createEvent(');
+	});
+
+	it('captures the persisted row id and hands it to the rollback', () => {
+		// saveToDatabase runs before sendConfirmation, so a failure in the
+		// confirmation step used to leave a permanent ctfs row behind while the
+		// channel and event were deleted.
+		const run = createCtf.slice(
+			createCtf.indexOf('async chatInputRun'),
+			createCtf.indexOf('async _compensateCreate')
+		);
+
+		expect(run).toContain('let ctfId = null;');
+		expect(run).toContain('ctfId = await this.saveToDatabase(');
+		expect(run).toContain('await this._compensateCreate(interaction, ctfChannel, scheduledEvent, ctfId);');
+	});
+
+	it('deletes the row inside a guard so a database error cannot mask the original failure', () => {
+		const compensate = createCtf.slice(createCtf.indexOf('async _compensateCreate'));
+
+		expect(compensate).toContain('ctfId');
+		expect(compensate).toContain('ctfOperations.deleteCTF(ctfId)');
+		// The delete is wrapped so it cannot throw out of the rollback helper.
+		expect(compensate).toContain('Could not roll back CTF row');
+	});
+});
+
+describe('createctf confirmation embed', () => {
+	it('reads scheduledStartAt, not the nonexistent scheduledStartTime', () => {
+		// discord.js v14 exposes scheduledStartAt (Date) and
+		// scheduledStartTimestamp (number). `scheduledStartTime` is only valid as a
+		// KEY for scheduledEvents.create() options, never as a read-back property.
+		// Reading it produced a TypeError on the Start Time field and an
+		// `Invalid Date` (<t:NaN:F>) in the description.
+		const confirmation = createCtf.slice(createCtf.indexOf('\tsendConfirmation('));
+
+		expect(confirmation).toContain('event.scheduledStartAt');
+		expect(confirmation).not.toContain('scheduledStartTime');
+	});
+
+	it('still passes scheduledStartTime as a create() option', () => {
+		// Guard against over-correcting the create call sites, where the v13-style
+		// key is the correct discord.js v14 input name.
+		const createEvent = createCtf.slice(
+			createCtf.indexOf('async createEvent('),
+			createCtf.indexOf('async sendWelcomeMessage(')
+		);
+
+		expect(createEvent).toContain('scheduledStartTime: dates.eventDate,');
+		expect(createEvent).toContain('scheduledEndTime: dates.eventEndDate,');
 	});
 });
 
