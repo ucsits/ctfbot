@@ -1,6 +1,5 @@
 const { Listener } = require('@sapphire/framework');
-const reputationRepository = require('../database/repositories/reputation.repository');
-const luce = require('../lib/luce');
+const { awardReputation } = require('../services/reputation');
 
 const THUMBS_UP = '👍';
 const THUMBS_DOWN = '👎';
@@ -31,41 +30,20 @@ class MessageReactionAddListener extends Listener {
 		// Don't let users rep bots
 		if (reaction.message.author.bot) return;
 
-		// Daily limit check
-		if (reputationRepository.hasGivenRepToday(user.id)) {
-			// Silently ignore — the user already used rep today
-			return;
-		}
-
 		const amount = emoji === THUMBS_UP ? 1 : -1;
 
 		try {
-			const data = JSON.stringify({
-				type: 'rep',
-				v: 1,
+			// The daily slot is claimed atomically inside awardReputation before
+			// the chain write, so a second reaction from the same user cannot
+			// also append a block. 'already-given' is ignored silently here.
+			await awardReputation({
 				toUser: reaction.message.author.id,
 				fromUser: user.id,
 				amount,
 				reason: 'reaction',
-				date: new Date().toISOString().slice(0, 10)
+				toTag: reaction.message.author.tag,
+				fromTag: user.tag
 			});
-
-			const block = await luce.appendBlock({
-				author: user.id,
-				data
-			});
-
-			reputationRepository.addReputation({
-				userId: reaction.message.author.id,
-				fromUser: user.id,
-				amount,
-				reason: 'reaction',
-				blockHeight: block.height
-			});
-
-			this.container.logger.info(
-				`Rep ${amount > 0 ? '+' : ''}${amount} from ${user.tag} to ${reaction.message.author.tag} (reaction) — block #${block.height}`
-			);
 		} catch (error) {
 			this.container.logger.error('Error processing rep reaction:', error);
 		}
