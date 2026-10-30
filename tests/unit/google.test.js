@@ -127,8 +127,10 @@ describe('oauth module', () => {
 
 	it('buildAuthUrl returns a valid URL with the calendar scope', async () => {
 		const { buildAuthUrl } = await import('../../src/lib/google/oauth.js');
-		const url = buildAuthUrl('client-123');
+		const url = buildAuthUrl('client-123', 'http://127.0.0.1:5555');
 		expect(url).toContain('accounts.google.com');
+		expect(url).toContain('redirect_uri=' + encodeURIComponent('http://127.0.0.1:5555'));
+		expect(url).not.toContain('oob');
 		expect(url).toContain('client_id=client-123');
 		expect(url).toContain('scope=' + encodeURIComponent('https://www.googleapis.com/auth/calendar'));
 		expect(url).toContain('access_type=offline');

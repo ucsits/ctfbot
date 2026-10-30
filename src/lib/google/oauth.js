@@ -3,8 +3,9 @@
  *
  * The bot uses a single set of shared org credentials provisioned via env vars
  * or the google_credentials DB table. A long-lived refresh token is obtained
- * once via the out-of-band consent flow (see buildAuthUrl) and then used at
- * runtime to mint short-lived access tokens.
+ * once via the loopback consent flow (see scripts/google-auth.js, which uses
+ * buildAuthUrl and exchangeCode) and then used at runtime to mint short-lived
+ * access tokens.
  *
  * @module lib/google/oauth
  */
@@ -70,14 +71,18 @@ async function getAccessToken(clientId, clientSecret, refreshToken) {
 
 /**
  * Build the authorization URL that an admin visits in a browser to obtain a
- * one-time code. Exchange that code for a refresh token via POST to the token
- * endpoint (same flow but with authorization_code grant_type).
+ * one-time code, which exchangeCode then trades for a refresh token.
+ *
+ * Google blocked the out-of-band (urn:ietf:wg:oauth:2.0:oob) redirect in
+ * 2023, so the redirect must be a loopback address (http://127.0.0.1:<port>)
+ * served by a local listener. Desktop app OAuth clients accept any loopback
+ * port without registering it.
  *
  * @param {string} clientId
- * @param {string} [redirectUri] - Defaults to the OOB redirect URI
+ * @param {string} redirectUri - Loopback URI the local listener serves
  * @returns {string} The full Google OAuth consent URL
  */
-function buildAuthUrl(clientId, redirectUri = 'urn:ietf:wg:oauth:2.0:oob') {
+function buildAuthUrl(clientId, redirectUri) {
 	const params = new URLSearchParams({
 		client_id: clientId,
 		redirect_uri: redirectUri,
@@ -87,6 +92,38 @@ function buildAuthUrl(clientId, redirectUri = 'urn:ietf:wg:oauth:2.0:oob') {
 		prompt: 'consent'
 	});
 	return `${AUTH_URL}?${params.toString()}`;
+}
+
+/**
+ * Exchange a one-time authorization code for tokens.
+ *
+ * @param {string} clientId
+ * @param {string} clientSecret
+ * @param {string} code - The code Google sent to the redirect URI
+ * @param {string} redirectUri - Must match the one used in buildAuthUrl
+ * @returns {Promise<{ refresh_token?: string, access_token: string, expires_in: number }>}
+ */
+async function exchangeCode(clientId, clientSecret, code, redirectUri) {
+	const body = new URLSearchParams({
+		client_id: clientId,
+		client_secret: clientSecret,
+		code,
+		redirect_uri: redirectUri,
+		grant_type: 'authorization_code'
+	});
+
+	const res = await fetch(TOKEN_URL, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+		body
+	});
+
+	if (!res.ok) {
+		const errBody = await res.text().catch(() => '');
+		throw new Error(`Google OAuth code exchange failed (${res.status}): ${errBody}`);
+	}
+
+	return res.json();
 }
 
 /**
@@ -101,5 +138,6 @@ function clearTokenCache() {
 module.exports = {
 	getAccessToken,
 	buildAuthUrl,
+	exchangeCode,
 	clearTokenCache
 };
