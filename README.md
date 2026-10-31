@@ -553,7 +553,13 @@ reply with a suggestion card offering to create a task with reminders.
   even when it finds nothing or the model call fails.
 - Requests ask for `reasoning_effort: "low"`, which OpenAI and DeepSeek both
   read; decision spotting does not need deep reasoning.
-- Each firm decision becomes a card with **Create task**, **Edit & create**
+- Only admin follow-up work becomes a card: an explicit "ingetin aku / buatin
+  task" request, or admins agreeing that one of them will do something later.
+  Assignments or homework given to members, announcements and "siap" replies
+  do not. Unprompted cards need higher model confidence (0.85) than answers
+  to a mention (0.7), and dismissed cards are shown to the model as things
+  this channel does not want tracked.
+- Each such task becomes a card with **Create task**, **Edit & create**
   (pre-filled form: title, assignee, deadline, description) and **Dismiss**.
   Nothing is created until someone clicks.
 - Accepted suggestions go through the same path as `/task add`: blockchain

@@ -125,10 +125,21 @@ function suggestedSourceIds(channelId, sourceMessageIds) {
  * @returns {string[]}
  */
 function recentTitles(channelId, limit = 20) {
+	return recentHandled(channelId, limit).map(r => r.title);
+}
+
+/**
+ * Title and status of the most recent suggestions in a channel, newest last.
+ * Dismissed ones tell the model what the team does not want tracked.
+ *
+ * @returns {Array<{ title: string, status: string }>}
+ */
+function recentHandled(channelId, limit = 20) {
 	return db()
-		.prepare('SELECT title FROM task_suggestions WHERE channel_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ?')
+		.prepare(
+			'SELECT title, status FROM task_suggestions WHERE channel_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ?'
+		)
 		.all(channelId, limit)
-		.map(r => r.title)
 		.reverse();
 }
 
@@ -196,6 +207,7 @@ module.exports = {
 	finishSuggestion,
 	suggestedSourceIds,
 	recentTitles,
+	recentHandled,
 	listOpenSuggestions,
 	updateSuggestion
 };

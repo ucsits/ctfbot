@@ -49,6 +49,9 @@ const MAX_UPDATES_PER_PASS = 3;
 const MAX_MESSAGE_CHARS = 1500;
 const MAX_PROPOSALS_PER_PASS = 3;
 const MIN_CONFIDENCE = 0.7;
+// Unprompted cards interrupt the conversation, so they need more certainty
+// than an answer to someone who mentioned the bot.
+const PASSIVE_MIN_CONFIDENCE = 0.85;
 const MAX_MEMORY_CHANGES_PER_PASS = 5;
 const MAX_NOTE_CHARS = 200;
 const MAX_LANGUAGE_CHARS = 30;
@@ -281,7 +284,7 @@ async function _analyze(channelId, { trigger = null } = {}) {
 	try {
 		const context = await _loadContext(state, fresh);
 		const open = await _dropDeletedCards(state.channel, suggestionRepository.listOpenSuggestions(channelId));
-		const openTitles = new Set(open.map(r => r.title));
+		const handled = suggestionRepository.recentHandled(channelId).filter(r => r.status !== 'open');
 		const profiles = memoryRepository.getProfiles([...state.people.keys()]);
 
 		let reply;
@@ -293,7 +296,8 @@ async function _analyze(channelId, { trigger = null } = {}) {
 					people: state.people,
 					open,
 					profiles,
-					proposedTitles: suggestionRepository.recentTitles(channelId).filter(t => !openTitles.has(t)),
+					proposedTitles: handled.filter(r => r.status !== 'dismissed').map(r => r.title),
+					dismissedTitles: handled.filter(r => r.status === 'dismissed').map(r => r.title),
 					botId: trigger ? trigger.client.user.id : null
 				}),
 				json: true,
@@ -319,6 +323,7 @@ async function _analyze(channelId, { trigger = null } = {}) {
 		const found = _normalizeProposals(parsed, {
 			fresh,
 			people: state.people,
+			minConfidence: trigger ? MIN_CONFIDENCE : PASSIVE_MIN_CONFIDENCE,
 			proposedSources: suggestionRepository.suggestedSourceIds(
 				channelId,
 				fresh.map(m => m.id)
@@ -440,6 +445,7 @@ function _buildPrompt({
 	fresh,
 	people,
 	proposedTitles,
+	dismissedTitles = [],
 	open = [],
 	profiles = new Map(),
 	botId = null,
@@ -455,8 +461,11 @@ function _buildPrompt({
 
 	const system = [
 		"You watch a Discord channel where an organisation's administrators coordinate.",
-		'Find decisions, made or confirmed in the NEW messages, to do something in the future that deserves a tracked task with a reminder.',
-		'Only include firm commitments or agreed plans. Skip open questions, ideas still being debated, things already done, jokes, and actions that will be finished within the next hour.',
+		'Find tasks in the NEW messages that deserve a tracked task with a reminder. A task here is follow-up work the administrators themselves have to do, with an owner among them.',
+		'Propose a task only when (1) someone asks you or the team to remind them or to make a task ("ingetin aku ...", "buatin task ...", "remind us to ..."), or (2) the administrators agree that one of them will do a specific thing later ("oke aku yang kirim proposal sponsor jumat").',
+		'Do NOT propose: assignments, homework, exercises or instructions an administrator gives to members or participants, even with a deadline and even when members reply "siap" (that is the members\' work, not an admin task); announcements, event info, rules and open invitations ("yang mau ikut reply MAU"); acknowledgments and reactions on their own ("siap", "oke", emoji); open questions, ideas still being debated, things already done, jokes, and actions finished within the next hour.',
+		'Example: an admin posts "Latihan kecil untuk @A dan @B: download aplikasi ini, catat pengeluaran sepekan, hari Minggu kirim laporan PDF ke channel ini" and @A replies "siap mas" → nothing. Later the admin writes "ingatkan saya hari Minggu jam 12 siang untuk menagih laporan peserta" → a task for that admin.',
+		'When unsure, propose nothing: a missed task costs little because people can mention you, but a wrong card is noise. Suggestions the team dismissed show what they do not want tracked; do not propose those or similar things again.',
 		'Earlier messages are context: use them to understand what the NEW messages refer to, but only act on what the NEW messages say. Do not repeat anything listed as already suggested.',
 		'When a NEW message changes or corrects an OPEN suggestion (a different day, person, title or detail), put it in "updates" with that suggestion_id instead of adding a new proposal. Only include the fields that change.',
 		'Messages may be in Indonesian, English or a mix. Write every title, description, note and reply in Indonesian (Bahasa Indonesia) by default, even when the messages are in English. Use another language only for a person whose memory sets one: the assignee for a task, the person who mentioned you for the reply.',
@@ -501,6 +510,7 @@ function _buildPrompt({
 		openLines.length ? openLines.join('\n') : '(none)',
 		'',
 		`Already suggested and handled: ${proposedTitles.length ? proposedTitles.map(t => `"${t}"`).join(', ') : 'none'}`,
+		`Dismissed by the team (they did not want these tracked): ${dismissedTitles.length ? dismissedTitles.map(t => `"${t}"`).join(', ') : 'none'}`,
 		'',
 		'Earlier messages (context):',
 		context.length ? context.map(fmt).join('\n') : '(none)',
@@ -522,7 +532,10 @@ function _buildPrompt({
  *
  * @returns {Array<object>}
  */
-function _normalizeProposals(parsed, { fresh, people, proposedSources, now = Date.now() }) {
+function _normalizeProposals(
+	parsed,
+	{ fresh, people, proposedSources, minConfidence = MIN_CONFIDENCE, now = Date.now() }
+) {
 	const raw = Array.isArray(parsed?.proposals) ? parsed.proposals : [];
 	const freshById = new Map(fresh.map(m => [String(m.id), m]));
 	const seen = new Set();
@@ -537,7 +550,7 @@ function _normalizeProposals(parsed, { fresh, people, proposedSources, now = Dat
 		if (!title || !source || proposedSources.has(source.id) || seen.has(source.id)) {
 			continue;
 		}
-		if (typeof item.confidence === 'number' && item.confidence < MIN_CONFIDENCE) {
+		if (typeof item.confidence === 'number' && item.confidence < minConfidence) {
 			continue;
 		}
 

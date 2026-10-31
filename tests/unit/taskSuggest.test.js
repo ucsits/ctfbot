@@ -1130,6 +1130,137 @@ describe('deleted messages', () => {
 	});
 });
 
+describe('what counts as a task', () => {
+	const originalEnv = { ...process.env };
+	const originalFetch = globalThis.fetch;
+	let taskSuggest;
+	let suggestions;
+	let constants;
+	let n = 0;
+
+	const llmReply = content => ({
+		ok: true,
+		json: () => Promise.resolve({ choices: [{ message: { content } }] })
+	});
+
+	beforeEach(async () => {
+		vi.resetModules();
+		process.env.TASK_SUGGESTIONS_ENABLED = 'true';
+		process.env.OPENAI_API_KEY = 'sk-test';
+		process.env.OPENAI_MODEL = 'test-model';
+		taskSuggest = await import('../../src/services/taskSuggest.js');
+		suggestions = await import('../../src/database/repositories/taskSuggestion.repository.js');
+		constants = (await import('../../src/lib/constants/config.js')).default;
+		taskSuggest._reset();
+		n++;
+	});
+
+	afterEach(() => {
+		taskSuggest._reset();
+		process.env = { ...originalEnv };
+		globalThis.fetch = originalFetch;
+	});
+
+	const setup = () => {
+		const channel = {
+			id: `kind-chan-${n}`,
+			parentId: constants.GOVERNANCE_CATEGORIES[0],
+			sendTyping: vi.fn().mockResolvedValue(undefined),
+			messages: { fetch: vi.fn(arg => Promise.resolve(typeof arg === 'object' ? new Map() : null)) },
+			send: vi.fn().mockResolvedValue({ id: `card-${n}` })
+		};
+		const message = (id, content, mentionBot = false) => ({
+			id,
+			channelId: channel.id,
+			channel,
+			guild: {},
+			client: { user: { id: 'bot-1' } },
+			author: { id: 'u1', bot: false, username: 'hanz' },
+			member: { displayName: 'Hanz' },
+			mentions: {
+				users: new Map(mentionBot ? [['bot-1', { id: 'bot-1', bot: true }]] : []),
+				members: new Map()
+			},
+			content,
+			createdTimestamp: Date.now(),
+			reply: vi.fn().mockResolvedValue({})
+		});
+		return { channel, message };
+	};
+	const proposal = (sourceId, confidence) =>
+		JSON.stringify({
+			proposals: [
+				{
+					title: 'Latihan personal finance',
+					deadline: future,
+					source_message_id: sourceId,
+					confidence
+				}
+			]
+		});
+
+	it('tells the model that assignments to members are not admin tasks, with the counter-example', () => {
+		const [system, user] = taskSuggest._buildPrompt({
+			context: [],
+			fresh,
+			people,
+			proposedTitles: [],
+			dismissedTitles: ['Latihan personal finance: catat pengeluaran & laporan PDF']
+		});
+		expect(system.content).toContain('follow-up work the administrators themselves have to do');
+		expect(system.content).toContain('assignments, homework, exercises or instructions');
+		expect(system.content).toContain('"siap mas" → nothing');
+		expect(system.content).toContain('When unsure, propose nothing');
+		expect(user.content).toContain(
+			'Dismissed by the team (they did not want these tracked): "Latihan personal finance: catat pengeluaran & laporan PDF"'
+		);
+	});
+
+	it('shows the model which cards were dismissed and which became tasks', async () => {
+		const { channel, message } = setup();
+		for (const [id, status] of [
+			[`kind-made-${n}`, 'created'],
+			[`kind-nope-${n}`, 'dismissed'],
+			[`kind-open-${n}`, 'open']
+		]) {
+			suggestions.createSuggestion({
+				id,
+				channelId: channel.id,
+				sourceMessageId: `src-${id}`,
+				title: `Title ${status}`,
+				assigneeId: 'u1',
+				deadline: null
+			});
+			if (status !== 'open') {
+				suggestions.finishSuggestion(id, { status, handledBy: 'u1' });
+			}
+		}
+		globalThis.fetch = vi.fn().mockResolvedValue(llmReply('{"proposals":[]}'));
+
+		taskSuggest.observe(message(`m-${n}`, 'oke lanjut'));
+		await taskSuggest._analyze(channel.id);
+
+		const prompt = JSON.parse(globalThis.fetch.mock.calls[0][1].body).messages[1].content;
+		expect(prompt).toContain('Already suggested and handled: "Title created"');
+		expect(prompt).toContain('Dismissed by the team (they did not want these tracked): "Title dismissed"');
+	});
+
+	it('needs more confidence for an unprompted card than for an answer to a mention', async () => {
+		const passive = setup();
+		globalThis.fetch = vi.fn().mockResolvedValue(llmReply(proposal(`p-${n}`, 0.8)));
+		taskSuggest.observe(passive.message(`p-${n}`, 'siapp mass'));
+		await taskSuggest._analyze(passive.channel.id);
+		expect(passive.channel.send).not.toHaveBeenCalled();
+
+		n++;
+		const asked = setup();
+		globalThis.fetch = vi.fn().mockResolvedValue(llmReply(proposal(`a-${n}`, 0.8)));
+		taskSuggest.observe(asked.message(`a-${n}`, '<@bot-1> ingetin aku minggu jam 12 siang', true));
+		await vi.waitFor(() => expect(asked.channel.send).toHaveBeenCalledTimes(1));
+		expect(asked.channel.send.mock.calls[0][0].embeds).toHaveLength(1);
+	});
+});
+
 describe('task suggestion wiring (source level)', () => {
 	const listener = readFileSync(join(root, 'src/listeners/taskSuggestInteraction.js'), 'utf8');
 	const messageCreate = readFileSync(join(root, 'src/listeners/messageCreate.js'), 'utf8');
