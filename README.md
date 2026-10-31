@@ -569,6 +569,8 @@ reply with a suggestion card offering to create a task with reminders.
   a card keeps working across restarts, with no time limit, until someone
   creates the task or dismisses it. Clicking a card that was already handled
   says who handled it.
+- **Dismiss** deletes the card to keep the channel clean. The dismissal is
+  still recorded, so the model knows the channel did not want it.
 - The bot remembers people. When someone states a lasting fact or preference
   ("aku biasanya baru bisa malam", "Budi pegang sponsor", "pakai bahasa
   Inggris aja ke aku"), the model saves it as a note or a language
@@ -579,8 +581,8 @@ reply with a suggestion card offering to create a task with reminders.
   card titles, descriptions, notes and its answer to a mention. A person
   with a saved language gets that language instead.
 - Deleted messages are forgotten: a deleted chat message is never sent to the
-  model again, a deleted open (or dismissed) card is dropped so the bot no
-  longer thinks it suggested it, and notes learned from a deleted message
+  model again, a deleted open card is dropped so the bot no longer thinks
+  it suggested it, and notes learned from a deleted message
   are removed. Cards deleted while the bot was offline are dropped on the
   next pass. Cards that already became a task are kept.
 - The model is told to chat like a classmate in the group chat, in everyday

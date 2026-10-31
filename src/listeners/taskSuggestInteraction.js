@@ -222,12 +222,20 @@ class TaskSuggestInteractionListener extends Listener {
 		}
 		taskSuggest.finishProposal(proposalId, { status: 'dismissed', handledBy: interaction.user.id });
 
-		const embed = new EmbedBuilder()
-			.setColor(0x95a5a6)
-			.setTitle('Suggestion dismissed')
-			.setDescription(`~~${proposal.title}~~`)
-			.setFooter({ text: `Dismissed by ${interaction.member?.displayName ?? interaction.user.username}` });
-		return interaction.update({ embeds: [embed], components: [] });
+		// Remove the card so dismissed suggestions do not clutter the channel.
+		// The row stays, so the model still knows this was not wanted.
+		await interaction.deferUpdate();
+		try {
+			await interaction.message.delete();
+		} catch (error) {
+			this.container.logger.warn(`Could not delete dismissed suggestion card: ${error.message}`);
+			const embed = new EmbedBuilder()
+				.setColor(0x95a5a6)
+				.setTitle('Suggestion dismissed')
+				.setDescription(`~~${proposal.title}~~`)
+				.setFooter({ text: `Dismissed by ${interaction.member?.displayName ?? interaction.user.username}` });
+			await interaction.editReply({ embeds: [embed], components: [] });
+		}
 	}
 
 	/**

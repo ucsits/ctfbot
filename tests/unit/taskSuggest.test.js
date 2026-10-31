@@ -1058,7 +1058,7 @@ describe('deleted messages', () => {
 		expect(prompt).not.toContain('pesan yang nanti dihapus');
 	});
 
-	it('drops a deleted card and the notes learned from a deleted message, but keeps created tasks', () => {
+	it('drops a deleted open card and the notes learned from a deleted message, but keeps handled ones', () => {
 		const channelId = `del-chan-${n}`;
 		const add = (id, card) => {
 			suggestions.createSuggestion({
@@ -1074,14 +1074,19 @@ describe('deleted messages', () => {
 		add(`open-${n}`, `card-open-${n}`);
 		add(`made-${n}`, `card-made-${n}`);
 		suggestions.finishSuggestion(`made-${n}`, { status: 'created', handledBy: 'u1', taskId: 't1' });
+		add(`nope-${n}`, `card-nope-${n}`);
+		suggestions.finishSuggestion(`nope-${n}`, { status: 'dismissed', handledBy: 'u1' });
 		memory.addNote('u1', `note-${n}`, { sourceMessageId: `said-${n}` });
 
 		taskSuggest.forgetMessage(channelId, `card-open-${n}`);
 		taskSuggest.forgetMessage(channelId, `card-made-${n}`);
+		taskSuggest.forgetMessage(channelId, `card-nope-${n}`);
 		taskSuggest.forgetMessage(channelId, `said-${n}`);
 
 		expect(suggestions.getSuggestion(`open-${n}`)).toBeUndefined();
 		expect(suggestions.getSuggestion(`made-${n}`).status).toBe('created');
+		// Dismiss deletes the card itself; the model should still know it was not wanted.
+		expect(suggestions.getSuggestion(`nope-${n}`).status).toBe('dismissed');
 		expect(memory.listNotes('u1').map(x => x.note)).not.toContain(`note-${n}`);
 	});
 
@@ -1258,6 +1263,61 @@ describe('what counts as a task', () => {
 		taskSuggest.observe(asked.message(`a-${n}`, '<@bot-1> ingetin aku minggu jam 12 siang', true));
 		await vi.waitFor(() => expect(asked.channel.send).toHaveBeenCalledTimes(1));
 		expect(asked.channel.send.mock.calls[0][0].embeds).toHaveLength(1);
+	});
+});
+
+describe('dismissing a suggestion', () => {
+	let suggestions;
+	let Listener;
+	let n = 0;
+
+	beforeEach(async () => {
+		suggestions = await import('../../src/database/repositories/taskSuggestion.repository.js');
+		({ TaskSuggestInteractionListener: Listener } = await import('../../src/listeners/taskSuggestInteraction.js'));
+		n++;
+		suggestions.createSuggestion({
+			id: `dis-${n}`,
+			channelId: 'dis-chan',
+			sourceMessageId: `dis-src-${n}`,
+			title: 'Latihan personal finance',
+			assigneeId: 'u1',
+			deadline: null
+		});
+		suggestions.setCardMessage(`dis-${n}`, `dis-card-${n}`);
+	});
+
+	const run = interaction =>
+		Listener.prototype._dismiss.call(
+			{ _denied: async () => false, container: { logger: { warn: vi.fn() } } },
+			interaction,
+			`dis-${n}`
+		);
+	const makeInteraction = deleteCard => ({
+		user: { id: 'u9', username: 'hanz' },
+		member: { displayName: 'Hanz' },
+		message: { delete: deleteCard },
+		deferUpdate: vi.fn().mockResolvedValue(undefined),
+		editReply: vi.fn().mockResolvedValue(undefined),
+		update: vi.fn()
+	});
+
+	it('deletes the card and keeps the dismissal on record', async () => {
+		const interaction = makeInteraction(vi.fn().mockResolvedValue(undefined));
+		await run(interaction);
+
+		expect(interaction.message.delete).toHaveBeenCalledTimes(1);
+		expect(interaction.editReply).not.toHaveBeenCalled();
+		expect(interaction.update).not.toHaveBeenCalled();
+		expect(suggestions.getSuggestion(`dis-${n}`)).toMatchObject({ status: 'dismissed', handled_by: 'u9' });
+	});
+
+	it('falls back to marking the card dismissed when it cannot be deleted', async () => {
+		const interaction = makeInteraction(vi.fn().mockRejectedValue(new Error('Missing Permissions')));
+		await run(interaction);
+
+		const embed = interaction.editReply.mock.calls[0][0].embeds[0].toJSON();
+		expect(embed.title).toBe('Suggestion dismissed');
+		expect(interaction.editReply.mock.calls[0][0].components).toEqual([]);
 	});
 });
 
