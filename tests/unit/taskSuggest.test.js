@@ -182,6 +182,7 @@ describe('taskSuggest._analyze', () => {
 		await taskSuggest._analyze('c1');
 		const body = JSON.parse(globalThis.fetch.mock.calls[0][1].body);
 		expect(body.messages[1].content).toContain('id=m1');
+		expect(body.thinking).toBe('low');
 
 		taskSuggest._reset();
 		vi.useRealTimers();
@@ -314,6 +315,18 @@ describe('lib/llm/openai', () => {
 		const body = JSON.parse(init.body);
 		expect(body.model).toBe('test-model');
 		expect(body.response_format).toEqual({ type: 'json_object' });
+		expect(body).not.toHaveProperty('thinking');
+	});
+
+	it('sends the thinking level only when one is given', async () => {
+		globalThis.fetch = vi.fn().mockResolvedValue({
+			ok: true,
+			json: () => Promise.resolve({ choices: [{ message: { content: '{}' } }] })
+		});
+		const { chatCompletion } = await import('../../src/lib/llm/openai.js');
+
+		await chatCompletion({ messages: [], thinking: 'low' });
+		expect(JSON.parse(globalThis.fetch.mock.calls[0][1].body).thinking).toBe('low');
 	});
 
 	it('throws on a non-2xx response', async () => {

@@ -171,7 +171,10 @@ async function _analyze(channelId) {
 					people: state.people,
 					proposedTitles: suggestionRepository.recentTitles(channelId)
 				}),
-				json: true
+				json: true,
+				// Spotting decisions in chat does not need deep reasoning; low
+				// thinking keeps replies fast and cheap.
+				thinking: 'low'
 			});
 		} catch (error) {
 			// Put the messages back so the next pass (triggered by the next

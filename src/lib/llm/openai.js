@@ -20,9 +20,11 @@ const llmLog = logger.child('LLM');
  * @param {Array<{role: string, content: string}>} params.messages
  * @param {boolean} [params.json=false] - Ask the provider for a JSON object reply
  * @param {number} [params.temperature=0]
+ * @param {'low'|'medium'|'high'} [params.thinking] - Reasoning level, sent as
+ *   `thinking` in the request body; omitted when not given
  * @returns {Promise<string>}
  */
-async function chatCompletion({ messages, json = false, temperature = 0 }) {
+async function chatCompletion({ messages, json = false, temperature = 0, thinking }) {
 	if (!config.llm.isConfigured) {
 		throw new Error('OPENAI_API_KEY and OPENAI_MODEL must be set');
 	}
@@ -34,6 +36,9 @@ async function chatCompletion({ messages, json = false, temperature = 0 }) {
 	};
 	if (json) {
 		body.response_format = { type: 'json_object' };
+	}
+	if (thinking) {
+		body.thinking = thinking;
 	}
 
 	const url = `${config.llm.baseUrl}/chat/completions`;
