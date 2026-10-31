@@ -169,9 +169,26 @@ function updateSuggestion(id, changes) {
 	return result.changes > 0 ? getSuggestion(id) : null;
 }
 
+/**
+ * Drop the suggestion whose card message was deleted from Discord, so the
+ * model no longer sees it as open or already suggested. Cards that became a
+ * task are kept: the task exists whether or not its message does.
+ *
+ * @returns {boolean} whether a suggestion was removed
+ */
+function deleteByCardMessage(channelId, cardMessageId) {
+	const result = db()
+		.prepare(
+			"DELETE FROM task_suggestions WHERE channel_id = ? AND card_message_id = ? AND status IN ('open', 'dismissed')"
+		)
+		.run(channelId, cardMessageId);
+	return result.changes > 0;
+}
+
 module.exports = {
 	createSuggestion,
 	deleteSuggestion,
+	deleteByCardMessage,
 	setCardMessage,
 	getSuggestion,
 	claimSuggestion,

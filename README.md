@@ -572,6 +572,13 @@ reply with a suggestion card offering to create a task with reminders.
 - The model writes in Indonesian by default (set in its system prompt):
   card titles, descriptions, notes and its answer to a mention. A person
   with a saved language gets that language instead.
+- Deleted messages are forgotten: a deleted chat message is never sent to the
+  model again, a deleted open (or dismissed) card is dropped so the bot no
+  longer thinks it suggested it, and notes learned from a deleted message
+  are removed. Cards deleted while the bot was offline are dropped on the
+  next pass. Cards that already became a task are kept.
+- The model is told to talk casually, like a teammate on Discord, in
+  everyday Indonesian ("Sip, udah aku catat ya 👍"), not formal Indonesian.
 - `/memory view` shows what the bot remembers about you (Manage Messages can
   view others). `/memory remember`, `/memory forget <number>`,
   `/memory language` and `/memory clear` edit or delete it.

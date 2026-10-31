@@ -939,6 +939,145 @@ describe('lib/llm/openai', () => {
 	});
 });
 
+describe('deleted messages', () => {
+	const originalEnv = { ...process.env };
+	const originalFetch = globalThis.fetch;
+	let taskSuggest;
+	let suggestions;
+	let memory;
+	let constants;
+	let n = 0;
+
+	const llmReply = content => ({
+		ok: true,
+		json: () => Promise.resolve({ choices: [{ message: { content } }] })
+	});
+
+	beforeEach(async () => {
+		vi.resetModules();
+		process.env.TASK_SUGGESTIONS_ENABLED = 'true';
+		process.env.OPENAI_API_KEY = 'sk-test';
+		process.env.OPENAI_MODEL = 'test-model';
+		taskSuggest = await import('../../src/services/taskSuggest.js');
+		suggestions = await import('../../src/database/repositories/taskSuggestion.repository.js');
+		memory = await import('../../src/database/repositories/actorMemory.repository.js');
+		constants = (await import('../../src/lib/constants/config.js')).default;
+		taskSuggest._reset();
+		n++;
+	});
+
+	afterEach(() => {
+		taskSuggest._reset();
+		process.env = { ...originalEnv };
+		globalThis.fetch = originalFetch;
+	});
+
+	const makeChannel = fetch => ({
+		id: `del-chan-${n}`,
+		parentId: constants.GOVERNANCE_CATEGORIES[0],
+		sendTyping: vi.fn().mockResolvedValue(undefined),
+		messages: { fetch },
+		send: vi.fn()
+	});
+	const makeMessage = (channel, id, content) => ({
+		id,
+		channelId: channel.id,
+		channel,
+		guild: {},
+		client: { user: { id: 'bot-1' } },
+		author: { id: 'u1', bot: false, username: 'alice' },
+		member: { displayName: 'Alice' },
+		mentions: { users: new Map(), members: new Map() },
+		content,
+		createdTimestamp: Date.now(),
+		reply: vi.fn().mockResolvedValue({})
+	});
+	const promptOf = call => JSON.parse(call[1].body).messages[1].content;
+
+	it('never sends a deleted buffered message to the model', async () => {
+		const channel = makeChannel(vi.fn().mockResolvedValue(new Map()));
+		globalThis.fetch = vi.fn().mockResolvedValue(llmReply('{"proposals":[]}'));
+		taskSuggest.observe(makeMessage(channel, `a-${n}`, 'pesan yang nanti dihapus'));
+		taskSuggest.observe(makeMessage(channel, `b-${n}`, 'pesan yang tetap ada'));
+
+		taskSuggest.forgetMessage(channel.id, `a-${n}`);
+		await taskSuggest._analyze(channel.id);
+
+		const prompt = promptOf(globalThis.fetch.mock.calls[0]);
+		expect(prompt).toContain('pesan yang tetap ada');
+		expect(prompt).not.toContain('pesan yang nanti dihapus');
+	});
+
+	it('drops a deleted card and the notes learned from a deleted message, but keeps created tasks', () => {
+		const channelId = `del-chan-${n}`;
+		const add = (id, card) => {
+			suggestions.createSuggestion({
+				id,
+				channelId,
+				sourceMessageId: `src-${id}`,
+				title: id,
+				assigneeId: 'u1',
+				deadline: null
+			});
+			suggestions.setCardMessage(id, card);
+		};
+		add(`open-${n}`, `card-open-${n}`);
+		add(`made-${n}`, `card-made-${n}`);
+		suggestions.finishSuggestion(`made-${n}`, { status: 'created', handledBy: 'u1', taskId: 't1' });
+		memory.addNote('u1', `note-${n}`, { sourceMessageId: `said-${n}` });
+
+		taskSuggest.forgetMessage(channelId, `card-open-${n}`);
+		taskSuggest.forgetMessage(channelId, `card-made-${n}`);
+		taskSuggest.forgetMessage(channelId, `said-${n}`);
+
+		expect(suggestions.getSuggestion(`open-${n}`)).toBeUndefined();
+		expect(suggestions.getSuggestion(`made-${n}`).status).toBe('created');
+		expect(memory.listNotes('u1').map(x => x.note)).not.toContain(`note-${n}`);
+	});
+
+	it('drops open suggestions whose card was deleted while the bot was offline', async () => {
+		const channelId = `del-chan-${n}`;
+		for (const id of ['gone', 'kept', 'flaky']) {
+			suggestions.createSuggestion({
+				id: `${id}-${n}`,
+				channelId,
+				sourceMessageId: `src-${id}-${n}`,
+				title: `Card ${id}`,
+				assigneeId: 'u1',
+				deadline: null
+			});
+			suggestions.setCardMessage(`${id}-${n}`, `card-${id}-${n}`);
+		}
+		const channel = makeChannel(
+			vi.fn(arg => {
+				if (arg === `card-gone-${n}`) {
+					return Promise.reject(Object.assign(new Error('Unknown Message'), { code: 10008 }));
+				}
+				if (arg === `card-flaky-${n}`) {
+					return Promise.reject(new Error('socket hang up'));
+				}
+				return Promise.resolve(typeof arg === 'string' ? { id: arg } : new Map());
+			})
+		);
+		globalThis.fetch = vi.fn().mockResolvedValue(llmReply('{"proposals":[]}'));
+
+		taskSuggest.observe(makeMessage(channel, `m-${n}`, 'ada update?'));
+		await taskSuggest._analyze(channel.id);
+
+		const prompt = promptOf(globalThis.fetch.mock.calls[0]);
+		expect(prompt).not.toContain('Card gone');
+		expect(prompt).toContain('Card kept');
+		// A network error is not proof the card is gone.
+		expect(prompt).toContain('Card flaky');
+		expect(suggestions.getSuggestion(`gone-${n}`)).toBeUndefined();
+	});
+
+	it('asks the model for a relaxed, everyday Indonesian tone', () => {
+		const [system] = taskSuggest._buildPrompt({ context: [], fresh, people, proposedTitles: [] });
+		expect(system.content).toContain('Gaya bicara: santai dan akrab');
+	});
+});
+
 describe('task suggestion wiring (source level)', () => {
 	const listener = readFileSync(join(root, 'src/listeners/taskSuggestInteraction.js'), 'utf8');
 	const messageCreate = readFileSync(join(root, 'src/listeners/messageCreate.js'), 'utf8');
@@ -956,5 +1095,14 @@ describe('task suggestion wiring (source level)', () => {
 
 	it('feeds every non-bot message to the suggestion service', () => {
 		expect(messageCreate).toContain('taskSuggest.observe(message)');
+	});
+
+	it('forgets single and bulk-deleted messages', () => {
+		const single = readFileSync(join(root, 'src/listeners/messageDelete.js'), 'utf8');
+		const bulk = readFileSync(join(root, 'src/listeners/messageDeleteBulk.js'), 'utf8');
+		expect(single).toContain("event: 'messageDelete'");
+		expect(single).toContain('taskSuggest.forgetMessage(message.channelId, message.id)');
+		expect(bulk).toContain("event: 'messageDeleteBulk'");
+		expect(bulk).toContain('taskSuggest.forgetMessage(channel.id, id)');
 	});
 });

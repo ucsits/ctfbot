@@ -91,6 +91,15 @@ function removeNote(userId, noteId) {
 }
 
 /**
+ * Delete the notes learned from a message, after that message was deleted.
+ *
+ * @returns {number} number of notes removed
+ */
+function removeNotesFromMessage(sourceMessageId) {
+	return db().prepare('DELETE FROM actor_memories WHERE source_message_id = ?').run(sourceMessageId).changes;
+}
+
+/**
  * Forget everything about a user: notes and preferences.
  */
 function clearUser(userId) {
@@ -130,6 +139,7 @@ module.exports = {
 	listNotes,
 	addNote,
 	removeNote,
+	removeNotesFromMessage,
 	clearUser,
 	getProfiles
 };

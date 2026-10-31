@@ -248,7 +248,7 @@ async function _analyze(channelId, { trigger = null } = {}) {
 
 	try {
 		const context = await _loadContext(state, fresh);
-		const open = suggestionRepository.listOpenSuggestions(channelId);
+		const open = await _dropDeletedCards(state.channel, suggestionRepository.listOpenSuggestions(channelId));
 		const openTitles = new Set(open.map(r => r.title));
 		const profiles = memoryRepository.getProfiles([...state.people.keys()]);
 
@@ -427,6 +427,7 @@ function _buildPrompt({
 		'Earlier messages are context: use them to understand what the NEW messages refer to, but only act on what the NEW messages say. Do not repeat anything listed as already suggested.',
 		'When a NEW message changes or corrects an OPEN suggestion (a different day, person, title or detail), put it in "updates" with that suggestion_id instead of adding a new proposal. Only include the fields that change.',
 		'Messages may be in Indonesian, English or a mix. Write every title, description, note and reply in Indonesian (Bahasa Indonesia) by default, even when the messages are in English. Use another language only for a person whose memory sets one: the assignee for a task, the person who mentioned you for the reply.',
+		'Gaya bicara: santai dan akrab, kayak teman satu tim yang ngobrol di Discord, bukan customer service. Pakai bahasa Indonesia sehari-hari: "aku/kamu", kalimat pendek, kata-kata kayak "oke", "sip", "siap", "nih", "ya", "deh", "kok", "udah", "nggak", "aja", dan boleh satu emoji kalau pas. Hindari bahasa baku yang kaku seperti "Baik, saya telah mencatat permintaan Anda" atau "Terima kasih atas informasinya"; contoh yang pas: "Sip, udah aku catat ya 👍" atau "Hmm, aku nggak nemu keputusan baru nih." Judul tugas tetap singkat dan jelas, misalnya "Kirim proposal sponsor". Kalau seseorang minta bahasa lain, tetap santai di bahasa itu.',
 		'You remember participants between conversations. Use what you remember to pick assignees and deadlines the way each person prefers.',
 		'In "memories", save lasting facts or preferences a NEW message states about its author or a teammate that will help with later tasks: role or responsibilities, usual availability, preferred reminder time, how they want to be addressed. Do not save one-off task details, anything already remembered, secrets or credentials, or sensitive personal data. When a NEW message says a remembered note is no longer true, "forget" it by note id (and "remember" the corrected one). Set "language" only when a person asks you to use a language with them.',
 		'Reply with a JSON object only:',
@@ -863,6 +864,57 @@ function unavailableMessage(id) {
 	return '⏳ Someone else is handling this suggestion right now. Try again in a moment.';
 }
 
+/**
+ * Forget a message that was deleted from Discord, so the model never sees
+ * it again: drop it from the buffer, drop the suggestion if it was a card,
+ * and drop notes learned from it. Called from the messageDelete listener.
+ *
+ * @param {string} channelId
+ * @param {string} messageId
+ */
+function forgetMessage(channelId, messageId) {
+	const state = channels.get(channelId);
+	if (state) {
+		state.messages = state.messages.filter(m => m.id !== messageId);
+	}
+	const card = suggestionRepository.deleteByCardMessage(channelId, messageId);
+	const notes = memoryRepository.removeNotesFromMessage(messageId);
+	if (card || notes > 0) {
+		suggestLog.info(
+			`Message ${messageId} was deleted: removed ${card ? 'its suggestion card' : 'no card'} and ${notes} note(s)`
+		);
+	}
+}
+
+// Discord's error code for a message that no longer exists.
+const UNKNOWN_MESSAGE = 10008;
+
+/**
+ * Drop open suggestions whose card was deleted while the bot was not
+ * watching (e.g. offline). Cards are usually in the message cache, so this
+ * rarely costs an API call. Errors other than "unknown message" keep the
+ * suggestion.
+ *
+ * @returns {Promise<Array<object>>} the suggestions whose card still exists
+ */
+async function _dropDeletedCards(channel, open) {
+	const kept = [];
+	for (const row of open) {
+		if (row.card_message_id) {
+			const gone = await channel.messages.fetch(row.card_message_id).then(
+				() => false,
+				error => error?.code === UNKNOWN_MESSAGE
+			);
+			if (gone) {
+				suggestionRepository.deleteByCardMessage(channel.id, row.card_message_id);
+				continue;
+			}
+		}
+		kept.push(row);
+	}
+	return kept;
+}
+
 /** Test helper: clear all in-memory state. */
 function _reset() {
 	for (const state of channels.values()) {
@@ -878,6 +930,7 @@ module.exports = {
 	TIMEZONE,
 	isEnabled,
 	observe,
+	forgetMessage,
 	getProposal,
 	claimProposal,
 	releaseProposal,
