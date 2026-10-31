@@ -3,7 +3,9 @@
  *
  * Watches governance channels and, when the conversation settles, asks an
  * OpenAI-compatible model whether the admins decided to do something in the
- * future. Each firm decision is posted as a suggestion card (reply to the
+ * future. Mentioning the bot skips the wait: it analyses immediately, shows
+ * "typing..." while the model works, and always answers the mention.
+ * Each firm decision is posted as a suggestion card (reply to the
  * message where it was made) with Create / Edit & create / Dismiss buttons,
  * handled by src/listeners/taskSuggestInteraction.js. Nothing is created
  * until someone confirms.
@@ -38,6 +40,8 @@ const CONTEXT_MESSAGES = 10;
 const MAX_MESSAGE_CHARS = 1500;
 const MAX_PROPOSALS_PER_PASS = 3;
 const MIN_CONFIDENCE = 0.7;
+// Discord shows "typing..." for about 10s per call, so refresh it before then.
+const TYPING_REFRESH_MS = 8_000;
 const TIMEZONE = constants.DEFAULT_TIMEZONE;
 
 // Custom ID namespaces for the suggestion card. Format: <namespace>:<proposalId>
@@ -98,7 +102,8 @@ function observe(message) {
 			people: new Map(),
 			timer: null,
 			lastRunAt: 0,
-			running: false
+			running: false,
+			pendingTrigger: null
 		};
 		channels.set(message.channelId, state);
 	}
@@ -118,6 +123,16 @@ function observe(message) {
 		analyzed: false
 	});
 	_prune(state);
+
+	// A direct mention is a request to look now, not after the discussion ends.
+	const botId = message.client?.user?.id;
+	if (botId && message.mentions?.users?.has(botId)) {
+		clearTimeout(state.timer);
+		_analyze(message.channelId, { trigger: message }).catch(err =>
+			suggestLog.error(`Analysis failed for channel ${message.channelId}: ${err.message}`)
+		);
+		return;
+	}
 	_schedule(message.channelId, state);
 }
 
@@ -136,21 +151,54 @@ function _schedule(channelId, state) {
 }
 
 /**
+ * Keep the "typing..." indicator up in a channel until the returned stop
+ * function is called. Posting a message also clears it on Discord's side.
+ *
+ * @returns {() => void}
+ */
+function _keepTyping(channel) {
+	const send = () => Promise.resolve(channel.sendTyping?.()).catch(() => {});
+	send();
+	const interval = setInterval(send, TYPING_REFRESH_MS);
+	interval.unref?.();
+	return () => clearInterval(interval);
+}
+
+function _replyTo(message, content) {
+	return message.reply({ content, allowedMentions: { parse: [], repliedUser: false } }).catch(() => {});
+}
+
+/**
  * Send the unanalysed messages (plus some context) to the model and post a
  * suggestion card for each decision it finds.
+ *
+ * @param {string} channelId
+ * @param {object} [options]
+ * @param {import('discord.js').Message} [options.trigger] - Message that
+ *   mentioned the bot. Shows "typing..." during the call and always replies,
+ *   even when nothing is found or the model call fails.
  */
-async function _analyze(channelId) {
+async function _analyze(channelId, { trigger = null } = {}) {
 	const state = channels.get(channelId);
 	if (!state) {
 		return;
 	}
 	if (state.running) {
-		_schedule(channelId, state);
+		// Run the mention right after the current pass instead of waiting for
+		// the channel to go quiet again.
+		if (trigger) {
+			state.pendingTrigger = trigger;
+		} else {
+			_schedule(channelId, state);
+		}
 		return;
 	}
 
 	const fresh = state.messages.filter(m => !m.analyzed);
 	if (fresh.length === 0) {
+		if (trigger) {
+			await _replyTo(trigger, '🤔 Nothing new to look at here.');
+		}
 		return;
 	}
 	const context = state.messages.filter(m => m.analyzed).slice(-CONTEXT_MESSAGES);
@@ -160,6 +208,7 @@ async function _analyze(channelId) {
 	for (const m of fresh) {
 		m.analyzed = true;
 	}
+	const stopTyping = trigger ? _keepTyping(state.channel) : () => {};
 
 	try {
 		let reply;
@@ -169,12 +218,13 @@ async function _analyze(channelId) {
 					context,
 					fresh,
 					people: state.people,
-					proposedTitles: suggestionRepository.recentTitles(channelId)
+					proposedTitles: suggestionRepository.recentTitles(channelId),
+					botId: trigger ? trigger.client.user.id : null
 				}),
 				json: true,
-				// Spotting decisions in chat does not need deep reasoning; low
-				// thinking keeps replies fast and cheap.
-				thinking: 'low'
+				// Spotting decisions in chat does not need deep reasoning; low effort
+				// keeps replies fast and cheap.
+				reasoningEffort: 'low'
 			});
 		} catch (error) {
 			// Put the messages back so the next pass (triggered by the next
@@ -183,6 +233,10 @@ async function _analyze(channelId) {
 			// polled in a loop.
 			for (const m of fresh) {
 				m.analyzed = false;
+			}
+			if (trigger) {
+				stopTyping();
+				await _replyTo(trigger, `❌ I couldn't get an answer from the language model. ${error.message}`);
 			}
 			throw error;
 		}
@@ -203,9 +257,19 @@ async function _analyze(channelId) {
 		}
 		if (posted > 0) {
 			suggestLog.info(`Posted ${posted} task suggestion(s) in channel ${channelId}`);
+		} else if (trigger) {
+			await _replyTo(trigger, "🤔 I didn't find a new decision to set a reminder for.");
 		}
 	} finally {
+		stopTyping();
 		state.running = false;
+		if (state.pendingTrigger) {
+			const next = state.pendingTrigger;
+			state.pendingTrigger = null;
+			_analyze(channelId, { trigger: next }).catch(err =>
+				suggestLog.error(`Analysis failed for channel ${channelId}: ${err.message}`)
+			);
+		}
 	}
 }
 
@@ -214,7 +278,7 @@ async function _analyze(channelId) {
  *
  * @returns {Array<{role: string, content: string}>}
  */
-function _buildPrompt({ context, fresh, people, proposedTitles, now = DateTime.now() }) {
+function _buildPrompt({ context, fresh, people, proposedTitles, botId = null, now = DateTime.now() }) {
 	const local = now.setZone(TIMEZONE);
 	const fmt = m => {
 		const at = DateTime.fromMillis(m.createdAt).setZone(TIMEZONE).toFormat('yyyy-MM-dd HH:mm');
@@ -231,7 +295,13 @@ function _buildPrompt({ context, fresh, people, proposedTitles, now = DateTime.n
 		'{"proposals":[{"title":"short imperative, max 80 chars","description":"one or two sentences of context, or empty","assignee_id":"Discord user id from the participants list, or null if unclear","deadline":"YYYY-MM-DD HH:mm in the given local time, or null if no time frame was mentioned","source_message_id":"id of the NEW message where it was decided","confidence":0.0}]}',
 		'Resolve relative dates ("besok", "next Friday", "end of the month") against the current local time. When only a day is given, use 23:59 that day.',
 		'Return {"proposals":[]} when there is nothing to suggest.'
-	].join('\n');
+	];
+	if (botId) {
+		system.push(
+			`You were mentioned directly as <@${botId}>: someone is asking you to look for tasks now. Treat an explicit request such as "remind us to X by Y" as a decision, and use the mentioning message as source_message_id when the request is made there.`
+		);
+	}
+	const systemText = system.join('\n');
 
 	const participants = [...people].map(([id, name]) => `- ${name} (${id})`).join('\n');
 	const user = [
@@ -250,7 +320,7 @@ function _buildPrompt({ context, fresh, people, proposedTitles, now = DateTime.n
 	].join('\n');
 
 	return [
-		{ role: 'system', content: system },
+		{ role: 'system', content: systemText },
 		{ role: 'user', content: user }
 	];
 }
@@ -479,6 +549,7 @@ module.exports = {
 	buildProposalEmbed,
 	buildProposalButtons,
 	_analyze,
+	_keepTyping,
 	_buildPrompt,
 	_normalizeProposals,
 	_postProposal,

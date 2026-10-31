@@ -543,6 +543,11 @@ reply with a suggestion card offering to create a task with reminders.
 - Messages are buffered per channel. After 60 seconds of quiet (and at most
   once every 2 minutes per channel) the new messages, plus a few earlier ones
   for context, are sent to an OpenAI-compatible model.
+- Mentioning the bot (`@ctfbot remind us to ...`) skips the wait: it analyses
+  right away, shows "typing..." until the model answers, and always replies,
+  even when it finds nothing or the model call fails.
+- Requests ask for `reasoning_effort: "low"`, which OpenAI and DeepSeek both
+  read; decision spotting does not need deep reasoning.
 - Each firm decision becomes a card with **Create task**, **Edit & create**
   (pre-filled form: title, assignee, deadline, description) and **Dismiss**.
   Nothing is created until someone clicks.

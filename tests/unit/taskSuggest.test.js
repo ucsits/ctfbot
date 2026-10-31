@@ -182,10 +182,149 @@ describe('taskSuggest._analyze', () => {
 		await taskSuggest._analyze('c1');
 		const body = JSON.parse(globalThis.fetch.mock.calls[0][1].body);
 		expect(body.messages[1].content).toContain('id=m1');
-		expect(body.thinking).toBe('low');
+		expect(body.reasoning_effort).toBe('low');
 
 		taskSuggest._reset();
 		vi.useRealTimers();
+	});
+});
+
+describe('taskSuggest direct mentions', () => {
+	const originalEnv = { ...process.env };
+	const originalFetch = globalThis.fetch;
+	const BOT_ID = 'bot-1';
+	let taskSuggest;
+	let constants;
+	let channel;
+	let n = 0;
+
+	const llmReply = content => ({
+		ok: true,
+		json: () => Promise.resolve({ choices: [{ message: { content } }] })
+	});
+
+	const makeMessage = ({ id, content, mentionBot = false }) => {
+		const users = new Map(mentionBot ? [[BOT_ID, { id: BOT_ID, bot: true, username: 'ctfbot' }]] : []);
+		return {
+			id,
+			channelId: channel.id,
+			channel,
+			guild: {},
+			client: { user: { id: BOT_ID } },
+			author: { id: 'u1', bot: false, username: 'alice' },
+			member: { displayName: 'Alice' },
+			mentions: { users, members: new Map() },
+			content,
+			createdTimestamp: Date.now(),
+			reply: vi.fn().mockResolvedValue({ id: `reply-${id}` })
+		};
+	};
+
+	beforeEach(async () => {
+		vi.resetModules();
+		process.env.TASK_SUGGESTIONS_ENABLED = 'true';
+		process.env.OPENAI_API_KEY = 'sk-test';
+		process.env.OPENAI_MODEL = 'test-model';
+		taskSuggest = await import('../../src/services/taskSuggest.js');
+		constants = (await import('../../src/lib/constants/config.js')).default;
+		taskSuggest._reset();
+		n++;
+		channel = {
+			id: `mention-chan-${n}`,
+			parentId: constants.GOVERNANCE_CATEGORIES[0],
+			sendTyping: vi.fn().mockResolvedValue(undefined),
+			messages: { fetch: vi.fn().mockResolvedValue(null) },
+			send: vi.fn().mockResolvedValue({ id: `card-${n}` })
+		};
+	});
+
+	afterEach(() => {
+		taskSuggest._reset();
+		vi.useRealTimers();
+		process.env = { ...originalEnv };
+		globalThis.fetch = originalFetch;
+	});
+
+	it('waits for the discussion to end when the bot is not mentioned', () => {
+		vi.useFakeTimers();
+		globalThis.fetch = vi.fn().mockResolvedValue(llmReply('{"proposals":[]}'));
+		taskSuggest.observe(makeMessage({ id: 'm1', content: 'we will book the venue friday' }));
+		expect(globalThis.fetch).not.toHaveBeenCalled();
+		expect(channel.sendTyping).not.toHaveBeenCalled();
+	});
+
+	it('analyses immediately on a mention and keeps "typing..." up while the model thinks', async () => {
+		vi.useFakeTimers();
+		let resolveLlm;
+		globalThis.fetch = vi.fn(() => new Promise(resolve => (resolveLlm = resolve)));
+		const deadline = DateTime.now().setZone('Asia/Jakarta').plus({ days: 2 }).toFormat('yyyy-MM-dd HH:mm');
+
+		const message = makeMessage({ id: 'm1', content: '<@bot-1> remind us to submit the report', mentionBot: true });
+		taskSuggest.observe(message);
+
+		expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+		expect(channel.sendTyping).toHaveBeenCalledTimes(1);
+
+		// A reasoning model taking 20s still shows the indicator throughout.
+		await vi.advanceTimersByTimeAsync(20_000);
+		expect(channel.sendTyping).toHaveBeenCalledTimes(3);
+
+		const body = JSON.parse(globalThis.fetch.mock.calls[0][1].body);
+		expect(body.messages[0].content).toContain('You were mentioned directly as <@bot-1>');
+
+		resolveLlm(
+			llmReply(
+				JSON.stringify({
+					proposals: [{ title: 'Submit the report', deadline, source_message_id: 'm1', confidence: 0.9 }]
+				})
+			)
+		);
+		await vi.waitFor(() => expect(channel.send).toHaveBeenCalledTimes(1));
+
+		// Typing stops once the answer is posted.
+		await vi.advanceTimersByTimeAsync(30_000);
+		expect(channel.sendTyping).toHaveBeenCalledTimes(3);
+		expect(message.reply).not.toHaveBeenCalled();
+	});
+
+	it('answers the mention when no decision is found', async () => {
+		globalThis.fetch = vi.fn().mockResolvedValue(llmReply('{"proposals":[]}'));
+		const message = makeMessage({ id: 'm1', content: '<@bot-1> anything to note?', mentionBot: true });
+		taskSuggest.observe(message);
+
+		await vi.waitFor(() => expect(message.reply).toHaveBeenCalledTimes(1));
+		expect(message.reply.mock.calls[0][0].content).toContain("didn't find a new decision");
+		expect(channel.send).not.toHaveBeenCalled();
+	});
+
+	it('answers the mention with the error when the model call fails', async () => {
+		globalThis.fetch = vi.fn().mockRejectedValue(Object.assign(new Error('aborted'), { name: 'TimeoutError' }));
+		const message = makeMessage({ id: 'm1', content: '<@bot-1> check this', mentionBot: true });
+		taskSuggest.observe(message);
+
+		await vi.waitFor(() => expect(message.reply).toHaveBeenCalledTimes(1));
+		expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+		expect(message.reply.mock.calls[0][0].content).toContain("couldn't get an answer from the language model");
+		expect(message.reply.mock.calls[0][0].content).toContain('within 300s');
+	});
+
+	it('runs a mention that arrives mid-pass right after the current pass', async () => {
+		let resolveFirst;
+		globalThis.fetch = vi
+			.fn()
+			.mockImplementationOnce(() => new Promise(resolve => (resolveFirst = resolve)))
+			.mockResolvedValue(llmReply('{"proposals":[]}'));
+
+		taskSuggest.observe(makeMessage({ id: 'm1', content: '<@bot-1> look', mentionBot: true }));
+		const second = makeMessage({ id: 'm2', content: '<@bot-1> and this', mentionBot: true });
+		taskSuggest.observe(second);
+		expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+
+		resolveFirst(llmReply('{"proposals":[]}'));
+		await vi.waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(2));
+		const body = JSON.parse(globalThis.fetch.mock.calls[1][1].body);
+		expect(body.messages[1].content).toContain('id=m2');
+		await vi.waitFor(() => expect(second.reply).toHaveBeenCalledTimes(1));
 	});
 });
 
@@ -315,18 +454,21 @@ describe('lib/llm/openai', () => {
 		const body = JSON.parse(init.body);
 		expect(body.model).toBe('test-model');
 		expect(body.response_format).toEqual({ type: 'json_object' });
+		expect(body).not.toHaveProperty('reasoning_effort');
 		expect(body).not.toHaveProperty('thinking');
 	});
 
-	it('sends the thinking level only when one is given', async () => {
+	it('sends reasoning_effort only when one is given', async () => {
 		globalThis.fetch = vi.fn().mockResolvedValue({
 			ok: true,
 			json: () => Promise.resolve({ choices: [{ message: { content: '{}' } }] })
 		});
 		const { chatCompletion } = await import('../../src/lib/llm/openai.js');
 
-		await chatCompletion({ messages: [], thinking: 'low' });
-		expect(JSON.parse(globalThis.fetch.mock.calls[0][1].body).thinking).toBe('low');
+		await chatCompletion({ messages: [], reasoningEffort: 'low' });
+		const body = JSON.parse(globalThis.fetch.mock.calls[0][1].body);
+		expect(body.reasoning_effort).toBe('low');
+		expect(body).not.toHaveProperty('thinking');
 	});
 
 	it('throws on a non-2xx response', async () => {
