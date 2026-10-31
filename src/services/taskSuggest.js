@@ -55,8 +55,6 @@ const MAX_LANGUAGE_CHARS = 30;
 // The model answers a mention with a few short chat messages, sent one by one.
 const MAX_CHAT_MESSAGES = 3;
 const MAX_CHAT_CHARS = 1000;
-// Sent as a reply the moment the bot is mentioned, before the model answers.
-const ACK_MESSAGES = ['wait', 'bentar', 'bentar ya', 'sek', 'otw cek', 'okee wait'];
 const MEMORY_REACTION = '🧠';
 // Discord shows "typing..." for about 10s per call, so refresh it before then.
 const TYPING_REFRESH_MS = 8_000;
@@ -155,7 +153,6 @@ function observe(message) {
 		_analyze(message.channelId, { trigger: message }).catch(err =>
 			suggestLog.error(`Analysis failed for channel ${message.channelId}: ${err.message}`)
 		);
-		_acknowledge(message, state);
 		return;
 	}
 	_schedule(message.channelId, state);
@@ -202,24 +199,17 @@ function _keepTyping(channel) {
 }
 
 /**
- * Answer a mention right away with a short "wait", like a friend would,
- * then put "typing..." back up, since posting a message clears it.
+ * Post the model's chat messages one by one: the first (a quick
+ * acknowledgment) as a reply to the mention, the rest as plain messages so
+ * they read like a conversation.
  */
-async function _acknowledge(message, state) {
-	const ack = ACK_MESSAGES[Math.floor(Math.random() * ACK_MESSAGES.length)];
-	await _replyTo(message, ack);
-	if (state.running || state.pendingTrigger) {
-		await Promise.resolve(state.channel.sendTyping?.()).catch(() => {});
-	}
-}
-
-/**
- * Post chat messages one by one, not as replies, so they read like a
- * conversation.
- */
-async function _sendChat(channel, messages) {
-	for (const content of messages) {
-		await channel.send({ content, allowedMentions: { parse: [] } }).catch(() => {});
+async function _sendChat(channel, messages, trigger) {
+	for (const [i, content] of messages.entries()) {
+		if (i === 0) {
+			await _replyTo(trigger, content);
+		} else {
+			await channel.send({ content, allowedMentions: { parse: [] } }).catch(() => {});
+		}
 	}
 }
 
@@ -340,7 +330,7 @@ async function _analyze(channelId, { trigger = null } = {}) {
 		// For a mention the model's chat messages come first and the cards
 		// follow them in the channel, like "oke ini ya" and then the card.
 		const chat = trigger ? _chatMessages(parsed) : [];
-		await _sendChat(state.channel, chat);
+		await _sendChat(state.channel, chat, trigger);
 
 		let updated = 0;
 		for (const u of updates) {
@@ -482,7 +472,7 @@ function _buildPrompt({
 	];
 	if (botId) {
 		system.push(
-			`You were mentioned directly as <@${botId}>: someone is asking you to look for tasks now. Treat an explicit request such as "remind us to X by Y" as a decision, and use the mentioning message as source_message_id when the request is made there. You already replied "wait" (or similar), so do not say it again. Also add "messages" to the JSON object: one to three short chat messages to the person who mentioned you, each sent as its own Discord message, like texting a friend. Any suggestion card is posted right after your messages, so a card needs only something short like "oke ini ya". Say what you suggested, changed or remembered, or why there was nothing to do, and answer questions about what you remember from the memory list. Example: "brooooo @bot minta tolong buatin task ABC deadlinenya besok jam 12 malam" → {"proposals":[{"title":"ABC",...}],"messages":["oke ini ya"]}.`
+			`You were mentioned directly as <@${botId}>: someone is asking you to look for tasks now. Treat an explicit request such as "remind us to X by Y" as a decision, and use the mentioning message as source_message_id when the request is made there. Also add "messages" to the JSON object: one to three short chat messages to the person who mentioned you, each sent as its own Discord message, like texting a friend. The first message is sent as a reply to them and must be a quick acknowledgment of a few words that fits what they said: "wait" or "oke bentar" for a request, a short reaction like "ohh itu" or "hmm" for a question. Put the actual answer in the next message(s). Any suggestion card is posted right after your messages, so a card needs only something short like "oke ini ya". Say what you suggested, changed or remembered, or why there was nothing to do, and answer questions about what you remember from the memory list. Example: "brooooo @bot minta tolong buatin task ABC deadlinenya besok jam 12 malam" → {"proposals":[{"title":"ABC",...}],"messages":["wait","oke ini ya"]}. "<@bot> deadline inaff kapan sih?" → {"proposals":[],"messages":["hmm bentar","jumat jam 23:59, masih aman kok"]}.`
 		);
 	}
 	const systemText = system.join('\n');
@@ -974,7 +964,6 @@ function _reset() {
 
 module.exports = {
 	SUGGEST_IDS,
-	ACK_MESSAGES,
 	TIMEZONE,
 	isEnabled,
 	observe,

@@ -580,10 +580,11 @@ reply with a suggestion card offering to create a task with reminders.
 - The model is told to chat like a classmate in the group chat, in everyday
   Indonesian slang, with its humor setting at 30% (TARS from Interstellar):
   mostly to the point, with the odd deadpan one-liner.
-- When mentioned, the bot replies "wait" (or similar) right away, keeps
-  "typing..." up, then posts the model's one to three short chat messages
-  and any cards as plain channel messages, e.g. "oke ini ya" and then the
-  card.
+- When mentioned, the bot shows "typing..." while the model thinks, then
+  sends one to three short chat messages: the first is a quick
+  acknowledgment that fits the message ("wait" for a request, "hmm" for a
+  question) sent as a reply, the rest and any cards follow as plain channel
+  messages, e.g. "wait", "oke ini ya", then the card.
 - `/memory view` shows what the bot remembers about you (Manage Messages can
   view others). `/memory remember`, `/memory forget <number>`,
   `/memory language` and `/memory clear` edit or delete it.
