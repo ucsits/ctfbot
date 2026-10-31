@@ -52,7 +52,11 @@ const MIN_CONFIDENCE = 0.7;
 const MAX_MEMORY_CHANGES_PER_PASS = 5;
 const MAX_NOTE_CHARS = 200;
 const MAX_LANGUAGE_CHARS = 30;
-const MAX_REPLY_CHARS = 1500;
+// The model answers a mention with a few short chat messages, sent one by one.
+const MAX_CHAT_MESSAGES = 3;
+const MAX_CHAT_CHARS = 1000;
+// Sent as a reply the moment the bot is mentioned, before the model answers.
+const ACK_MESSAGES = ['wait', 'bentar', 'bentar ya', 'sek', 'otw cek', 'okee wait'];
 const MEMORY_REACTION = '🧠';
 // Discord shows "typing..." for about 10s per call, so refresh it before then.
 const TYPING_REFRESH_MS = 8_000;
@@ -151,6 +155,7 @@ function observe(message) {
 		_analyze(message.channelId, { trigger: message }).catch(err =>
 			suggestLog.error(`Analysis failed for channel ${message.channelId}: ${err.message}`)
 		);
+		_acknowledge(message, state);
 		return;
 	}
 	_schedule(message.channelId, state);
@@ -196,6 +201,43 @@ function _keepTyping(channel) {
 	return () => clearInterval(interval);
 }
 
+/**
+ * Answer a mention right away with a short "wait", like a friend would,
+ * then put "typing..." back up, since posting a message clears it.
+ */
+async function _acknowledge(message, state) {
+	const ack = ACK_MESSAGES[Math.floor(Math.random() * ACK_MESSAGES.length)];
+	await _replyTo(message, ack);
+	if (state.running || state.pendingTrigger) {
+		await Promise.resolve(state.channel.sendTyping?.()).catch(() => {});
+	}
+}
+
+/**
+ * Post chat messages one by one, not as replies, so they read like a
+ * conversation.
+ */
+async function _sendChat(channel, messages) {
+	for (const content of messages) {
+		await channel.send({ content, allowedMentions: { parse: [] } }).catch(() => {});
+	}
+}
+
+/**
+ * The model's chat messages for a mention: "messages" (an array), or an
+ * older-style single "reply" string.
+ *
+ * @returns {string[]}
+ */
+function _chatMessages(parsed) {
+	const raw = Array.isArray(parsed?.messages) ? parsed.messages : [parsed?.reply];
+	return raw
+		.filter(m => typeof m === 'string')
+		.map(m => m.trim().slice(0, MAX_CHAT_CHARS))
+		.filter(Boolean)
+		.slice(0, MAX_CHAT_MESSAGES);
+}
+
 function _replyTo(message, content) {
 	return message.reply({ content, allowedMentions: { parse: [], repliedUser: false } }).catch(() => {});
 }
@@ -235,7 +277,7 @@ async function _analyze(channelId, { trigger = null } = {}) {
 	const fresh = state.messages.filter(m => !m.analyzed);
 	if (fresh.length === 0) {
 		if (trigger) {
-			await _replyTo(trigger, '🤔 Nothing new to look at here.');
+			await _replyTo(trigger, 'hmm belum ada chat baru buat aku cek nih');
 		}
 		return;
 	}
@@ -279,7 +321,7 @@ async function _analyze(channelId, { trigger = null } = {}) {
 			}
 			if (trigger) {
 				stopTyping();
-				await _replyTo(trigger, `❌ I couldn't get an answer from the language model. ${error.message}`);
+				await _replyTo(trigger, `❌ duh, otakku (model AI-nya) lagi nggak nyaut. ${error.message}`);
 			}
 			throw error;
 		}
@@ -295,6 +337,11 @@ async function _analyze(channelId, { trigger = null } = {}) {
 
 		const updates = _normalizeUpdates(parsed, { fresh, people: state.people, open });
 
+		// For a mention the model's chat messages come first and the cards
+		// follow them in the channel, like "oke ini ya" and then the card.
+		const chat = trigger ? _chatMessages(parsed) : [];
+		await _sendChat(state.channel, chat);
+
 		let updated = 0;
 		for (const u of updates) {
 			if (await _applyUpdate(state.channel, u)) {
@@ -303,7 +350,7 @@ async function _analyze(channelId, { trigger = null } = {}) {
 		}
 		let posted = 0;
 		for (const p of found) {
-			if (await _postProposal(state.channel, p)) {
+			if (await _postProposal(state.channel, p, { reply: !trigger })) {
 				posted++;
 			}
 		}
@@ -316,15 +363,11 @@ async function _analyze(channelId, { trigger = null } = {}) {
 				`Posted ${posted}, updated ${updated} task suggestion(s) and saved ${learned} memory change(s) in channel ${channelId}`
 			);
 		}
-		if (trigger) {
-			// The model writes the answer to a mention, in the person's language.
-			const answer = typeof parsed?.reply === 'string' ? parsed.reply.trim().slice(0, MAX_REPLY_CHARS) : '';
-			if (answer) {
-				await _replyTo(trigger, answer);
-			} else if (posted === 0 && updated === 0 && learned === 0) {
+		if (trigger && chat.length === 0) {
+			if (posted === 0 && updated === 0 && learned === 0) {
 				await _replyTo(
 					trigger,
-					"🤔 I didn't find a new decision, or a change to an open suggestion, to act on."
+					'hmm aku nggak nemu keputusan baru atau perubahan buat saran yang masih kebuka nih'
 				);
 			}
 		}
@@ -427,17 +470,19 @@ function _buildPrompt({
 		'Earlier messages are context: use them to understand what the NEW messages refer to, but only act on what the NEW messages say. Do not repeat anything listed as already suggested.',
 		'When a NEW message changes or corrects an OPEN suggestion (a different day, person, title or detail), put it in "updates" with that suggestion_id instead of adding a new proposal. Only include the fields that change.',
 		'Messages may be in Indonesian, English or a mix. Write every title, description, note and reply in Indonesian (Bahasa Indonesia) by default, even when the messages are in English. Use another language only for a person whose memory sets one: the assignee for a task, the person who mentioned you for the reply.',
-		'Gaya bicara: santai dan akrab, kayak teman satu tim yang ngobrol di Discord, bukan customer service. Pakai bahasa Indonesia sehari-hari: "aku/kamu", kalimat pendek, kata-kata kayak "oke", "sip", "siap", "nih", "ya", "deh", "kok", "udah", "nggak", "aja", dan boleh satu emoji kalau pas. Hindari bahasa baku yang kaku seperti "Baik, saya telah mencatat permintaan Anda" atau "Terima kasih atas informasinya"; contoh yang pas: "Sip, udah aku catat ya 👍" atau "Hmm, aku nggak nemu keputusan baru nih." Judul tugas tetap singkat dan jelas, misalnya "Kirim proposal sponsor". Kalau seseorang minta bahasa lain, tetap santai di bahasa itu.',
+		'Gaya bicara: kamu itu temen sekelas yang lagi chat di grup Discord, bukan orang kantor dan bukan customer service. Ketik kayak orang nge-chat: pendek-pendek, huruf kecil boleh, bahasa gaul sehari-hari ("bro", "gas", "aman", "sip", "oke", "wkwk", "udah", "nggak", "aja", "nih", "dong", "sih"), sesekali emoji. Nggak usah basa-basi formal kayak "Baik, saya telah mencatat permintaan Anda" atau "Terima kasih atas informasinya". Jangan kasar.',
+		'Humor setting: 30%, kayak TARS di Interstellar. Kadang selipin satu celetukan kering yang deadpan, tapi kebanyakan langsung to the point dan jawabannya tetap jelas. Jangan maksa lucu di tiap pesan, dan jangan bercanda soal hal yang serius.',
+		'Judul tugas tetap singkat dan jelas, misalnya "Kirim proposal sponsor". Kalau seseorang minta bahasa lain, tetap santai kayak temen di bahasa itu.',
 		'You remember participants between conversations. Use what you remember to pick assignees and deadlines the way each person prefers.',
 		'In "memories", save lasting facts or preferences a NEW message states about its author or a teammate that will help with later tasks: role or responsibilities, usual availability, preferred reminder time, how they want to be addressed. Do not save one-off task details, anything already remembered, secrets or credentials, or sensitive personal data. When a NEW message says a remembered note is no longer true, "forget" it by note id (and "remember" the corrected one). Set "language" only when a person asks you to use a language with them.',
 		'Reply with a JSON object only:',
 		'{"proposals":[{"title":"short imperative, max 80 chars","description":"one or two sentences of context, or empty","assignee_id":"Discord user id from the participants list, or null if unclear","deadline":"YYYY-MM-DD HH:mm in the given local time, or null if no time frame was mentioned","source_message_id":"id of the NEW message where it was decided","confidence":0.0}],"updates":[{"suggestion_id":"id of the OPEN suggestion","title":"new title, or omit","description":"new description, or omit","assignee_id":"new assignee id, or omit","deadline":"new YYYY-MM-DD HH:mm, or omit","source_message_id":"id of the NEW message asking for the change"}],"memories":[{"user_id":"Discord user id the note is about","remember":"short note in the third person, max 200 chars, or omit","forget":"id of a remembered note that is no longer true, or omit","language":"language the person asked you to use with them, or omit","source_message_id":"id of the NEW message it came from"}]}',
-		'Resolve relative dates ("besok", "next Friday", "end of the month") against the current local time. When only a day is given, use the time the assignee prefers if you remember one, otherwise 23:59 that day.',
+		'Resolve relative dates ("besok", "next Friday", "end of the month") against the current local time. When only a day is given, use the time the assignee prefers if you remember one, otherwise 23:59 that day. "Jam 12 malam" on a day means the end of that day, so use 23:59 that day.',
 		'Return {"proposals":[],"updates":[],"memories":[]} when there is nothing to do.'
 	];
 	if (botId) {
 		system.push(
-			`You were mentioned directly as <@${botId}>: someone is asking you to look for tasks now. Treat an explicit request such as "remind us to X by Y" as a decision, and use the mentioning message as source_message_id when the request is made there. Also add "reply" to the JSON object: one to three sentences answering the person who mentioned you, saying what you suggested, changed or remembered, or why there was nothing to do. Answer questions about what you remember from the memory list.`
+			`You were mentioned directly as <@${botId}>: someone is asking you to look for tasks now. Treat an explicit request such as "remind us to X by Y" as a decision, and use the mentioning message as source_message_id when the request is made there. You already replied "wait" (or similar), so do not say it again. Also add "messages" to the JSON object: one to three short chat messages to the person who mentioned you, each sent as its own Discord message, like texting a friend. Any suggestion card is posted right after your messages, so a card needs only something short like "oke ini ya". Say what you suggested, changed or remembered, or why there was nothing to do, and answer questions about what you remember from the memory list. Example: "brooooo @bot minta tolong buatin task ABC deadlinenya besok jam 12 malam" → {"proposals":[{"title":"ABC",...}],"messages":["oke ini ya"]}.`
 		);
 	}
 	const systemText = system.join('\n');
@@ -714,12 +759,14 @@ async function _applyUpdate(channel, { id, changes, sourceMessageId }) {
 }
 
 /**
- * Store a suggestion and post its card. Returns false when the decision was
+ * Store a suggestion and post its card, as a reply to the message where it
+ * was decided unless `reply` is false (after a mention, the card follows the
+ * bot's own chat messages instead). Returns false when the decision was
  * already suggested (e.g. before a restart) and nothing was posted.
  *
  * @returns {Promise<boolean>}
  */
-async function _postProposal(channel, found) {
+async function _postProposal(channel, found, { reply = true } = {}) {
 	const proposal = { ...found, id: randomUUID() };
 	const inserted = suggestionRepository.createSuggestion({
 		id: proposal.id,
@@ -740,7 +787,7 @@ async function _postProposal(channel, found) {
 		allowedMentions: { parse: [], repliedUser: false }
 	};
 	try {
-		const source = await channel.messages.fetch(proposal.sourceMessageId).catch(() => null);
+		const source = reply ? await channel.messages.fetch(proposal.sourceMessageId).catch(() => null) : null;
 		const card = await (source ? source.reply(payload) : channel.send(payload));
 		suggestionRepository.setCardMessage(proposal.id, card.id);
 	} catch (error) {
@@ -927,6 +974,7 @@ function _reset() {
 
 module.exports = {
 	SUGGEST_IDS,
+	ACK_MESSAGES,
 	TIMEZONE,
 	isEnabled,
 	observe,

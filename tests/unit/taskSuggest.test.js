@@ -266,11 +266,15 @@ describe('taskSuggest direct mentions', () => {
 		// Only the history read sits between the mention and the model call.
 		await vi.advanceTimersByTimeAsync(0);
 		expect(globalThis.fetch).toHaveBeenCalledTimes(1);
-		expect(channel.sendTyping).toHaveBeenCalledTimes(1);
+		expect(channel.sendTyping).toHaveBeenCalled();
+		// The quick "wait" reply goes out right away, and typing comes back after it.
+		expect(message.reply).toHaveBeenCalledTimes(1);
+		expect(taskSuggest.ACK_MESSAGES).toContain(message.reply.mock.calls[0][0].content);
 
 		// A reasoning model taking 20s still shows the indicator throughout.
+		const before = channel.sendTyping.mock.calls.length;
 		await vi.advanceTimersByTimeAsync(20_000);
-		expect(channel.sendTyping).toHaveBeenCalledTimes(3);
+		expect(channel.sendTyping).toHaveBeenCalledTimes(before + 2);
 
 		const body = JSON.parse(globalThis.fetch.mock.calls[0][1].body);
 		expect(body.messages[0].content).toContain('You were mentioned directly as <@bot-1>');
@@ -285,9 +289,10 @@ describe('taskSuggest direct mentions', () => {
 		await vi.waitFor(() => expect(channel.send).toHaveBeenCalledTimes(1));
 
 		// Typing stops once the answer is posted.
+		const after = channel.sendTyping.mock.calls.length;
 		await vi.advanceTimersByTimeAsync(30_000);
-		expect(channel.sendTyping).toHaveBeenCalledTimes(3);
-		expect(message.reply).not.toHaveBeenCalled();
+		expect(channel.sendTyping).toHaveBeenCalledTimes(after);
+		expect(message.reply).toHaveBeenCalledTimes(1);
 	});
 
 	it('answers the mention when no decision is found', async () => {
@@ -295,8 +300,8 @@ describe('taskSuggest direct mentions', () => {
 		const message = makeMessage({ id: 'm1', content: '<@bot-1> anything to note?', mentionBot: true });
 		taskSuggest.observe(message);
 
-		await vi.waitFor(() => expect(message.reply).toHaveBeenCalledTimes(1));
-		expect(message.reply.mock.calls[0][0].content).toContain("didn't find a new decision");
+		await vi.waitFor(() => expect(message.reply).toHaveBeenCalledTimes(2));
+		expect(message.reply.mock.calls[1][0].content).toContain('nggak nemu keputusan baru');
 		expect(channel.send).not.toHaveBeenCalled();
 	});
 
@@ -305,10 +310,11 @@ describe('taskSuggest direct mentions', () => {
 		const message = makeMessage({ id: 'm1', content: '<@bot-1> check this', mentionBot: true });
 		taskSuggest.observe(message);
 
-		await vi.waitFor(() => expect(message.reply).toHaveBeenCalledTimes(1));
+		await vi.waitFor(() => expect(message.reply).toHaveBeenCalledTimes(2));
 		expect(globalThis.fetch).toHaveBeenCalledTimes(1);
-		expect(message.reply.mock.calls[0][0].content).toContain("couldn't get an answer from the language model");
-		expect(message.reply.mock.calls[0][0].content).toContain('within 300s');
+		const error = message.reply.mock.calls.map(c => c[0].content).find(c => c.startsWith('❌'));
+		expect(error).toContain('lagi nggak nyaut');
+		expect(error).toContain('within 300s');
 	});
 
 	it('runs a mention that arrives mid-pass right after the current pass', async () => {
@@ -327,7 +333,7 @@ describe('taskSuggest direct mentions', () => {
 		await vi.waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(2));
 		const body = JSON.parse(globalThis.fetch.mock.calls[1][1].body);
 		expect(body.messages[1].content).toContain('id=m2');
-		await vi.waitFor(() => expect(second.reply).toHaveBeenCalledTimes(1));
+		await vi.waitFor(() => expect(second.reply).toHaveBeenCalledTimes(2));
 	});
 
 	it('shows "typing..." right away when a mention has to wait for a background pass', async () => {
@@ -347,11 +353,13 @@ describe('taskSuggest direct mentions', () => {
 		const mention = makeMessage({ id: 'm2', content: '<@bot-1> tolong cek', mentionBot: true });
 		taskSuggest.observe(mention);
 		expect(channel.sendTyping).toHaveBeenCalledTimes(1);
+		await vi.advanceTimersByTimeAsync(0);
+		const queued = channel.sendTyping.mock.calls.length;
 		await vi.advanceTimersByTimeAsync(20_000);
-		expect(channel.sendTyping).toHaveBeenCalledTimes(3);
+		expect(channel.sendTyping).toHaveBeenCalledTimes(queued + 2);
 
 		resolveFirst(llmReply('{"proposals":[]}'));
-		await vi.waitFor(() => expect(mention.reply).toHaveBeenCalledTimes(1));
+		await vi.waitFor(() => expect(mention.reply).toHaveBeenCalledTimes(2));
 		expect(globalThis.fetch).toHaveBeenCalledTimes(2);
 
 		// Neither the queued indicator nor the mention's own pass keeps typing.
@@ -378,11 +386,52 @@ describe('taskSuggest direct mentions', () => {
 		taskSuggest.observe(withRole('m2', '<@&bot-role> tolong cek', { id: 'bot-role', tags: { botId: BOT_ID } }));
 		await vi.advanceTimersByTimeAsync(0);
 		expect(globalThis.fetch).toHaveBeenCalledTimes(1);
-		expect(channel.sendTyping).toHaveBeenCalledTimes(1);
+		expect(channel.sendTyping).toHaveBeenCalled();
 
 		const body = JSON.parse(globalThis.fetch.mock.calls[0][1].body);
 		expect(body.messages[1].content).toContain('<@bot-1> tolong cek');
 		expect(body.messages[0].content).toContain('You were mentioned directly as <@bot-1>');
+	});
+
+	it('chats like the example: quick "wait" reply, then short messages, then the card, not threaded', async () => {
+		const deadline = DateTime.now().setZone('Asia/Jakarta').plus({ days: 1 }).set({ hour: 23, minute: 59 });
+		const order = [];
+		channel.send = vi.fn(payload => {
+			order.push(payload.embeds ? 'card' : payload.content);
+			return Promise.resolve({ id: `sent-${order.length}` });
+		});
+		globalThis.fetch = vi.fn().mockResolvedValue(
+			llmReply(
+				JSON.stringify({
+					proposals: [
+						{
+							title: 'ABC',
+							deadline: deadline.toFormat('yyyy-MM-dd HH:mm'),
+							source_message_id: 'm1',
+							confidence: 0.9
+						}
+					],
+					messages: ['oke ini ya']
+				})
+			)
+		);
+		const message = makeMessage({
+			id: 'm1',
+			content: 'brooooo <@bot-1> minta tolong buatin task ABC deadlinenya besok jam 12 malam',
+			mentionBot: true
+		});
+		message.reply = vi.fn(payload => {
+			order.push(`reply:${payload.content}`);
+			return Promise.resolve({});
+		});
+
+		taskSuggest.observe(message);
+		await vi.waitFor(() => expect(order).toHaveLength(3));
+
+		expect(order[0]).toMatch(/^reply:/);
+		expect(taskSuggest.ACK_MESSAGES).toContain(order[0].slice('reply:'.length));
+		expect(order.slice(1)).toEqual(['oke ini ya', 'card']);
+		expect(message.reply).toHaveBeenCalledTimes(1);
 	});
 });
 
@@ -506,7 +555,7 @@ describe('taskSuggest corrections to open suggestions', () => {
 		});
 
 		taskSuggest.observe(correction);
-		await vi.waitFor(() => expect(correction.reply).toHaveBeenCalledTimes(1));
+		await vi.waitFor(() => expect(correction.reply).toHaveBeenCalledTimes(2));
 
 		// The model saw the original message and the open card.
 		const prompt = JSON.parse(globalThis.fetch.mock.calls[0][1].body).messages[1].content;
@@ -520,7 +569,7 @@ describe('taskSuggest corrections to open suggestions', () => {
 		const edited = card.edit.mock.calls[0][0].embeds[0].toJSON();
 		expect(edited.fields.find(f => f.name === 'Deadline').value).toContain(`<t:${friday.toUnixInteger()}:F>`);
 
-		const reply = correction.reply.mock.calls[0][0].content;
+		const reply = correction.reply.mock.calls[1][0].content;
 		expect(reply).toContain('Updated the suggestion');
 		expect(reply).toContain(`deadline → <t:${friday.toUnixInteger()}:F>`);
 		expect(reply).toContain('https://discord.com/channels/g1/');
@@ -777,7 +826,7 @@ describe('actor memory', () => {
 			parentId: constants.GOVERNANCE_CATEGORIES[0],
 			sendTyping: vi.fn().mockResolvedValue(undefined),
 			messages: { fetch: vi.fn(arg => Promise.resolve(typeof arg === 'string' ? source : new Map())) },
-			send: vi.fn()
+			send: vi.fn().mockResolvedValue({})
 		};
 		const message = {
 			id: `msg-${n}`,
@@ -810,7 +859,9 @@ describe('actor memory', () => {
 											source_message_id: message.id
 										}
 									],
-									reply: "Got it, I'll remember you're usually free in the evening and use English with you."
+									messages: [
+										"Got it, I'll remember you're usually free in the evening and use English with you."
+									]
 								})
 							}
 						}
@@ -819,9 +870,9 @@ describe('actor memory', () => {
 		});
 
 		taskSuggest.observe(message);
-		await vi.waitFor(() => expect(message.reply).toHaveBeenCalledTimes(1));
+		await vi.waitFor(() => expect(channel.send).toHaveBeenCalledTimes(1));
 
-		expect(message.reply.mock.calls[0][0].content).toBe(
+		expect(channel.send.mock.calls[0][0].content).toBe(
 			"Got it, I'll remember you're usually free in the evening and use English with you."
 		);
 		expect(source.react).toHaveBeenCalledWith('🧠');
@@ -830,7 +881,7 @@ describe('actor memory', () => {
 
 		// A mention asks the model to write the reply itself.
 		const prompt = JSON.parse(globalThis.fetch.mock.calls[0][1].body).messages[0].content;
-		expect(prompt).toContain('Also add "reply"');
+		expect(prompt).toContain('Also add "messages"');
 	});
 });
 
@@ -1072,9 +1123,11 @@ describe('deleted messages', () => {
 		expect(suggestions.getSuggestion(`gone-${n}`)).toBeUndefined();
 	});
 
-	it('asks the model for a relaxed, everyday Indonesian tone', () => {
+	it('asks the model to chat like a classmate, with humor at 30%', () => {
 		const [system] = taskSuggest._buildPrompt({ context: [], fresh, people, proposedTitles: [] });
-		expect(system.content).toContain('Gaya bicara: santai dan akrab');
+		expect(system.content).toContain('temen sekelas');
+		expect(system.content).toContain('Humor setting: 30%, kayak TARS di Interstellar');
+		expect(system.content).toContain('"Jam 12 malam" on a day means the end of that day');
 	});
 });
 

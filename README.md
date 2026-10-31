@@ -577,8 +577,13 @@ reply with a suggestion card offering to create a task with reminders.
   longer thinks it suggested it, and notes learned from a deleted message
   are removed. Cards deleted while the bot was offline are dropped on the
   next pass. Cards that already became a task are kept.
-- The model is told to talk casually, like a teammate on Discord, in
-  everyday Indonesian ("Sip, udah aku catat ya 👍"), not formal Indonesian.
+- The model is told to chat like a classmate in the group chat, in everyday
+  Indonesian slang, with its humor setting at 30% (TARS from Interstellar):
+  mostly to the point, with the odd deadpan one-liner.
+- When mentioned, the bot replies "wait" (or similar) right away, keeps
+  "typing..." up, then posts the model's one to three short chat messages
+  and any cards as plain channel messages, e.g. "oke ini ya" and then the
+  card.
 - `/memory view` shows what the bot remembers about you (Manage Messages can
   view others). `/memory remember`, `/memory forget <number>`,
   `/memory language` and `/memory clear` edit or delete it.
