@@ -262,6 +262,8 @@ describe('taskSuggest direct mentions', () => {
 		const message = makeMessage({ id: 'm1', content: '<@bot-1> remind us to submit the report', mentionBot: true });
 		taskSuggest.observe(message);
 
+		// Only the history read sits between the mention and the model call.
+		await vi.advanceTimersByTimeAsync(0);
 		expect(globalThis.fetch).toHaveBeenCalledTimes(1);
 		expect(channel.sendTyping).toHaveBeenCalledTimes(1);
 
@@ -318,13 +320,205 @@ describe('taskSuggest direct mentions', () => {
 		taskSuggest.observe(makeMessage({ id: 'm1', content: '<@bot-1> look', mentionBot: true }));
 		const second = makeMessage({ id: 'm2', content: '<@bot-1> and this', mentionBot: true });
 		taskSuggest.observe(second);
-		expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+		await vi.waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(1));
 
 		resolveFirst(llmReply('{"proposals":[]}'));
 		await vi.waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(2));
 		const body = JSON.parse(globalThis.fetch.mock.calls[1][1].body);
 		expect(body.messages[1].content).toContain('id=m2');
 		await vi.waitFor(() => expect(second.reply).toHaveBeenCalledTimes(1));
+	});
+});
+
+describe('taskSuggest corrections to open suggestions', () => {
+	const originalEnv = { ...process.env };
+	const originalFetch = globalThis.fetch;
+	const BOT_ID = 'bot-1';
+	const zone = 'Asia/Jakarta';
+	let taskSuggest;
+	let repo;
+	let constants;
+	let n = 0;
+
+	beforeEach(async () => {
+		vi.resetModules();
+		process.env.TASK_SUGGESTIONS_ENABLED = 'true';
+		process.env.OPENAI_API_KEY = 'sk-test';
+		process.env.OPENAI_MODEL = 'test-model';
+		taskSuggest = await import('../../src/services/taskSuggest.js');
+		repo = await import('../../src/database/repositories/taskSuggestion.repository.js');
+		constants = (await import('../../src/lib/constants/config.js')).default;
+		taskSuggest._reset();
+		n++;
+	});
+
+	afterEach(() => {
+		taskSuggest._reset();
+		process.env = { ...originalEnv };
+		globalThis.fetch = originalFetch;
+	});
+
+	it('reads channel history after a restart and moves the open card to Friday', async () => {
+		const sunday = DateTime.now()
+			.setZone(zone)
+			.plus({ weeks: 1 })
+			.set({ weekday: 7, hour: 23, minute: 59, second: 0, millisecond: 0 });
+		const friday = sunday.minus({ days: 2 });
+		const channelId = `fix-chan-${n}`;
+
+		// The 1:15 message and the card posted for it, from before the restart.
+		const original = {
+			id: 'h1',
+			content: 'jangan lupa inaff minggu depan mabarctf jadi harus dicek ctf mana yang bagus',
+			author: { id: 'u1', bot: false, username: 'hanz' },
+			member: { displayName: 'Hanz' },
+			embeds: [],
+			createdTimestamp: Date.now() - 20 * 60_000
+		};
+		repo.createSuggestion({
+			id: `sug-${n}`,
+			channelId,
+			sourceMessageId: 'h1',
+			title: 'Cek CTF mana yang bagus untuk mabar CTF minggu depan',
+			description: null,
+			assigneeId: 'u1',
+			deadline: sunday.toUnixInteger()
+		});
+		repo.setCardMessage(`sug-${n}`, 'card-1');
+
+		const card = { edit: vi.fn().mockResolvedValue({}) };
+		const channel = {
+			id: channelId,
+			guildId: 'g1',
+			parentId: constants.GOVERNANCE_CATEGORIES[0],
+			sendTyping: vi.fn().mockResolvedValue(undefined),
+			send: vi.fn(),
+			messages: {
+				fetch: vi.fn(arg => {
+					if (typeof arg === 'object') {
+						return Promise.resolve(new Map([['h1', original]]));
+					}
+					return Promise.resolve(arg === 'card-1' ? card : null);
+				})
+			}
+		};
+		const correction = {
+			id: 'm2',
+			channelId,
+			channel,
+			guild: {},
+			client: { user: { id: BOT_ID } },
+			author: { id: 'u1', bot: false, username: 'hanz' },
+			member: { displayName: 'Hanz' },
+			mentions: { users: new Map([[BOT_ID, { id: BOT_ID, bot: true }]]), members: new Map() },
+			content:
+				'jangan di hari minggunya karena mabarctf tuh start hari sabtu. paling jadwalin hari jumat aja biar bagus bro <@bot-1>',
+			createdTimestamp: Date.now(),
+			reply: vi.fn().mockResolvedValue({})
+		};
+		channel.messages.fetch.mockImplementation(arg => {
+			if (typeof arg === 'object') {
+				return Promise.resolve(new Map([['h1', original]]));
+			}
+			if (arg === 'card-1') {
+				return Promise.resolve(card);
+			}
+			return Promise.resolve(arg === 'm2' ? correction : null);
+		});
+
+		globalThis.fetch = vi.fn().mockResolvedValue({
+			ok: true,
+			json: () =>
+				Promise.resolve({
+					choices: [
+						{
+							message: {
+								content: JSON.stringify({
+									proposals: [],
+									updates: [
+										{
+											suggestion_id: `sug-${n}`,
+											deadline: friday.toFormat('yyyy-MM-dd HH:mm'),
+											source_message_id: 'm2'
+										}
+									]
+								})
+							}
+						}
+					]
+				})
+		});
+
+		taskSuggest.observe(correction);
+		await vi.waitFor(() => expect(correction.reply).toHaveBeenCalledTimes(1));
+
+		// The model saw the original message and the open card.
+		const prompt = JSON.parse(globalThis.fetch.mock.calls[0][1].body).messages[1].content;
+		expect(prompt).toContain('id=h1');
+		expect(prompt).toContain('jangan lupa inaff minggu depan');
+		expect(prompt).toContain(`suggestion_id=sug-${n}`);
+		expect(prompt).toContain(sunday.toFormat('yyyy-MM-dd HH:mm cccc'));
+
+		// The card was edited in place and the stored deadline moved to Friday.
+		expect(repo.getSuggestion(`sug-${n}`).deadline).toBe(friday.toUnixInteger());
+		const edited = card.edit.mock.calls[0][0].embeds[0].toJSON();
+		expect(edited.fields.find(f => f.name === 'Deadline').value).toContain(`<t:${friday.toUnixInteger()}:F>`);
+
+		const reply = correction.reply.mock.calls[0][0].content;
+		expect(reply).toContain('Updated the suggestion');
+		expect(reply).toContain(`deadline → <t:${friday.toUnixInteger()}:F>`);
+		expect(reply).toContain('https://discord.com/channels/g1/');
+		expect(channel.send).not.toHaveBeenCalled();
+	});
+
+	it('drops updates for unknown suggestions, invalid values and no-op changes', () => {
+		const deadline = DateTime.now().setZone(zone).plus({ days: 3 }).set({ second: 0, millisecond: 0 });
+		const open = [
+			{ id: 's1', title: 'Book venue', description: null, assignee_id: 'u1', deadline: deadline.toUnixInteger() }
+		];
+		const people = new Map([
+			['u1', 'Alice'],
+			['u2', 'Budi']
+		]);
+		const fresh = [{ id: 'm1', authorId: 'u1', content: 'x', createdAt: Date.now() }];
+		const normalize = updates => taskSuggest._normalizeUpdates({ updates }, { fresh, people, open });
+
+		expect(normalize([{ suggestion_id: 'nope', title: 'X' }])).toEqual([]);
+		expect(
+			normalize([{ suggestion_id: 's1', title: 'Book venue', deadline: deadline.toFormat('yyyy-MM-dd HH:mm') }])
+		).toEqual([]);
+		expect(normalize([{ suggestion_id: 's1', assignee_id: 'stranger', deadline: 'friday' }])).toEqual([]);
+		expect(normalize([{ suggestion_id: 's1', assignee_id: 'u2', source_message_id: 'unknown' }])).toEqual([
+			{ id: 's1', changes: { assigneeId: 'u2' }, sourceMessageId: 'm1' }
+		]);
+	});
+
+	it('only lists open suggestions and only updates them while open', async () => {
+		const channelId = `open-chan-${n}`;
+		repo.createSuggestion({
+			id: `a-${n}`,
+			channelId,
+			sourceMessageId: 'x1',
+			title: 'A',
+			assigneeId: 'u1',
+			deadline: null
+		});
+		repo.createSuggestion({
+			id: `b-${n}`,
+			channelId,
+			sourceMessageId: 'x2',
+			title: 'B',
+			assigneeId: 'u1',
+			deadline: null
+		});
+		repo.finishSuggestion(`b-${n}`, { status: 'dismissed', handledBy: 'u1' });
+
+		expect(repo.listOpenSuggestions(channelId).map(r => r.id)).toEqual([`a-${n}`]);
+		expect(repo.updateSuggestion(`b-${n}`, { title: 'B2' })).toBeNull();
+		expect(repo.updateSuggestion(`a-${n}`, { title: 'A2', deadline: 123 })).toMatchObject({
+			title: 'A2',
+			deadline: 123
+		});
 	});
 });
 

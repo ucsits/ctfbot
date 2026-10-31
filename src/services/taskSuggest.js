@@ -35,8 +35,10 @@ const QUIET_MS = 60_000;
 const MIN_INTERVAL_MS = 120_000;
 const BUFFER_LIMIT = 40;
 const BUFFER_MAX_AGE_MS = 3 * 60 * 60 * 1000;
-// Already-analysed messages sent along as context for the new ones.
-const CONTEXT_MESSAGES = 10;
+// Earlier messages sent along as context for the new ones, read from the
+// channel's Discord history so a restart does not lose the conversation.
+const HISTORY_MESSAGES = 20;
+const MAX_UPDATES_PER_PASS = 3;
 const MAX_MESSAGE_CHARS = 1500;
 const MAX_PROPOSALS_PER_PASS = 3;
 const MIN_CONFIDENCE = 0.7;
@@ -201,8 +203,6 @@ async function _analyze(channelId, { trigger = null } = {}) {
 		}
 		return;
 	}
-	const context = state.messages.filter(m => m.analyzed).slice(-CONTEXT_MESSAGES);
-
 	state.running = true;
 	state.lastRunAt = Date.now();
 	for (const m of fresh) {
@@ -211,6 +211,10 @@ async function _analyze(channelId, { trigger = null } = {}) {
 	const stopTyping = trigger ? _keepTyping(state.channel) : () => {};
 
 	try {
+		const context = await _loadContext(state, fresh);
+		const open = suggestionRepository.listOpenSuggestions(channelId);
+		const openTitles = new Set(open.map(r => r.title));
+
 		let reply;
 		try {
 			reply = await chatCompletion({
@@ -218,7 +222,8 @@ async function _analyze(channelId, { trigger = null } = {}) {
 					context,
 					fresh,
 					people: state.people,
-					proposedTitles: suggestionRepository.recentTitles(channelId),
+					open,
+					proposedTitles: suggestionRepository.recentTitles(channelId).filter(t => !openTitles.has(t)),
 					botId: trigger ? trigger.client.user.id : null
 				}),
 				json: true,
@@ -240,7 +245,8 @@ async function _analyze(channelId, { trigger = null } = {}) {
 			}
 			throw error;
 		}
-		const found = _normalizeProposals(parseJsonReply(reply), {
+		const parsed = parseJsonReply(reply);
+		const found = _normalizeProposals(parsed, {
 			fresh,
 			people: state.people,
 			proposedSources: suggestionRepository.suggestedSourceIds(
@@ -249,16 +255,24 @@ async function _analyze(channelId, { trigger = null } = {}) {
 			)
 		});
 
+		const updates = _normalizeUpdates(parsed, { fresh, people: state.people, open });
+
+		let updated = 0;
+		for (const u of updates) {
+			if (await _applyUpdate(state.channel, u)) {
+				updated++;
+			}
+		}
 		let posted = 0;
 		for (const p of found) {
 			if (await _postProposal(state.channel, p)) {
 				posted++;
 			}
 		}
-		if (posted > 0) {
-			suggestLog.info(`Posted ${posted} task suggestion(s) in channel ${channelId}`);
+		if (posted > 0 || updated > 0) {
+			suggestLog.info(`Posted ${posted} and updated ${updated} task suggestion(s) in channel ${channelId}`);
 		} else if (trigger) {
-			await _replyTo(trigger, "🤔 I didn't find a new decision to set a reminder for.");
+			await _replyTo(trigger, "🤔 I didn't find a new decision, or a change to an open suggestion, to act on.");
 		}
 	} finally {
 		stopTyping();
@@ -274,27 +288,86 @@ async function _analyze(channelId, { trigger = null } = {}) {
 }
 
 /**
+ * Text the model should see for a Discord message: its content, or for the
+ * bot's own suggestion cards, the card title and details.
+ */
+function _describeMessage(message) {
+	const content = message.content?.trim();
+	if (content) {
+		return content.slice(0, MAX_MESSAGE_CHARS);
+	}
+	const embed = message.embeds?.[0];
+	if (message.author?.bot && embed?.title) {
+		return `[${embed.title}] ${embed.description ?? ''}`.trim().slice(0, MAX_MESSAGE_CHARS);
+	}
+	return '';
+}
+
+/**
+ * Earlier messages for context: the channel's recent Discord history before
+ * the first new message, merged with what is buffered. Reading history means
+ * a correction like "make it Friday instead" still has the original message
+ * in view after a restart.
+ *
+ * @returns {Promise<Array<object>>} oldest first
+ */
+async function _loadContext(state, fresh) {
+	const freshIds = new Set(fresh.map(m => m.id));
+	const byId = new Map(state.messages.filter(m => !freshIds.has(m.id)).map(m => [m.id, m]));
+
+	try {
+		const history = await state.channel.messages.fetch({ limit: HISTORY_MESSAGES, before: fresh[0].id });
+		for (const m of history.values()) {
+			if (byId.has(m.id) || freshIds.has(m.id)) {
+				continue;
+			}
+			const content = _describeMessage(m);
+			if (!content) {
+				continue;
+			}
+			if (!m.author.bot) {
+				state.people.set(m.author.id, m.member?.displayName ?? m.author.username);
+			}
+			byId.set(m.id, {
+				id: m.id,
+				authorId: m.author.id,
+				authorName: m.author.bot ? `${m.author.username} (bot)` : undefined,
+				content,
+				createdAt: m.createdTimestamp
+			});
+		}
+	} catch (error) {
+		suggestLog.warn(`Could not read history for channel ${state.channel.id}: ${error.message}`);
+	}
+
+	return [...byId.values()].sort((a, b) => a.createdAt - b.createdAt).slice(-HISTORY_MESSAGES);
+}
+
+/**
  * Build the chat messages for one analysis pass.
  *
  * @returns {Array<{role: string, content: string}>}
  */
-function _buildPrompt({ context, fresh, people, proposedTitles, botId = null, now = DateTime.now() }) {
+function _buildPrompt({ context, fresh, people, proposedTitles, open = [], botId = null, now = DateTime.now() }) {
 	const local = now.setZone(TIMEZONE);
+	const localTime = unix => DateTime.fromSeconds(unix).setZone(TIMEZONE).toFormat('yyyy-MM-dd HH:mm cccc');
 	const fmt = m => {
 		const at = DateTime.fromMillis(m.createdAt).setZone(TIMEZONE).toFormat('yyyy-MM-dd HH:mm');
-		return `id=${m.id} ${at} ${people.get(m.authorId) ?? 'unknown'} (${m.authorId}): ${m.content}`;
+		const name = m.authorName ?? people.get(m.authorId) ?? 'unknown';
+		return `id=${m.id} ${at} ${name} (${m.authorId}): ${m.content}`;
 	};
 
 	const system = [
 		"You watch a Discord channel where an organisation's administrators coordinate.",
 		'Find decisions, made or confirmed in the NEW messages, to do something in the future that deserves a tracked task with a reminder.',
 		'Only include firm commitments or agreed plans. Skip open questions, ideas still being debated, things already done, jokes, and actions that will be finished within the next hour.',
-		'Earlier messages are context only. Do not repeat anything listed as already suggested.',
+		'Earlier messages are context: use them to understand what the NEW messages refer to, but only act on what the NEW messages say. Do not repeat anything listed as already suggested.',
+		'When a NEW message changes or corrects an OPEN suggestion (a different day, person, title or detail), put it in "updates" with that suggestion_id instead of adding a new proposal. Only include the fields that change.',
 		'Messages may be in Indonesian, English or a mix; write the title and description in the language the decision was made in.',
 		'Reply with a JSON object only:',
-		'{"proposals":[{"title":"short imperative, max 80 chars","description":"one or two sentences of context, or empty","assignee_id":"Discord user id from the participants list, or null if unclear","deadline":"YYYY-MM-DD HH:mm in the given local time, or null if no time frame was mentioned","source_message_id":"id of the NEW message where it was decided","confidence":0.0}]}',
+		'{"proposals":[{"title":"short imperative, max 80 chars","description":"one or two sentences of context, or empty","assignee_id":"Discord user id from the participants list, or null if unclear","deadline":"YYYY-MM-DD HH:mm in the given local time, or null if no time frame was mentioned","source_message_id":"id of the NEW message where it was decided","confidence":0.0}],"updates":[{"suggestion_id":"id of the OPEN suggestion","title":"new title, or omit","description":"new description, or omit","assignee_id":"new assignee id, or omit","deadline":"new YYYY-MM-DD HH:mm, or omit","source_message_id":"id of the NEW message asking for the change"}]}',
 		'Resolve relative dates ("besok", "next Friday", "end of the month") against the current local time. When only a day is given, use 23:59 that day.',
-		'Return {"proposals":[]} when there is nothing to suggest.'
+		'Return {"proposals":[],"updates":[]} when there is nothing to do.'
 	];
 	if (botId) {
 		system.push(
@@ -304,13 +377,20 @@ function _buildPrompt({ context, fresh, people, proposedTitles, botId = null, no
 	const systemText = system.join('\n');
 
 	const participants = [...people].map(([id, name]) => `- ${name} (${id})`).join('\n');
+	const openLines = open.map(
+		r =>
+			`- suggestion_id=${r.id} title="${r.title}" assignee=${people.get(r.assignee_id) ?? 'unknown'} (${r.assignee_id}) deadline=${r.deadline ? localTime(r.deadline) : 'none'} from message id=${r.source_message_id}${r.description ? ` details="${r.description}"` : ''}`
+	);
 	const user = [
 		`Current local time: ${local.toFormat('yyyy-MM-dd HH:mm cccc')} (${TIMEZONE})`,
 		'',
 		'Participants:',
 		participants,
 		'',
-		`Already suggested: ${proposedTitles.length ? proposedTitles.map(t => `"${t}"`).join(', ') : 'none'}`,
+		'OPEN suggestions (posted, not yet accepted; update these rather than suggesting them again):',
+		openLines.length ? openLines.join('\n') : '(none)',
+		'',
+		`Already suggested and handled: ${proposedTitles.length ? proposedTitles.map(t => `"${t}"`).join(', ') : 'none'}`,
 		'',
 		'Earlier messages (context):',
 		context.length ? context.map(fmt).join('\n') : '(none)',
@@ -374,6 +454,106 @@ function _normalizeProposals(parsed, { fresh, people, proposedSources, now = Dat
 		}
 	}
 	return out;
+}
+
+/**
+ * Validate the model's updates to open suggestions. Unknown suggestions,
+ * invalid values and no-op changes are dropped.
+ *
+ * @returns {Array<{ id: string, changes: object, sourceMessageId: string }>}
+ */
+function _normalizeUpdates(parsed, { fresh, people, open, now = Date.now() }) {
+	const raw = Array.isArray(parsed?.updates) ? parsed.updates : [];
+	const openById = new Map(open.map(r => [String(r.id), r]));
+	const freshById = new Map(fresh.map(m => [String(m.id), m]));
+	const seen = new Set();
+	const out = [];
+
+	for (const item of raw) {
+		const row = item && typeof item === 'object' ? openById.get(String(item.suggestion_id)) : null;
+		if (!row || seen.has(row.id)) {
+			continue;
+		}
+
+		const changes = {};
+		if (typeof item.title === 'string') {
+			const title = item.title.replace(/\s+/g, ' ').trim().slice(0, 100);
+			if (title && title !== row.title) {
+				changes.title = title;
+			}
+		}
+		if (typeof item.description === 'string') {
+			const description = item.description.trim().slice(0, 1000) || null;
+			if (description !== row.description) {
+				changes.description = description;
+			}
+		}
+		if (item.assignee_id && people.has(String(item.assignee_id)) && String(item.assignee_id) !== row.assignee_id) {
+			changes.assigneeId = String(item.assignee_id);
+		}
+		if (typeof item.deadline === 'string') {
+			const dt = DateTime.fromFormat(item.deadline.trim(), 'yyyy-MM-dd HH:mm', { zone: TIMEZONE });
+			if (dt.isValid && dt.toMillis() > now + 5 * 60_000 && dt.toUnixInteger() !== row.deadline) {
+				changes.deadline = dt.toUnixInteger();
+			}
+		}
+		if (Object.keys(changes).length === 0) {
+			continue;
+		}
+
+		const source = freshById.get(String(item.source_message_id)) ?? fresh[fresh.length - 1];
+		seen.add(row.id);
+		out.push({ id: row.id, changes, sourceMessageId: source.id });
+		if (out.length >= MAX_UPDATES_PER_PASS) {
+			break;
+		}
+	}
+	return out;
+}
+
+/**
+ * Save an update to an open suggestion, edit its card in place, and reply to
+ * the message that asked for the change with what changed. Returns false when
+ * the suggestion was handled in the meantime.
+ *
+ * @returns {Promise<boolean>}
+ */
+async function _applyUpdate(channel, { id, changes, sourceMessageId }) {
+	const row = suggestionRepository.updateSuggestion(id, changes);
+	if (!row) {
+		return false;
+	}
+	const proposal = _toProposal(row);
+
+	if (row.card_message_id) {
+		const card = await channel.messages.fetch(row.card_message_id).catch(() => null);
+		await card
+			?.edit({ embeds: [buildProposalEmbed(proposal)], components: [buildProposalButtons(proposal)] })
+			.catch(error => suggestLog.warn(`Could not edit suggestion card ${row.card_message_id}: ${error.message}`));
+	}
+
+	const lines = [];
+	if (changes.title) {
+		lines.push(`title → **${changes.title}**`);
+	}
+	if (changes.assigneeId) {
+		lines.push(`assignee → <@${changes.assigneeId}>`);
+	}
+	if (changes.deadline) {
+		lines.push(`deadline → <t:${changes.deadline}:F> (<t:${changes.deadline}:R>)`);
+	}
+	if ('description' in changes) {
+		lines.push('details updated');
+	}
+	const link = row.card_message_id
+		? `https://discord.com/channels/${channel.guildId}/${channel.id}/${row.card_message_id}`
+		: null;
+	const content = `✏️ Updated the suggestion **${row.title}**${link ? ` (${link})` : ''}:\n${lines.map(l => `- ${l}`).join('\n')}`;
+
+	const payload = { content, allowedMentions: { parse: [], repliedUser: false } };
+	const source = await channel.messages.fetch(sourceMessageId).catch(() => null);
+	await (source ? source.reply(payload) : channel.send(payload));
+	return true;
 }
 
 /**
@@ -552,6 +732,9 @@ module.exports = {
 	_keepTyping,
 	_buildPrompt,
 	_normalizeProposals,
+	_normalizeUpdates,
+	_applyUpdate,
+	_loadContext,
 	_postProposal,
 	_reset
 };

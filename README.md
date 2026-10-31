@@ -541,8 +541,13 @@ The bot can watch governance channels (the `GOVERNANCE_CATEGORIES` where
 reply with a suggestion card offering to create a task with reminders.
 
 - Messages are buffered per channel. After 60 seconds of quiet (and at most
-  once every 2 minutes per channel) the new messages, plus a few earlier ones
-  for context, are sent to an OpenAI-compatible model.
+  once every 2 minutes per channel) the new messages are sent to an
+  OpenAI-compatible model, along with the channel's last 20 messages read
+  from Discord history (so context survives a bot restart) and the
+  suggestion cards that are still open.
+- A message that corrects an open suggestion ("not Sunday, make it Friday")
+  updates that card in place instead of creating a new one, and the bot
+  replies with what changed and a link to the card.
 - Mentioning the bot (`@ctfbot remind us to ...`) skips the wait: it analyses
   right away, shows "typing..." until the model answers, and always replies,
   even when it finds nothing or the model call fails.

@@ -132,6 +132,43 @@ function recentTitles(channelId, limit = 20) {
 		.reverse();
 }
 
+/**
+ * Suggestions in a channel that nobody has acted on yet, oldest first, so the
+ * model can update one instead of suggesting the same task again.
+ *
+ * @returns {Array<object>}
+ */
+function listOpenSuggestions(channelId, limit = 10) {
+	return db()
+		.prepare(
+			"SELECT * FROM task_suggestions WHERE channel_id = ? AND status = 'open' ORDER BY created_at DESC, rowid DESC LIMIT ?"
+		)
+		.all(channelId, limit)
+		.reverse();
+}
+
+/**
+ * Change the fields of an open suggestion. Returns the updated row, or null
+ * when it is no longer open (being handled, created or dismissed).
+ *
+ * @param {string} id
+ * @param {{ title?: string, description?: string|null, assigneeId?: string, deadline?: number|null }} changes
+ * @returns {object|null}
+ */
+function updateSuggestion(id, changes) {
+	const columns = { title: 'title', description: 'description', assigneeId: 'assignee_id', deadline: 'deadline' };
+	const keys = Object.keys(changes).filter(k => columns[k]);
+	if (keys.length === 0) {
+		return null;
+	}
+	const result = db()
+		.prepare(
+			`UPDATE task_suggestions SET ${keys.map(k => `${columns[k]} = ?`).join(', ')} WHERE id = ? AND status = 'open'`
+		)
+		.run(...keys.map(k => changes[k]), id);
+	return result.changes > 0 ? getSuggestion(id) : null;
+}
+
 module.exports = {
 	createSuggestion,
 	deleteSuggestion,
@@ -141,5 +178,7 @@ module.exports = {
 	releaseSuggestion,
 	finishSuggestion,
 	suggestedSourceIds,
-	recentTitles
+	recentTitles,
+	listOpenSuggestions,
+	updateSuggestion
 };
