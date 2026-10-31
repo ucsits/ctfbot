@@ -105,6 +105,10 @@ const config = {
 		get model() {
 			return process.env.OPENAI_MODEL || '';
 		},
+		get timeoutMs() {
+			const ms = Number(process.env.OPENAI_TIMEOUT_MS);
+			return Number.isFinite(ms) && ms > 0 ? ms : 300_000;
+		},
 		get isConfigured() {
 			return Boolean(this.apiKey && this.model);
 		}

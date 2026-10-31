@@ -167,17 +167,27 @@ async function _analyze(channelId) {
 
 	state.running = true;
 	state.lastRunAt = Date.now();
-	// Mark before the call so a failing endpoint does not re-send the same
-	// messages on every pass.
 	for (const m of fresh) {
 		m.analyzed = true;
 	}
 
 	try {
-		const reply = await chatCompletion({
-			messages: _buildPrompt({ context, fresh, people: state.people, proposedTitles: state.proposedTitles }),
-			json: true
-		});
+		let reply;
+		try {
+			reply = await chatCompletion({
+				messages: _buildPrompt({ context, fresh, people: state.people, proposedTitles: state.proposedTitles }),
+				json: true
+			});
+		} catch (error) {
+			// Put the messages back so the next pass (triggered by the next
+			// message in this channel) retries them instead of losing the
+			// decision. No timer is set here, so a broken endpoint is not
+			// polled in a loop.
+			for (const m of fresh) {
+				m.analyzed = false;
+			}
+			throw error;
+		}
 		const found = _normalizeProposals(parseJsonReply(reply), {
 			fresh,
 			people: state.people,

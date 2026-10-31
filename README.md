@@ -558,7 +558,13 @@ TASK_SUGGESTIONS_ENABLED=true
 OPENAI_BASE_URL=https://api.openai.com/v1   # any OpenAI-compatible endpoint
 OPENAI_API_KEY=your_api_key
 OPENAI_MODEL=gpt-4o-mini                    # model name as your provider spells it
+OPENAI_TIMEOUT_MS=300000                    # optional, default 5 min for reasoning models
 ```
+
+If the log shows `No reply from ... within Ns`, the endpoint answered too
+slowly: raise `OPENAI_TIMEOUT_MS`, pick a faster (non-reasoning) model, or
+check that `OPENAI_BASE_URL` is reachable from the bot's host. Messages from a
+failed pass are retried when the next message arrives in that channel.
 
 The **Message Content** privileged intent must be enabled for the bot in the
 Discord Developer Portal.

@@ -100,6 +100,57 @@ describe('taskSuggest._buildPrompt', () => {
 	});
 });
 
+describe('taskSuggest._analyze', () => {
+	const originalEnv = { ...process.env };
+	const originalFetch = globalThis.fetch;
+
+	afterEach(() => {
+		process.env = { ...originalEnv };
+		globalThis.fetch = originalFetch;
+	});
+
+	it('puts messages back for the next pass when the model call fails', async () => {
+		vi.resetModules();
+		vi.useFakeTimers();
+		process.env.TASK_SUGGESTIONS_ENABLED = 'true';
+		process.env.OPENAI_API_KEY = 'sk-test';
+		process.env.OPENAI_MODEL = 'test-model';
+		globalThis.fetch = vi.fn().mockRejectedValue(Object.assign(new Error('aborted'), { name: 'TimeoutError' }));
+
+		const taskSuggest = await import('../../src/services/taskSuggest.js');
+		const constants = (await import('../../src/lib/constants/config.js')).default;
+		taskSuggest._reset();
+
+		const channel = { id: 'c1', parentId: constants.GOVERNANCE_CATEGORIES[0], messages: { fetch: vi.fn() } };
+		const message = {
+			id: 'm1',
+			channelId: 'c1',
+			channel,
+			guild: {},
+			author: { id: 'u1', bot: false, username: 'alice' },
+			member: { displayName: 'Alice' },
+			mentions: { users: new Map() },
+			content: 'we will submit the report next friday',
+			createdTimestamp: Date.now()
+		};
+
+		taskSuggest.observe(message);
+		await expect(taskSuggest._analyze('c1')).rejects.toThrow('within 300s');
+
+		// The retry sends the same message again rather than dropping it.
+		globalThis.fetch = vi.fn().mockResolvedValue({
+			ok: true,
+			json: () => Promise.resolve({ choices: [{ message: { content: '{"proposals":[]}' } }] })
+		});
+		await taskSuggest._analyze('c1');
+		const body = JSON.parse(globalThis.fetch.mock.calls[0][1].body);
+		expect(body.messages[1].content).toContain('id=m1');
+
+		taskSuggest._reset();
+		vi.useRealTimers();
+	});
+});
+
 describe('taskSuggest proposal claiming', () => {
 	it('lets only one interaction claim a proposal until it is released', async () => {
 		vi.resetModules();
@@ -176,6 +227,37 @@ describe('lib/llm/openai', () => {
 			proposals: [{ title: 'A' }]
 		});
 		expect(() => parseJsonReply('no json here')).toThrow();
+	});
+
+	it('parseJsonReply ignores inline <think> reasoning that contains braces', async () => {
+		const { parseJsonReply } = await import('../../src/lib/llm/openai.js');
+		const reply = '<think>maybe {"proposals":[{"title":"wrong"}]}? no.</think>\n{"proposals":[]}';
+		expect(parseJsonReply(reply)).toEqual({ proposals: [] });
+	});
+
+	it('waits 5 minutes by default so reasoning models can finish, and honours OPENAI_TIMEOUT_MS', async () => {
+		const timeout = vi.spyOn(AbortSignal, 'timeout');
+		globalThis.fetch = vi.fn().mockResolvedValue({
+			ok: true,
+			json: () => Promise.resolve({ choices: [{ message: { content: '{}' } }] })
+		});
+		const { chatCompletion } = await import('../../src/lib/llm/openai.js');
+
+		await chatCompletion({ messages: [] });
+		expect(timeout).toHaveBeenLastCalledWith(300_000);
+
+		process.env.OPENAI_TIMEOUT_MS = '600000';
+		await chatCompletion({ messages: [] });
+		expect(timeout).toHaveBeenLastCalledWith(600_000);
+		timeout.mockRestore();
+	});
+
+	it('names the endpoint, model and limit when the model does not reply in time', async () => {
+		globalThis.fetch = vi.fn().mockRejectedValue(Object.assign(new Error('aborted'), { name: 'TimeoutError' }));
+		const { chatCompletion } = await import('../../src/lib/llm/openai.js');
+		await expect(chatCompletion({ messages: [] })).rejects.toThrow(
+			'No reply from https://llm.example.com/v1/chat/completions (model test-model) within 300s'
+		);
 	});
 });
 
