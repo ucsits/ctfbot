@@ -1,5 +1,6 @@
 const { Listener } = require('@sapphire/framework');
 const { awardReputation } = require('../services/reputation');
+const taskSuggest = require('../services/taskSuggest');
 
 // Patterns that trigger +1 or -1 when used as a reply
 const UP_PATTERNS = /^(?:\+1|👍)$/;
@@ -19,6 +20,14 @@ class MessageCreateListener extends Listener {
 		}
 
 		this.container.logger.debug(`${message.author.tag}: ${message.content}`);
+
+		// Buffer governance-channel messages for task suggestions (no-op unless
+		// TASK_SUGGESTIONS_ENABLED and the OpenAI-compatible endpoint are set).
+		try {
+			taskSuggest.observe(message);
+		} catch (error) {
+			this.container.logger.error('Error buffering message for task suggestions:', error);
+		}
 
 		// Reply-based rep detection:
 		// check if this message is a reply and matches +1/-1/👍/👎

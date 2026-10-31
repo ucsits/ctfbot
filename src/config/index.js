@@ -93,6 +93,27 @@ const config = {
 		get calendarId() {
 			return process.env.GOOGLE_CALENDAR_ID || '';
 		}
+	},
+
+	llm: {
+		get baseUrl() {
+			return (process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1').replace(/\/+$/, '');
+		},
+		get apiKey() {
+			return process.env.OPENAI_API_KEY || '';
+		},
+		get model() {
+			return process.env.OPENAI_MODEL || '';
+		},
+		get isConfigured() {
+			return Boolean(this.apiKey && this.model);
+		}
+	},
+
+	taskSuggestions: {
+		get enabled() {
+			return process.env.TASK_SUGGESTIONS_ENABLED === 'true';
+		}
 	}
 };
 

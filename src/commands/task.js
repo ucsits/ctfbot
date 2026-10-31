@@ -240,76 +240,14 @@ class TaskCommand extends Command {
 		const taskId = randomUUID();
 
 		try {
-			// 1. Write to blockchain
-			const data = JSON.stringify({
-				type: 'task',
-				v: 1,
+			const { block } = await this.createTaskRecord({
 				taskId,
 				title,
-				description: description || '',
+				description,
 				assignedTo: assignTo.id,
 				createdBy: interaction.user.id,
 				deadline: deadlineUnix
 			});
-
-			const block = await luce.appendBlock({
-				author: interaction.user.id,
-				data
-			});
-
-			// 2. Write the task and all of its reminders in one transaction so a
-			// failure cannot leave a task with only part of its schedule recorded.
-			// Keep timestamps unique so short deadlines do not create duplicate
-			// notifications.
-			const reminderTimes = new Set();
-			const remindAt = deadlineUnix - 3600;
-			if (remindAt > Math.floor(Date.now() / 1000)) {
-				reminderTimes.add(remindAt);
-			}
-
-			// Day-before reminder (9:00 AM Jakarta time, day before deadline)
-			const deadlineJakarta = DateTime.fromSeconds(deadlineUnix).setZone('Asia/Jakarta');
-			const dayBefore9am = deadlineJakarta
-				.minus({ days: 1 })
-				.set({ hour: 9, minute: 0, second: 0, millisecond: 0 });
-			const dayBeforeRemindAt = dayBefore9am.toUTC().toUnixInteger();
-			if (dayBeforeRemindAt > Math.floor(Date.now() / 1000)) {
-				reminderTimes.add(dayBeforeRemindAt);
-			}
-
-			taskRepository.createTaskWithReminders({
-				task: {
-					taskId,
-					title,
-					description,
-					assignedTo: assignTo.id,
-					createdBy: interaction.user.id,
-					deadline: deadlineUnix,
-					blockHeight: block.height
-				},
-				reminders: [...reminderTimes].map(at => ({
-					channelId: constants.REMINDER_CHANNEL_ID,
-					remindAt: at
-				}))
-			});
-
-			// 5. Push to Google Calendar (best-effort, never blocks the response)
-			const sync = _syncService();
-			if (sync) {
-				sync.pushTaskUpdate(
-					{
-						task_id: taskId,
-						title,
-						description,
-						assigned_to: assignTo.id,
-						deadline: deadlineUnix,
-						calendar_event_id: null
-					},
-					'create'
-				).catch(err =>
-					this.container.logger.warn(`Calendar push failed for new task ${taskId}: ${err.message}`)
-				);
-			}
 
 			const embed = new EmbedBuilder()
 				.setColor(0x00ff00)
@@ -342,6 +280,87 @@ class TaskCommand extends Command {
 				`⚠️ The task was anchored, but the confirmation could not be completed. Task ID: \`${taskId}\`. Please use /task list to verify it.`
 			);
 		}
+	}
+
+	/**
+	 * Anchor a task on the blockchain, store it with its reminders and push it
+	 * to Google Calendar. Shared by /task add and accepted task suggestions
+	 * (src/listeners/taskSuggestInteraction.js).
+	 *
+	 * Throws on failure. An error whose message mentions "Blockchain" means the
+	 * anchor failed and nothing was written.
+	 *
+	 * @returns {Promise<{ block: { height: number } }>}
+	 */
+	async createTaskRecord({ taskId, title, description, assignedTo, createdBy, deadline }) {
+		// 1. Write to blockchain
+		const data = JSON.stringify({
+			type: 'task',
+			v: 1,
+			taskId,
+			title,
+			description: description || '',
+			assignedTo,
+			createdBy,
+			deadline
+		});
+
+		const block = await luce.appendBlock({
+			author: createdBy,
+			data
+		});
+
+		// 2. Write the task and all of its reminders in one transaction so a
+		// failure cannot leave a task with only part of its schedule recorded.
+		// Keep timestamps unique so short deadlines do not create duplicate
+		// notifications.
+		const reminderTimes = new Set();
+		const remindAt = deadline - 3600;
+		if (remindAt > Math.floor(Date.now() / 1000)) {
+			reminderTimes.add(remindAt);
+		}
+
+		// Day-before reminder (9:00 AM Jakarta time, day before deadline)
+		const deadlineJakarta = DateTime.fromSeconds(deadline).setZone('Asia/Jakarta');
+		const dayBefore9am = deadlineJakarta.minus({ days: 1 }).set({ hour: 9, minute: 0, second: 0, millisecond: 0 });
+		const dayBeforeRemindAt = dayBefore9am.toUTC().toUnixInteger();
+		if (dayBeforeRemindAt > Math.floor(Date.now() / 1000)) {
+			reminderTimes.add(dayBeforeRemindAt);
+		}
+
+		taskRepository.createTaskWithReminders({
+			task: {
+				taskId,
+				title,
+				description,
+				assignedTo,
+				createdBy,
+				deadline,
+				blockHeight: block.height
+			},
+			reminders: [...reminderTimes].map(at => ({
+				channelId: constants.REMINDER_CHANNEL_ID,
+				remindAt: at
+			}))
+		});
+
+		// 5. Push to Google Calendar (best-effort, never blocks the response)
+		const sync = _syncService();
+		if (sync) {
+			sync.pushTaskUpdate(
+				{
+					task_id: taskId,
+					title,
+					description,
+					assigned_to: assignedTo,
+					deadline,
+					calendar_event_id: null
+				},
+				'create'
+			).catch(err => this.container.logger.warn(`Calendar push failed for new task ${taskId}: ${err.message}`));
+		}
+
+		return { block };
 	}
 
 	// ──────────────────────────────────────────────

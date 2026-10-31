@@ -534,6 +534,35 @@ explicitly reported.
 
 ---
 
+## Task Suggestions from Conversation
+
+The bot can watch governance channels (the `GOVERNANCE_CATEGORIES` where
+`/task` is allowed) and, when admins decide to do something in the future,
+reply with a suggestion card offering to create a task with reminders.
+
+- Messages are buffered per channel. After 60 seconds of quiet (and at most
+  once every 2 minutes per channel) the new messages, plus a few earlier ones
+  for context, are sent to an OpenAI-compatible model.
+- Each firm decision becomes a card with **Create task**, **Edit & create**
+  (pre-filled form: title, assignee, deadline, description) and **Dismiss**.
+  Nothing is created until someone clicks.
+- Accepted suggestions go through the same path as `/task add`: blockchain
+  anchoring, reminders and Google Calendar sync.
+- Only governance-channel messages are ever sent to the model. Suggestions
+  live in memory and expire after 24 hours or when the bot restarts.
+
+### Setup
+
+```env
+TASK_SUGGESTIONS_ENABLED=true
+OPENAI_BASE_URL=https://api.openai.com/v1   # any OpenAI-compatible endpoint
+OPENAI_API_KEY=your_api_key
+OPENAI_MODEL=gpt-4o-mini                    # model name as your provider spells it
+```
+
+The **Message Content** privileged intent must be enabled for the bot in the
+Discord Developer Portal.
+
 ## Google Calendar Sync (Option A)
 
 A background service (`src/services/calendarSync.js`) pushes bot tasks to a
