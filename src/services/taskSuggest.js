@@ -117,7 +117,9 @@ function observe(message) {
 			timer: null,
 			lastRunAt: 0,
 			running: false,
-			pendingTrigger: null
+			pendingTrigger: null,
+			// Stops the "typing..." shown while a mention waits for a running pass.
+			queuedTyping: null
 		};
 		channels.set(message.channelId, state);
 	}
@@ -129,18 +131,22 @@ function observe(message) {
 		}
 	}
 
+	const botId = message.client?.user?.id;
+	const botRoles = botId ? _botRoleIds(message, botId) : [];
+	// Show a mention of the bot's role to the model as a mention of the bot.
+	const text = botRoles.reduce((s, roleId) => s.replaceAll(`<@&${roleId}>`, `<@${botId}>`), content);
+
 	state.messages.push({
 		id: message.id,
 		authorId: message.author.id,
-		content: content.slice(0, MAX_MESSAGE_CHARS),
+		content: text.slice(0, MAX_MESSAGE_CHARS),
 		createdAt: message.createdTimestamp,
 		analyzed: false
 	});
 	_prune(state);
 
 	// A direct mention is a request to look now, not after the discussion ends.
-	const botId = message.client?.user?.id;
-	if (botId && message.mentions?.users?.has(botId)) {
+	if (botId && (message.mentions?.users?.has(botId) || botRoles.length > 0)) {
 		clearTimeout(state.timer);
 		_analyze(message.channelId, { trigger: message }).catch(err =>
 			suggestLog.error(`Analysis failed for channel ${message.channelId}: ${err.message}`)
@@ -148,6 +154,18 @@ function observe(message) {
 		return;
 	}
 	_schedule(message.channelId, state);
+}
+
+/**
+ * Ids of mentioned roles that belong to this bot. Discord creates a managed
+ * role named after the bot, and picking it from the @ autocomplete sends a
+ * role mention instead of a user mention. Other roles the bot happens to have
+ * (e.g. @Admin) do not count.
+ *
+ * @returns {string[]}
+ */
+function _botRoleIds(message, botId) {
+	return [...(message.mentions?.roles?.values() ?? [])].filter(r => r.tags?.botId === botId).map(r => r.id);
 }
 
 function _prune(state) {
@@ -199,13 +217,19 @@ async function _analyze(channelId, { trigger = null } = {}) {
 	}
 	if (state.running) {
 		// Run the mention right after the current pass instead of waiting for
-		// the channel to go quiet again.
+		// the channel to go quiet again, showing "typing..." in the meantime.
 		if (trigger) {
 			state.pendingTrigger = trigger;
+			state.queuedTyping ??= _keepTyping(state.channel);
 		} else {
 			_schedule(channelId, state);
 		}
 		return;
+	}
+	if (trigger) {
+		// The mention's own pass takes over the indicator from here.
+		state.queuedTyping?.();
+		state.queuedTyping = null;
 	}
 
 	const fresh = state.messages.filter(m => !m.analyzed);
@@ -843,6 +867,7 @@ function unavailableMessage(id) {
 function _reset() {
 	for (const state of channels.values()) {
 		clearTimeout(state.timer);
+		state.queuedTyping?.();
 	}
 	channels.clear();
 	warnedUnconfigured = false;

@@ -329,6 +329,61 @@ describe('taskSuggest direct mentions', () => {
 		expect(body.messages[1].content).toContain('id=m2');
 		await vi.waitFor(() => expect(second.reply).toHaveBeenCalledTimes(1));
 	});
+
+	it('shows "typing..." right away when a mention has to wait for a background pass', async () => {
+		vi.useFakeTimers();
+		let resolveFirst;
+		globalThis.fetch = vi
+			.fn()
+			.mockImplementationOnce(() => new Promise(resolve => (resolveFirst = resolve)))
+			.mockResolvedValue(llmReply('{"proposals":[]}'));
+
+		// The quiet timer starts a background pass, and the model is slow.
+		taskSuggest.observe(makeMessage({ id: 'm1', content: 'kita rapat jumat ya' }));
+		await vi.advanceTimersByTimeAsync(61_000);
+		expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+		expect(channel.sendTyping).not.toHaveBeenCalled();
+
+		const mention = makeMessage({ id: 'm2', content: '<@bot-1> tolong cek', mentionBot: true });
+		taskSuggest.observe(mention);
+		expect(channel.sendTyping).toHaveBeenCalledTimes(1);
+		await vi.advanceTimersByTimeAsync(20_000);
+		expect(channel.sendTyping).toHaveBeenCalledTimes(3);
+
+		resolveFirst(llmReply('{"proposals":[]}'));
+		await vi.waitFor(() => expect(mention.reply).toHaveBeenCalledTimes(1));
+		expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+
+		// Neither the queued indicator nor the mention's own pass keeps typing.
+		const calls = channel.sendTyping.mock.calls.length;
+		await vi.advanceTimersByTimeAsync(30_000);
+		expect(channel.sendTyping).toHaveBeenCalledTimes(calls);
+	});
+
+	it("treats a mention of the bot's own role as a mention, but not other roles", async () => {
+		vi.useFakeTimers();
+		globalThis.fetch = vi.fn().mockResolvedValue(llmReply('{"proposals":[]}'));
+
+		const withRole = (id, content, role) => {
+			const message = makeMessage({ id, content });
+			message.mentions.roles = new Map([[role.id, role]]);
+			return message;
+		};
+
+		taskSuggest.observe(withRole('m1', '<@&admins> rapat jumat', { id: 'admins', tags: null }));
+		await vi.advanceTimersByTimeAsync(0);
+		expect(globalThis.fetch).not.toHaveBeenCalled();
+		expect(channel.sendTyping).not.toHaveBeenCalled();
+
+		taskSuggest.observe(withRole('m2', '<@&bot-role> tolong cek', { id: 'bot-role', tags: { botId: BOT_ID } }));
+		await vi.advanceTimersByTimeAsync(0);
+		expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+		expect(channel.sendTyping).toHaveBeenCalledTimes(1);
+
+		const body = JSON.parse(globalThis.fetch.mock.calls[0][1].body);
+		expect(body.messages[1].content).toContain('<@bot-1> tolong cek');
+		expect(body.messages[0].content).toContain('You were mentioned directly as <@bot-1>');
+	});
 });
 
 describe('taskSuggest corrections to open suggestions', () => {
