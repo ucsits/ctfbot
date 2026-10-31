@@ -1,12 +1,42 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { DateTime } from 'luxon';
-import { readFileSync } from 'fs';
+import { readFileSync, mkdtempSync, rmSync } from 'fs';
+import { tmpdir } from 'os';
 import { join } from 'path';
+import Database from 'better-sqlite3';
 
 const root = join(import.meta.dirname, '../..');
 
+// The service persists suggestions through the real repository, which opens
+// ctfbot.db in the working directory. Run the whole file in a scratch
+// directory holding a fresh database with just the task_suggestions table.
+let tmpDir;
+let originalCwd;
+
+beforeAll(() => {
+	originalCwd = process.cwd();
+	tmpDir = mkdtempSync(join(tmpdir(), 'ctfbot-task-suggest-'));
+	const db = new Database(join(tmpDir, 'ctfbot.db'));
+	db.exec(readFileSync(join(root, 'migrations/026_add_task_suggestions.sql'), 'utf8'));
+	db.close();
+	process.chdir(tmpDir);
+});
+
+afterAll(async () => {
+	const { closeConnection } = await import('../../src/database/connection.js');
+	closeConnection();
+	process.chdir(originalCwd);
+	rmSync(tmpDir, { recursive: true, force: true });
+});
+
 const fresh = [
-	{ id: '111', authorId: 'u1', content: 'ok kita kirim proposal sponsor jumat ya', createdAt: Date.now(), analyzed: false },
+	{
+		id: '111',
+		authorId: 'u1',
+		content: 'ok kita kirim proposal sponsor jumat ya',
+		createdAt: Date.now(),
+		analyzed: false
+	},
 	{ id: '222', authorId: 'u2', content: 'siap, aku yang kirim', createdAt: Date.now(), analyzed: false }
 ];
 const people = new Map([
@@ -40,7 +70,9 @@ describe('taskSuggest._normalizeProposals', () => {
 		expect(p.title).toBe('Kirim proposal sponsor');
 		expect(p.assigneeId).toBe('u2');
 		expect(p.description).toBeNull();
-		expect(p.deadline).toBe(DateTime.fromFormat(future, 'yyyy-MM-dd HH:mm', { zone: 'Asia/Jakarta' }).toUnixInteger());
+		expect(p.deadline).toBe(
+			DateTime.fromFormat(future, 'yyyy-MM-dd HH:mm', { zone: 'Asia/Jakarta' }).toUnixInteger()
+		);
 	});
 
 	it('drops proposals pointing at messages that were not in the new batch', () => {
@@ -67,10 +99,15 @@ describe('taskSuggest._normalizeProposals', () => {
 
 	it('ignores malformed replies and caps the number of proposals', () => {
 		expect(taskSuggest._normalizeProposals(null, { fresh, people, proposedSources: new Set() })).toEqual([]);
-		expect(taskSuggest._normalizeProposals({ proposals: 'nope' }, { fresh, people, proposedSources: new Set() })).toEqual(
-			[]
-		);
-		const many = Array.from({ length: 6 }, (_, i) => ({ id: String(i), authorId: 'u1', content: 'x', createdAt: 0 }));
+		expect(
+			taskSuggest._normalizeProposals({ proposals: 'nope' }, { fresh, people, proposedSources: new Set() })
+		).toEqual([]);
+		const many = Array.from({ length: 6 }, (_, i) => ({
+			id: String(i),
+			authorId: 'u1',
+			content: 'x',
+			createdAt: 0
+		}));
 		const out = taskSuggest._normalizeProposals(
 			{ proposals: many.map(m => ({ title: `T${m.id}`, source_message_id: m.id })) },
 			{ fresh: many, people, proposedSources: new Set() }
@@ -151,25 +188,97 @@ describe('taskSuggest._analyze', () => {
 	});
 });
 
-describe('taskSuggest proposal claiming', () => {
-	it('lets only one interaction claim a proposal until it is released', async () => {
-		vi.resetModules();
-		const taskSuggest = await import('../../src/services/taskSuggest.js');
-		taskSuggest._reset();
-		taskSuggest._proposals.set('p1', { id: 'p1', status: 'open', createdAt: Date.now() });
+describe('task suggestion persistence', () => {
+	let taskSuggest;
+	let repo;
+	let channel;
+	let n = 0;
 
-		expect(taskSuggest.claimProposal('p1')).not.toBeNull();
-		expect(taskSuggest.claimProposal('p1')).toBeNull();
-		taskSuggest.releaseProposal('p1');
-		expect(taskSuggest.claimProposal('p1')).not.toBeNull();
-		taskSuggest.finishProposal('p1');
-		expect(taskSuggest.getProposal('p1')).toBeNull();
+	beforeEach(async () => {
+		taskSuggest = await import('../../src/services/taskSuggest.js');
+		repo = await import('../../src/database/repositories/taskSuggestion.repository.js');
+		n++;
+		channel = {
+			id: `chan-${n}`,
+			messages: { fetch: vi.fn().mockResolvedValue(null) },
+			send: vi.fn().mockResolvedValue({ id: `card-${n}` })
+		};
 	});
 
-	it('treats proposals older than a day as expired', async () => {
-		const taskSuggest = await import('../../src/services/taskSuggest.js');
-		taskSuggest._proposals.set('old', { id: 'old', status: 'open', createdAt: Date.now() - 25 * 60 * 60 * 1000 });
-		expect(taskSuggest.claimProposal('old')).toBeNull();
+	const found = (overrides = {}) => ({
+		title: 'Kirim proposal sponsor',
+		description: null,
+		assigneeId: 'u2',
+		deadline: Math.floor(Date.now() / 1000) + 86_400,
+		sourceMessageId: `src-${n}`,
+		...overrides
+	});
+
+	const postedId = () => channel.send.mock.calls[0][0].components[0].toJSON().components[0].custom_id.split(':')[1];
+
+	it('stores the suggestion and its card, with no expiry', async () => {
+		expect(await taskSuggest._postProposal(channel, found())).toBe(true);
+		const id = postedId();
+
+		const row = repo.getSuggestion(id);
+		expect(row.status).toBe('open');
+		expect(row.card_message_id).toBe(`card-${n}`);
+
+		// A week later (or after a restart) the card is still actionable.
+		vi.useFakeTimers();
+		vi.setSystemTime(Date.now() + 7 * 24 * 60 * 60 * 1000);
+		expect(taskSuggest.getProposal(id)).toMatchObject({ title: 'Kirim proposal sponsor', assigneeId: 'u2' });
+		vi.useRealTimers();
+	});
+
+	it('never suggests the same source message twice', async () => {
+		expect(await taskSuggest._postProposal(channel, found())).toBe(true);
+		expect(await taskSuggest._postProposal(channel, found({ title: 'Again' }))).toBe(false);
+		expect(channel.send).toHaveBeenCalledTimes(1);
+		expect(repo.suggestedSourceIds(channel.id, [`src-${n}`, 'other'])).toEqual(new Set([`src-${n}`]));
+		expect(repo.recentTitles(channel.id)).toEqual(['Kirim proposal sponsor']);
+	});
+
+	it('drops the row when the card cannot be posted, so it can be suggested later', async () => {
+		channel.send.mockRejectedValue(new Error('Missing Access'));
+		await expect(taskSuggest._postProposal(channel, found())).rejects.toThrow('Missing Access');
+		expect(repo.suggestedSourceIds(channel.id, [`src-${n}`]).size).toBe(0);
+	});
+
+	it('lets only one click claim a suggestion, and frees it again after release or a stale lease', async () => {
+		await taskSuggest._postProposal(channel, found());
+		const id = postedId();
+
+		expect(taskSuggest.claimProposal(id)).not.toBeNull();
+		expect(taskSuggest.claimProposal(id)).toBeNull();
+		expect(taskSuggest.unavailableMessage(id)).toContain('handling this suggestion right now');
+
+		taskSuggest.releaseProposal(id);
+		expect(taskSuggest.claimProposal(id)).not.toBeNull();
+
+		// A crash mid-creation leaves the lease behind; it lapses after 2 minutes.
+		vi.useFakeTimers();
+		vi.setSystemTime(Date.now() + 3 * 60 * 1000);
+		expect(taskSuggest.claimProposal(id)).not.toBeNull();
+		vi.useRealTimers();
+	});
+
+	it('closes created and dismissed suggestions with a message saying who handled them', async () => {
+		await taskSuggest._postProposal(channel, found());
+		const created = postedId();
+		taskSuggest.claimProposal(created);
+		taskSuggest.finishProposal(created, { status: 'created', handledBy: 'u9', taskId: 'task-1' });
+		expect(taskSuggest.claimProposal(created)).toBeNull();
+		expect(taskSuggest.unavailableMessage(created)).toBe('✅ <@u9> already created this task (`task-1`).');
+
+		channel.send.mockClear();
+		await taskSuggest._postProposal(channel, found({ sourceMessageId: `src-${n}-b` }));
+		const dismissed = postedId();
+		taskSuggest.finishProposal(dismissed, { status: 'dismissed', handledBy: 'u8' });
+		expect(taskSuggest.getProposal(dismissed)).toBeNull();
+		expect(taskSuggest.unavailableMessage(dismissed)).toContain('dismissed by <@u8>');
+
+		expect(taskSuggest.unavailableMessage('unknown-id')).toContain('could not be found');
 	});
 });
 
@@ -208,7 +317,9 @@ describe('lib/llm/openai', () => {
 	});
 
 	it('throws on a non-2xx response', async () => {
-		globalThis.fetch = vi.fn().mockResolvedValue({ ok: false, status: 401, text: () => Promise.resolve('bad key') });
+		globalThis.fetch = vi
+			.fn()
+			.mockResolvedValue({ ok: false, status: 401, text: () => Promise.resolve('bad key') });
 		const { chatCompletion } = await import('../../src/lib/llm/openai.js');
 		await expect(chatCompletion({ messages: [] })).rejects.toThrow('401');
 	});

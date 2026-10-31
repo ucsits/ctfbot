@@ -9,8 +9,9 @@
  * until someone confirms.
  *
  * Only messages from GOVERNANCE_CATEGORIES channels are buffered or sent to
- * the model. Buffers and open suggestions live in memory, so suggestion
- * buttons expire on restart.
+ * the model. Message buffers live in memory; suggestions are stored in the
+ * task_suggestions table, so a card stays actionable (across restarts, with
+ * no time limit) until someone creates the task or dismisses it.
  *
  * @module services/taskSuggest
  */
@@ -21,6 +22,7 @@ const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('
 const config = require('../config');
 const constants = require('../lib/constants/config');
 const { chatCompletion, parseJsonReply } = require('../lib/llm/openai');
+const suggestionRepository = require('../database/repositories/taskSuggestion.repository');
 const { logger } = require('../lib/logger');
 
 const suggestLog = logger.child('TaskSuggest');
@@ -36,7 +38,6 @@ const CONTEXT_MESSAGES = 10;
 const MAX_MESSAGE_CHARS = 1500;
 const MAX_PROPOSALS_PER_PASS = 3;
 const MIN_CONFIDENCE = 0.7;
-const PROPOSAL_TTL_MS = 24 * 60 * 60 * 1000;
 const TIMEZONE = constants.DEFAULT_TIMEZONE;
 
 // Custom ID namespaces for the suggestion card. Format: <namespace>:<proposalId>
@@ -49,8 +50,6 @@ const SUGGEST_IDS = {
 
 /** @type {Map<string, object>} channelId → buffer state */
 const channels = new Map();
-/** @type {Map<string, object>} proposalId → proposal */
-const proposals = new Map();
 
 let warnedUnconfigured = false;
 
@@ -97,8 +96,6 @@ function observe(message) {
 			channel: message.channel,
 			messages: [],
 			people: new Map(),
-			proposedSources: new Set(),
-			proposedTitles: [],
 			timer: null,
 			lastRunAt: 0,
 			running: false
@@ -127,13 +124,6 @@ function observe(message) {
 function _prune(state) {
 	const cutoff = Date.now() - BUFFER_MAX_AGE_MS;
 	state.messages = state.messages.filter(m => m.createdAt >= cutoff).slice(-BUFFER_LIMIT);
-
-	const expiry = Date.now() - PROPOSAL_TTL_MS;
-	for (const [id, p] of proposals) {
-		if (p.createdAt < expiry) {
-			proposals.delete(id);
-		}
-	}
 }
 
 function _schedule(channelId, state) {
@@ -175,7 +165,12 @@ async function _analyze(channelId) {
 		let reply;
 		try {
 			reply = await chatCompletion({
-				messages: _buildPrompt({ context, fresh, people: state.people, proposedTitles: state.proposedTitles }),
+				messages: _buildPrompt({
+					context,
+					fresh,
+					people: state.people,
+					proposedTitles: suggestionRepository.recentTitles(channelId)
+				}),
 				json: true
 			});
 		} catch (error) {
@@ -191,17 +186,20 @@ async function _analyze(channelId) {
 		const found = _normalizeProposals(parseJsonReply(reply), {
 			fresh,
 			people: state.people,
-			proposedSources: state.proposedSources
+			proposedSources: suggestionRepository.suggestedSourceIds(
+				channelId,
+				fresh.map(m => m.id)
+			)
 		});
 
+		let posted = 0;
 		for (const p of found) {
-			state.proposedSources.add(p.sourceMessageId);
-			state.proposedTitles.push(p.title);
-			await _postProposal(state.channel, p);
+			if (await _postProposal(state.channel, p)) {
+				posted++;
+			}
 		}
-		state.proposedTitles = state.proposedTitles.slice(-20);
-		if (found.length > 0) {
-			suggestLog.info(`Posted ${found.length} task suggestion(s) in channel ${channelId}`);
+		if (posted > 0) {
+			suggestLog.info(`Posted ${posted} task suggestion(s) in channel ${channelId}`);
 		}
 	} finally {
 		state.running = false;
@@ -305,23 +303,42 @@ function _normalizeProposals(parsed, { fresh, people, proposedSources, now = Dat
 	return out;
 }
 
+/**
+ * Store a suggestion and post its card. Returns false when the decision was
+ * already suggested (e.g. before a restart) and nothing was posted.
+ *
+ * @returns {Promise<boolean>}
+ */
 async function _postProposal(channel, found) {
-	const proposal = {
-		...found,
-		id: randomUUID(),
+	const proposal = { ...found, id: randomUUID() };
+	const inserted = suggestionRepository.createSuggestion({
+		id: proposal.id,
 		channelId: channel.id,
-		createdAt: Date.now(),
-		status: 'open'
-	};
-	proposals.set(proposal.id, proposal);
+		sourceMessageId: proposal.sourceMessageId,
+		title: proposal.title,
+		description: proposal.description,
+		assigneeId: proposal.assigneeId,
+		deadline: proposal.deadline
+	});
+	if (!inserted) {
+		return false;
+	}
 
 	const payload = {
 		embeds: [buildProposalEmbed(proposal)],
 		components: [buildProposalButtons(proposal)],
 		allowedMentions: { parse: [], repliedUser: false }
 	};
-	const source = await channel.messages.fetch(proposal.sourceMessageId).catch(() => null);
-	await (source ? source.reply(payload) : channel.send(payload));
+	try {
+		const source = await channel.messages.fetch(proposal.sourceMessageId).catch(() => null);
+		const card = await (source ? source.reply(payload) : channel.send(payload));
+		suggestionRepository.setCardMessage(proposal.id, card.id);
+	} catch (error) {
+		// No card exists, so drop the row and let a later pass suggest it again.
+		suggestionRepository.deleteSuggestion(proposal.id);
+		throw error;
+	}
+	return true;
 }
 
 /**
@@ -369,41 +386,72 @@ function buildProposalButtons(proposal) {
 	);
 }
 
+function _toProposal(row) {
+	return {
+		id: row.id,
+		channelId: row.channel_id,
+		sourceMessageId: row.source_message_id,
+		title: row.title,
+		description: row.description,
+		assigneeId: row.assignee_id,
+		deadline: row.deadline,
+		status: row.status
+	};
+}
+
 /**
- * Return an open, unexpired proposal, or null.
+ * Return a suggestion that can still be acted on, or null.
  */
 function getProposal(id) {
-	const p = proposals.get(id);
-	if (!p || p.status !== 'open' || p.createdAt < Date.now() - PROPOSAL_TTL_MS) {
+	const row = suggestionRepository.getSuggestion(id);
+	if (!row) {
 		return null;
 	}
-	return p;
+	const leaseExpired = row.status === 'working' && row.claimed_until < Math.floor(Date.now() / 1000);
+	return row.status === 'open' || leaseExpired ? _toProposal(row) : null;
 }
 
 /**
- * Atomically take an open proposal so two clicks cannot both act on it.
- * Returns the proposal, or null when it is gone or already being handled.
+ * Atomically take a suggestion so two clicks cannot both act on it.
+ * Returns the proposal, or null when it is gone, handled, or being handled.
  */
 function claimProposal(id) {
-	const p = getProposal(id);
-	if (!p) {
-		return null;
-	}
-	p.status = 'working';
-	return p;
+	const row = suggestionRepository.claimSuggestion(id);
+	return row ? _toProposal(row) : null;
 }
 
-/** Put a claimed proposal back so it can be retried. */
+/** Put a claimed suggestion back so it can be retried. */
 function releaseProposal(id) {
-	const p = proposals.get(id);
-	if (p && p.status === 'working') {
-		p.status = 'open';
-	}
+	suggestionRepository.releaseSuggestion(id);
 }
 
-/** Forget a proposal once it was turned into a task or dismissed. */
-function finishProposal(id) {
-	proposals.delete(id);
+/**
+ * Close a suggestion once it was turned into a task or dismissed.
+ *
+ * @param {string} id
+ * @param {{ status: 'created'|'dismissed', handledBy: string, taskId?: string }} outcome
+ */
+function finishProposal(id, outcome) {
+	suggestionRepository.finishSuggestion(id, outcome);
+}
+
+/**
+ * Explain to the clicker why a suggestion cannot be acted on right now.
+ *
+ * @returns {string}
+ */
+function unavailableMessage(id) {
+	const row = suggestionRepository.getSuggestion(id);
+	if (!row) {
+		return '❌ This suggestion could not be found (it was posted before suggestions were saved). Use /task add instead.';
+	}
+	if (row.status === 'created') {
+		return `✅ <@${row.handled_by}> already created this task${row.task_id ? ` (\`${row.task_id}\`)` : ''}.`;
+	}
+	if (row.status === 'dismissed') {
+		return `This suggestion was dismissed by <@${row.handled_by}>.`;
+	}
+	return '⏳ Someone else is handling this suggestion right now. Try again in a moment.';
 }
 
 /** Test helper: clear all in-memory state. */
@@ -412,7 +460,6 @@ function _reset() {
 		clearTimeout(state.timer);
 	}
 	channels.clear();
-	proposals.clear();
 	warnedUnconfigured = false;
 }
 
@@ -425,12 +472,12 @@ module.exports = {
 	claimProposal,
 	releaseProposal,
 	finishProposal,
+	unavailableMessage,
 	buildProposalEmbed,
 	buildProposalButtons,
 	_analyze,
 	_buildPrompt,
 	_normalizeProposals,
 	_postProposal,
-	_reset,
-	_proposals: proposals
+	_reset
 };

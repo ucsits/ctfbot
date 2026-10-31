@@ -17,8 +17,6 @@ const constants = require('../lib/constants/config');
 
 const { SUGGEST_IDS, TIMEZONE } = taskSuggest;
 
-const EXPIRED_MESSAGE = '⌛ This suggestion has expired or was already handled. Use /task add instead.';
-
 /**
  * Handle the buttons and modal on task suggestion cards posted by
  * src/services/taskSuggest.js:
@@ -70,6 +68,14 @@ class TaskSuggestInteractionListener extends Listener {
 		}
 	}
 
+	_unavailable(interaction, proposalId) {
+		return interaction.reply({
+			content: taskSuggest.unavailableMessage(proposalId),
+			ephemeral: true,
+			allowedMentions: { parse: [] }
+		});
+	}
+
 	async _denied(interaction) {
 		return checkPermissionReply(interaction, PermissionFlagsBits.ManageMessages, 'Manage Messages');
 	}
@@ -81,7 +87,7 @@ class TaskSuggestInteractionListener extends Listener {
 
 		const proposal = taskSuggest.claimProposal(proposalId);
 		if (!proposal) {
-			return interaction.reply({ content: EXPIRED_MESSAGE, ephemeral: true });
+			return this._unavailable(interaction, proposalId);
 		}
 		if (!proposal.deadline || proposal.deadline <= Math.floor(Date.now() / 1000)) {
 			taskSuggest.releaseProposal(proposalId);
@@ -107,7 +113,7 @@ class TaskSuggestInteractionListener extends Listener {
 
 		const proposal = taskSuggest.getProposal(proposalId);
 		if (!proposal) {
-			return interaction.reply({ content: EXPIRED_MESSAGE, ephemeral: true });
+			return this._unavailable(interaction, proposalId);
 		}
 
 		const titleInput = new TextInputBuilder()
@@ -166,7 +172,7 @@ class TaskSuggestInteractionListener extends Listener {
 
 		const proposal = taskSuggest.claimProposal(proposalId);
 		if (!proposal) {
-			return interaction.reply({ content: EXPIRED_MESSAGE, ephemeral: true });
+			return this._unavailable(interaction, proposalId);
 		}
 
 		const title = interaction.fields.getTextInputValue('title')?.trim();
@@ -212,9 +218,9 @@ class TaskSuggestInteractionListener extends Listener {
 
 		const proposal = taskSuggest.claimProposal(proposalId);
 		if (!proposal) {
-			return interaction.reply({ content: EXPIRED_MESSAGE, ephemeral: true });
+			return this._unavailable(interaction, proposalId);
 		}
-		taskSuggest.finishProposal(proposalId);
+		taskSuggest.finishProposal(proposalId, { status: 'dismissed', handledBy: interaction.user.id });
 
 		const embed = new EmbedBuilder()
 			.setColor(0x95a5a6)
@@ -241,7 +247,7 @@ class TaskSuggestInteractionListener extends Listener {
 				createdBy: interaction.user.id,
 				deadline
 			});
-			taskSuggest.finishProposal(proposal.id);
+			taskSuggest.finishProposal(proposal.id, { status: 'created', handledBy: interaction.user.id, taskId });
 
 			const embed = new EmbedBuilder()
 				.setColor(0x00ff00)
@@ -274,7 +280,8 @@ class TaskSuggestInteractionListener extends Listener {
 					ephemeral: true
 				});
 			}
-			taskSuggest.finishProposal(proposal.id);
+			// The block was anchored, so the task exists; never offer the card again.
+			taskSuggest.finishProposal(proposal.id, { status: 'created', handledBy: interaction.user.id, taskId });
 			return interaction.followUp({
 				content: `⚠️ The task was anchored, but the confirmation could not be completed. Task ID: \`${taskId}\`. Please use /task list to verify it.`,
 				ephemeral: true

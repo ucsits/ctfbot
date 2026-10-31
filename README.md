@@ -548,8 +548,11 @@ reply with a suggestion card offering to create a task with reminders.
   Nothing is created until someone clicks.
 - Accepted suggestions go through the same path as `/task add`: blockchain
   anchoring, reminders and Google Calendar sync.
-- Only governance-channel messages are ever sent to the model. Suggestions
-  live in memory and expire after 24 hours or when the bot restarts.
+- Only governance-channel messages are ever sent to the model.
+- Suggestions are stored in the `task_suggestions` table (migration 026), so
+  a card keeps working across restarts, with no time limit, until someone
+  creates the task or dismisses it. Clicking a card that was already handled
+  says who handled it.
 
 ### Setup
 
