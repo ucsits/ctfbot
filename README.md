@@ -563,6 +563,18 @@ reply with a suggestion card offering to create a task with reminders.
   a card keeps working across restarts, with no time limit, until someone
   creates the task or dismisses it. Clicking a card that was already handled
   says who handled it.
+- The bot remembers people. When someone states a lasting fact or preference
+  ("aku biasanya baru bisa malam", "Budi pegang sponsor", "pakai bahasa
+  Inggris aja ke aku"), the model saves it as a note or a language
+  preference (migration 027) and the bot reacts 🧠 on that message. Later
+  passes see these notes, so assignees and deadlines follow each person's
+  preferences.
+- The model writes in Indonesian by default (set in its system prompt):
+  card titles, descriptions, notes and its answer to a mention. A person
+  with a saved language gets that language instead.
+- `/memory view` shows what the bot remembers about you (Manage Messages can
+  view others). `/memory remember`, `/memory forget <number>`,
+  `/memory language` and `/memory clear` edit or delete it.
 
 ### Setup
 

@@ -9,7 +9,7 @@ const root = join(import.meta.dirname, '../..');
 
 // The service persists suggestions through the real repository, which opens
 // ctfbot.db in the working directory. Run the whole file in a scratch
-// directory holding a fresh database with just the task_suggestions table.
+// directory holding a fresh database with just the tables it uses.
 let tmpDir;
 let originalCwd;
 
@@ -18,6 +18,7 @@ beforeAll(() => {
 	tmpDir = mkdtempSync(join(tmpdir(), 'ctfbot-task-suggest-'));
 	const db = new Database(join(tmpDir, 'ctfbot.db'));
 	db.exec(readFileSync(join(root, 'migrations/026_add_task_suggestions.sql'), 'utf8'));
+	db.exec(readFileSync(join(root, 'migrations/027_add_actor_memory.sql'), 'utf8'));
 	db.close();
 	process.chdir(tmpDir);
 });
@@ -613,6 +614,168 @@ describe('task suggestion persistence', () => {
 		expect(taskSuggest.unavailableMessage(dismissed)).toContain('dismissed by <@u8>');
 
 		expect(taskSuggest.unavailableMessage('unknown-id')).toContain('could not be found');
+	});
+});
+
+describe('actor memory', () => {
+	const originalEnv = { ...process.env };
+	const originalFetch = globalThis.fetch;
+	let taskSuggest;
+	let memory;
+	let constants;
+	let n = 0;
+
+	beforeEach(async () => {
+		vi.resetModules();
+		process.env.TASK_SUGGESTIONS_ENABLED = 'true';
+		process.env.OPENAI_API_KEY = 'sk-test';
+		process.env.OPENAI_MODEL = 'test-model';
+		taskSuggest = await import('../../src/services/taskSuggest.js');
+		memory = await import('../../src/database/repositories/actorMemory.repository.js');
+		constants = (await import('../../src/lib/constants/config.js')).default;
+		taskSuggest._reset();
+		n++;
+	});
+
+	afterEach(() => {
+		taskSuggest._reset();
+		process.env = { ...originalEnv };
+		globalThis.fetch = originalFetch;
+	});
+
+	const profilesOf = (...ids) => memory.getProfiles(ids);
+
+	it('stores language and notes per user, newest kept within the cap', () => {
+		const user = `mem-user-${n}`;
+		expect(memory.getLanguage(user)).toBeNull();
+		memory.setLanguage(user, 'English');
+		expect(memory.getLanguage(user)).toBe('English');
+
+		const first = memory.addNote(user, 'Pegang urusan sponsor');
+		expect(memory.addNote(user, 'Pegang urusan sponsor')).toBeNull();
+		for (let i = 0; i < memory.MAX_NOTES_PER_USER; i++) {
+			memory.addNote(user, `note ${i}`);
+		}
+		const notes = memory.listNotes(user);
+		expect(notes).toHaveLength(memory.MAX_NOTES_PER_USER);
+		expect(notes.some(x => x.id === first)).toBe(false);
+
+		expect(memory.removeNote('someone-else', notes[0].id)).toBeNull();
+		expect(memory.removeNote(user, notes[0].id)).toBe('note 0');
+
+		memory.clearUser(user);
+		expect(profilesOf(user).get(user)).toEqual({ language: null, notes: [] });
+	});
+
+	it('tells the model to write in Indonesian by default and shows what it remembers', () => {
+		const profiles = new Map([
+			['u1', { language: null, notes: [{ id: 7, note: 'Prefers reminders at 20:00' }] }],
+			['u2', { language: 'English', notes: [] }]
+		]);
+		const [system, user] = taskSuggest._buildPrompt({ context: [], fresh, people, proposedTitles: [], profiles });
+		expect(system.content).toContain('in Indonesian (Bahasa Indonesia) by default');
+		expect(system.content).toContain('"memories"');
+		expect(user.content).toContain(
+			'- Alice (u1): language=default (Indonesian); notes: [7] Prefers reminders at 20:00'
+		);
+		expect(user.content).toContain('- Budi (u2): language=English; notes: none');
+	});
+
+	it('only accepts memory changes from new messages about known people', () => {
+		const profiles = new Map([
+			['u1', { language: null, notes: [{ id: 3, note: 'Works evenings' }] }],
+			['u2', { language: null, notes: [] }]
+		]);
+		const changes = taskSuggest._normalizeMemories(
+			{
+				memories: [
+					{ user_id: 'u1', forget: 3, remember: 'Works mornings', source_message_id: '111' },
+					{ user_id: 'u2', remember: 'Handles the sponsor proposal', source_message_id: '111' },
+					// Someone else cannot change Budi's language.
+					{ user_id: 'u2', language: 'English', source_message_id: '111' },
+					{ user_id: 'u2', language: 'English', source_message_id: '222' },
+					{ user_id: 'stranger', remember: 'x', source_message_id: '111' },
+					{ user_id: 'u1', remember: 'x', source_message_id: '999' },
+					{ user_id: 'u1', remember: 'works evenings', forget: 42, source_message_id: '111' }
+				]
+			},
+			{ fresh, people, profiles }
+		);
+		expect(changes).toEqual([
+			{
+				userId: 'u1',
+				authorId: 'u1',
+				sourceMessageId: '111',
+				forget: { id: 3, note: 'Works evenings' },
+				remember: 'Works mornings'
+			},
+			{ userId: 'u2', authorId: 'u1', sourceMessageId: '111', remember: 'Handles the sponsor proposal' },
+			{ userId: 'u2', authorId: 'u2', sourceMessageId: '222', language: 'English' }
+		]);
+	});
+
+	it('learns from a mention, reacts, and answers with the model-written reply', async () => {
+		const user = `learner-${n}`;
+		const source = { react: vi.fn().mockResolvedValue(undefined) };
+		const channel = {
+			id: `mem-chan-${n}`,
+			parentId: constants.GOVERNANCE_CATEGORIES[0],
+			sendTyping: vi.fn().mockResolvedValue(undefined),
+			messages: { fetch: vi.fn(arg => Promise.resolve(typeof arg === 'string' ? source : new Map())) },
+			send: vi.fn()
+		};
+		const message = {
+			id: `msg-${n}`,
+			channelId: channel.id,
+			channel,
+			guild: {},
+			client: { user: { id: 'bot-1' } },
+			author: { id: user, bot: false, username: 'hanz' },
+			member: { displayName: 'Hanz' },
+			mentions: { users: new Map([['bot-1', { id: 'bot-1', bot: true }]]), members: new Map() },
+			content: '<@bot-1> ingat ya, aku biasanya baru bisa malam, dan pakai bahasa inggris aja ke aku',
+			createdTimestamp: Date.now(),
+			reply: vi.fn().mockResolvedValue({})
+		};
+		globalThis.fetch = vi.fn().mockResolvedValue({
+			ok: true,
+			json: () =>
+				Promise.resolve({
+					choices: [
+						{
+							message: {
+								content: JSON.stringify({
+									proposals: [],
+									updates: [],
+									memories: [
+										{
+											user_id: user,
+											remember: 'Usually only available in the evening',
+											language: 'English',
+											source_message_id: message.id
+										}
+									],
+									reply: "Got it, I'll remember you're usually free in the evening and use English with you."
+								})
+							}
+						}
+					]
+				})
+		});
+
+		taskSuggest.observe(message);
+		await vi.waitFor(() => expect(message.reply).toHaveBeenCalledTimes(1));
+
+		expect(message.reply.mock.calls[0][0].content).toBe(
+			"Got it, I'll remember you're usually free in the evening and use English with you."
+		);
+		expect(source.react).toHaveBeenCalledWith('🧠');
+		expect(memory.getLanguage(user)).toBe('English');
+		expect(memory.listNotes(user).map(x => x.note)).toEqual(['Usually only available in the evening']);
+
+		// A mention asks the model to write the reply itself.
+		const prompt = JSON.parse(globalThis.fetch.mock.calls[0][1].body).messages[0].content;
+		expect(prompt).toContain('Also add "reply"');
 	});
 });
 

@@ -10,6 +10,12 @@
  * handled by src/listeners/taskSuggestInteraction.js. Nothing is created
  * until someone confirms.
  *
+ * The bot also remembers people: each pass sees the notes and preferences
+ * stored for the participants (actor_profiles / actor_memories) and may add
+ * or drop notes when someone states a lasting fact or preference; the source
+ * message gets a 🧠 reaction so people know. The system prompt makes the
+ * model write in Indonesian unless a person's saved language says otherwise.
+ *
  * Only messages from GOVERNANCE_CATEGORIES channels are buffered or sent to
  * the model. Message buffers live in memory; suggestions are stored in the
  * task_suggestions table, so a card stays actionable (across restarts, with
@@ -25,6 +31,7 @@ const config = require('../config');
 const constants = require('../lib/constants/config');
 const { chatCompletion, parseJsonReply } = require('../lib/llm/openai');
 const suggestionRepository = require('../database/repositories/taskSuggestion.repository');
+const memoryRepository = require('../database/repositories/actorMemory.repository');
 const { logger } = require('../lib/logger');
 
 const suggestLog = logger.child('TaskSuggest');
@@ -42,6 +49,11 @@ const MAX_UPDATES_PER_PASS = 3;
 const MAX_MESSAGE_CHARS = 1500;
 const MAX_PROPOSALS_PER_PASS = 3;
 const MIN_CONFIDENCE = 0.7;
+const MAX_MEMORY_CHANGES_PER_PASS = 5;
+const MAX_NOTE_CHARS = 200;
+const MAX_LANGUAGE_CHARS = 30;
+const MAX_REPLY_CHARS = 1500;
+const MEMORY_REACTION = '🧠';
 // Discord shows "typing..." for about 10s per call, so refresh it before then.
 const TYPING_REFRESH_MS = 8_000;
 const TIMEZONE = constants.DEFAULT_TIMEZONE;
@@ -214,6 +226,7 @@ async function _analyze(channelId, { trigger = null } = {}) {
 		const context = await _loadContext(state, fresh);
 		const open = suggestionRepository.listOpenSuggestions(channelId);
 		const openTitles = new Set(open.map(r => r.title));
+		const profiles = memoryRepository.getProfiles([...state.people.keys()]);
 
 		let reply;
 		try {
@@ -223,6 +236,7 @@ async function _analyze(channelId, { trigger = null } = {}) {
 					fresh,
 					people: state.people,
 					open,
+					profiles,
 					proposedTitles: suggestionRepository.recentTitles(channelId).filter(t => !openTitles.has(t)),
 					botId: trigger ? trigger.client.user.id : null
 				}),
@@ -269,10 +283,26 @@ async function _analyze(channelId, { trigger = null } = {}) {
 				posted++;
 			}
 		}
-		if (posted > 0 || updated > 0) {
-			suggestLog.info(`Posted ${posted} and updated ${updated} task suggestion(s) in channel ${channelId}`);
-		} else if (trigger) {
-			await _replyTo(trigger, "🤔 I didn't find a new decision, or a change to an open suggestion, to act on.");
+		const learned = await _applyMemories(
+			state.channel,
+			_normalizeMemories(parsed, { fresh, people: state.people, profiles })
+		);
+		if (posted > 0 || updated > 0 || learned > 0) {
+			suggestLog.info(
+				`Posted ${posted}, updated ${updated} task suggestion(s) and saved ${learned} memory change(s) in channel ${channelId}`
+			);
+		}
+		if (trigger) {
+			// The model writes the answer to a mention, in the person's language.
+			const answer = typeof parsed?.reply === 'string' ? parsed.reply.trim().slice(0, MAX_REPLY_CHARS) : '';
+			if (answer) {
+				await _replyTo(trigger, answer);
+			} else if (posted === 0 && updated === 0 && learned === 0) {
+				await _replyTo(
+					trigger,
+					"🤔 I didn't find a new decision, or a change to an open suggestion, to act on."
+				);
+			}
 		}
 	} finally {
 		stopTyping();
@@ -348,7 +378,16 @@ async function _loadContext(state, fresh) {
  *
  * @returns {Array<{role: string, content: string}>}
  */
-function _buildPrompt({ context, fresh, people, proposedTitles, open = [], botId = null, now = DateTime.now() }) {
+function _buildPrompt({
+	context,
+	fresh,
+	people,
+	proposedTitles,
+	open = [],
+	profiles = new Map(),
+	botId = null,
+	now = DateTime.now()
+}) {
 	const local = now.setZone(TIMEZONE);
 	const localTime = unix => DateTime.fromSeconds(unix).setZone(TIMEZONE).toFormat('yyyy-MM-dd HH:mm cccc');
 	const fmt = m => {
@@ -363,20 +402,28 @@ function _buildPrompt({ context, fresh, people, proposedTitles, open = [], botId
 		'Only include firm commitments or agreed plans. Skip open questions, ideas still being debated, things already done, jokes, and actions that will be finished within the next hour.',
 		'Earlier messages are context: use them to understand what the NEW messages refer to, but only act on what the NEW messages say. Do not repeat anything listed as already suggested.',
 		'When a NEW message changes or corrects an OPEN suggestion (a different day, person, title or detail), put it in "updates" with that suggestion_id instead of adding a new proposal. Only include the fields that change.',
-		'Messages may be in Indonesian, English or a mix; write the title and description in the language the decision was made in.',
+		'Messages may be in Indonesian, English or a mix. Write every title, description, note and reply in Indonesian (Bahasa Indonesia) by default, even when the messages are in English. Use another language only for a person whose memory sets one: the assignee for a task, the person who mentioned you for the reply.',
+		'You remember participants between conversations. Use what you remember to pick assignees and deadlines the way each person prefers.',
+		'In "memories", save lasting facts or preferences a NEW message states about its author or a teammate that will help with later tasks: role or responsibilities, usual availability, preferred reminder time, how they want to be addressed. Do not save one-off task details, anything already remembered, secrets or credentials, or sensitive personal data. When a NEW message says a remembered note is no longer true, "forget" it by note id (and "remember" the corrected one). Set "language" only when a person asks you to use a language with them.',
 		'Reply with a JSON object only:',
-		'{"proposals":[{"title":"short imperative, max 80 chars","description":"one or two sentences of context, or empty","assignee_id":"Discord user id from the participants list, or null if unclear","deadline":"YYYY-MM-DD HH:mm in the given local time, or null if no time frame was mentioned","source_message_id":"id of the NEW message where it was decided","confidence":0.0}],"updates":[{"suggestion_id":"id of the OPEN suggestion","title":"new title, or omit","description":"new description, or omit","assignee_id":"new assignee id, or omit","deadline":"new YYYY-MM-DD HH:mm, or omit","source_message_id":"id of the NEW message asking for the change"}]}',
-		'Resolve relative dates ("besok", "next Friday", "end of the month") against the current local time. When only a day is given, use 23:59 that day.',
-		'Return {"proposals":[],"updates":[]} when there is nothing to do.'
+		'{"proposals":[{"title":"short imperative, max 80 chars","description":"one or two sentences of context, or empty","assignee_id":"Discord user id from the participants list, or null if unclear","deadline":"YYYY-MM-DD HH:mm in the given local time, or null if no time frame was mentioned","source_message_id":"id of the NEW message where it was decided","confidence":0.0}],"updates":[{"suggestion_id":"id of the OPEN suggestion","title":"new title, or omit","description":"new description, or omit","assignee_id":"new assignee id, or omit","deadline":"new YYYY-MM-DD HH:mm, or omit","source_message_id":"id of the NEW message asking for the change"}],"memories":[{"user_id":"Discord user id the note is about","remember":"short note in the third person, max 200 chars, or omit","forget":"id of a remembered note that is no longer true, or omit","language":"language the person asked you to use with them, or omit","source_message_id":"id of the NEW message it came from"}]}',
+		'Resolve relative dates ("besok", "next Friday", "end of the month") against the current local time. When only a day is given, use the time the assignee prefers if you remember one, otherwise 23:59 that day.',
+		'Return {"proposals":[],"updates":[],"memories":[]} when there is nothing to do.'
 	];
 	if (botId) {
 		system.push(
-			`You were mentioned directly as <@${botId}>: someone is asking you to look for tasks now. Treat an explicit request such as "remind us to X by Y" as a decision, and use the mentioning message as source_message_id when the request is made there.`
+			`You were mentioned directly as <@${botId}>: someone is asking you to look for tasks now. Treat an explicit request such as "remind us to X by Y" as a decision, and use the mentioning message as source_message_id when the request is made there. Also add "reply" to the JSON object: one to three sentences answering the person who mentioned you, saying what you suggested, changed or remembered, or why there was nothing to do. Answer questions about what you remember from the memory list.`
 		);
 	}
 	const systemText = system.join('\n');
 
 	const participants = [...people].map(([id, name]) => `- ${name} (${id})`).join('\n');
+	const memoryLines = [...people].map(([id, name]) => {
+		const profile = profiles.get(id);
+		const language = profile?.language ? `language=${profile.language}` : 'language=default (Indonesian)';
+		const notes = profile?.notes?.length ? profile.notes.map(n => `[${n.id}] ${n.note}`).join('; ') : 'none';
+		return `- ${name} (${id}): ${language}; notes: ${notes}`;
+	});
 	const openLines = open.map(
 		r =>
 			`- suggestion_id=${r.id} title="${r.title}" assignee=${people.get(r.assignee_id) ?? 'unknown'} (${r.assignee_id}) deadline=${r.deadline ? localTime(r.deadline) : 'none'} from message id=${r.source_message_id}${r.description ? ` details="${r.description}"` : ''}`
@@ -386,6 +433,9 @@ function _buildPrompt({ context, fresh, people, proposedTitles, open = [], botId
 		'',
 		'Participants:',
 		participants,
+		'',
+		'What you remember about participants:',
+		memoryLines.join('\n'),
 		'',
 		'OPEN suggestions (posted, not yet accepted; update these rather than suggesting them again):',
 		openLines.length ? openLines.join('\n') : '(none)',
@@ -509,6 +559,88 @@ function _normalizeUpdates(parsed, { fresh, people, open, now = Date.now() }) {
 		}
 	}
 	return out;
+}
+
+/**
+ * Validate the model's memory changes. A note must be about a known
+ * participant and come from a NEW message; only the person themselves can
+ * change their language; "forget" must name one of that person's notes.
+ *
+ * @returns {Array<{ userId: string, authorId: string, sourceMessageId: string, remember?: string, forget?: { id: number, note: string }, language?: string }>}
+ */
+function _normalizeMemories(parsed, { fresh, people, profiles }) {
+	const raw = Array.isArray(parsed?.memories) ? parsed.memories : [];
+	const freshById = new Map(fresh.map(m => [String(m.id), m]));
+	const out = [];
+
+	for (const item of raw) {
+		if (!item || typeof item !== 'object') {
+			continue;
+		}
+		const userId = String(item.user_id);
+		const source = freshById.get(String(item.source_message_id));
+		if (!people.has(userId) || !source) {
+			continue;
+		}
+		const profile = profiles.get(userId) ?? { language: null, notes: [] };
+		const change = { userId, authorId: source.authorId, sourceMessageId: source.id };
+
+		if (item.forget !== undefined && item.forget !== null) {
+			const noteId = Number(String(item.forget).replace(/^#/, ''));
+			const note = profile.notes.find(n => n.id === noteId);
+			if (note) {
+				change.forget = note;
+			}
+		}
+		if (typeof item.remember === 'string') {
+			const note = item.remember.replace(/\s+/g, ' ').trim().slice(0, MAX_NOTE_CHARS);
+			const known = profile.notes.some(n => n !== change.forget && n.note.toLowerCase() === note.toLowerCase());
+			if (note && !known) {
+				change.remember = note;
+			}
+		}
+		if (typeof item.language === 'string' && source.authorId === userId) {
+			const language = item.language.replace(/\s+/g, ' ').trim().slice(0, MAX_LANGUAGE_CHARS);
+			if (language && language.toLowerCase() !== (profile.language ?? '').toLowerCase()) {
+				change.language = language;
+			}
+		}
+		if (!change.remember && !change.forget && !change.language) {
+			continue;
+		}
+		out.push(change);
+		if (out.length >= MAX_MEMORY_CHANGES_PER_PASS) {
+			break;
+		}
+	}
+	return out;
+}
+
+/**
+ * Store memory changes and react on each source message so people can see
+ * the bot remembered something (and check it with /memory view).
+ *
+ * @returns {Promise<number>} number of changes saved
+ */
+async function _applyMemories(channel, changes) {
+	const sources = new Set();
+	for (const c of changes) {
+		if (c.forget) {
+			memoryRepository.removeNote(c.userId, c.forget.id);
+		}
+		if (c.remember) {
+			memoryRepository.addNote(c.userId, c.remember, { addedBy: c.authorId, sourceMessageId: c.sourceMessageId });
+		}
+		if (c.language) {
+			memoryRepository.setLanguage(c.userId, c.language);
+		}
+		sources.add(c.sourceMessageId);
+	}
+	for (const id of sources) {
+		const message = await channel.messages.fetch(id).catch(() => null);
+		await message?.react(MEMORY_REACTION).catch(() => {});
+	}
+	return changes.length;
 }
 
 /**
@@ -733,6 +865,8 @@ module.exports = {
 	_buildPrompt,
 	_normalizeProposals,
 	_normalizeUpdates,
+	_normalizeMemories,
+	_applyMemories,
 	_applyUpdate,
 	_loadContext,
 	_postProposal,
