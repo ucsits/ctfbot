@@ -432,6 +432,60 @@ describe('taskSuggest direct mentions', () => {
 		const prompt = JSON.parse(globalThis.fetch.mock.calls[0][1].body).messages[0].content;
 		expect(prompt).toContain('The first message is sent as a reply to them and must be a quick acknowledgment');
 	});
+
+	it('posts the card from the mention when the model points at an earlier message', async () => {
+		const deadline = DateTime.now().setZone('Asia/Jakarta').plus({ days: 5 }).toFormat('yyyy-MM-dd HH:mm');
+		globalThis.fetch = vi.fn().mockResolvedValue(
+			llmReply(
+				JSON.stringify({
+					proposals: [{ title: 'Day 3', deadline, source_message_id: 'old-msg', confidence: 0.9 }],
+					messages: ['oke', 'ini ya']
+				})
+			)
+		);
+		taskSuggest.observe(
+			makeMessage({ id: 'm1', content: '<@bot-1> kartunya nggak muncul, bikin ulang', mentionBot: true })
+		);
+		await vi.waitFor(() => expect(channel.send.mock.calls.some(([p]) => p.embeds)).toBe(true));
+	});
+
+	it('says so when a promised card was dropped instead of leaving the chat lying', async () => {
+		globalThis.fetch = vi.fn().mockResolvedValue(
+			llmReply(
+				JSON.stringify({
+					proposals: [{ title: 'Day 3', source_message_id: 'm1', confidence: 0.2 }],
+					messages: ['sip', 'oke ini kartunya']
+				})
+			)
+		);
+		taskSuggest.observe(makeMessage({ id: 'm1', content: '<@bot-1> day 3 tanggal 21', mentionBot: true }));
+		await vi.waitFor(() =>
+			expect(channel.send.mock.calls.some(([p]) => p.content?.includes('gagal kubikin'))).toBe(true)
+		);
+		expect(channel.send.mock.calls.some(([p]) => p.embeds)).toBe(false);
+	});
+
+	it('tells the model its own earlier messages do not prove a card exists', () => {
+		const [system] = taskSuggest._buildPrompt({ context: [], fresh, people, proposedTitles: [] });
+		expect(system.content).toContain('Your own earlier messages in the context are NOT proof');
+		expect(system.content).toContain('em dash');
+	});
+});
+
+describe('banned punctuation', () => {
+	it('replaces em and en dashes in chat, titles and descriptions', async () => {
+		const taskSuggest = await import('../../src/services/taskSuggest.js');
+		expect(taskSuggest._plain('kartunya ilang — nanti aku ingetin')).toBe('kartunya ilang, nanti aku ingetin');
+		expect(taskSuggest._plain('jam 9–10 pagi')).toBe('jam 9-10 pagi');
+		expect(taskSuggest._plain('oke—')).toBe('oke');
+		expect(taskSuggest._chatMessages({ messages: ['a — b'] })).toEqual(['a, b']);
+		const [p] = taskSuggest._normalizeProposals(
+			{ proposals: [{ title: 'Sidang — Day 3', description: 'lanjut – day 2', source_message_id: '111' }] },
+			{ fresh, people, proposedSources: new Set() }
+		);
+		expect(p.title).toBe('Sidang, Day 3');
+		expect(p.description).toBe('lanjut, day 2');
+	});
 });
 
 describe('taskSuggest corrections to open suggestions', () => {

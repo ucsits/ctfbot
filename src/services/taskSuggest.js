@@ -226,9 +226,25 @@ function _chatMessages(parsed) {
 	const raw = Array.isArray(parsed?.messages) ? parsed.messages : [parsed?.reply];
 	return raw
 		.filter(m => typeof m === 'string')
-		.map(m => m.trim().slice(0, MAX_CHAT_CHARS))
+		.map(m => _plain(m).slice(0, MAX_CHAT_CHARS))
 		.filter(Boolean)
 		.slice(0, MAX_CHAT_MESSAGES);
+}
+
+/**
+ * Strip punctuation the bot must not use: em and en dashes become a comma
+ * (or a hyphen inside a number range like 9–10).
+ *
+ * @param {string} text
+ * @returns {string}
+ */
+function _plain(text) {
+	return text
+		.replace(/(\d)\s*[–—]\s*(\d)/g, '$1-$2')
+		.replace(/\s*[—–]\s*/g, ', ')
+		.replace(/,\s*([,.!?])/g, '$1')
+		.replace(/^,\s*|,\s*$/g, '')
+		.trim();
 }
 
 function _replyTo(message, content) {
@@ -320,10 +336,13 @@ async function _analyze(channelId, { trigger = null } = {}) {
 			throw error;
 		}
 		const parsed = parseJsonReply(reply);
+		const dropped = [];
 		const found = _normalizeProposals(parsed, {
 			fresh,
 			people: state.people,
 			minConfidence: trigger ? MIN_CONFIDENCE : PASSIVE_MIN_CONFIDENCE,
+			fallbackSourceId: trigger?.id ?? null,
+			dropped,
 			proposedSources: suggestionRepository.suggestedSourceIds(
 				channelId,
 				fresh.map(m => m.id)
@@ -347,6 +366,21 @@ async function _analyze(channelId, { trigger = null } = {}) {
 		for (const p of found) {
 			if (await _postProposal(state.channel, p, { reply: !trigger })) {
 				posted++;
+			} else {
+				dropped.push(`"${p.title}": already suggested from message ${p.sourceMessageId}`);
+			}
+		}
+		if (dropped.length > 0) {
+			suggestLog.warn(`Dropped ${dropped.length} proposal(s) in channel ${channelId}: ${dropped.join('; ')}`);
+			// The chat may already have promised these cards, so say they did
+			// not come instead of leaving the person looking for them.
+			if (trigger && chat.length > 0) {
+				await state.channel
+					.send({
+						content: `eh ${dropped.length > 1 ? 'beberapa kartu' : 'kartunya'} gagal kubikin barusan. coba sebut lagi detailnya, atau pake /task add aja`,
+						allowedMentions: { parse: [] }
+					})
+					.catch(() => {});
 			}
 		}
 		const learned = await _applyMemories(
@@ -471,11 +505,13 @@ function _buildPrompt({
 		'Messages may be in Indonesian, English or a mix. Write every title, description, note and reply in Indonesian (Bahasa Indonesia) by default, even when the messages are in English. Use another language only for a person whose memory sets one: the assignee for a task, the person who mentioned you for the reply.',
 		'Gaya bicara: kamu itu temen sekelas yang lagi chat di grup Discord, bukan orang kantor dan bukan customer service. Ketik kayak orang nge-chat: pendek-pendek, huruf kecil boleh, bahasa gaul sehari-hari ("bro", "gas", "aman", "sip", "oke", "wkwk", "udah", "nggak", "aja", "nih", "dong", "sih"), sesekali emoji. Nggak usah basa-basi formal kayak "Baik, saya telah mencatat permintaan Anda" atau "Terima kasih atas informasinya". Jangan kasar.',
 		'Humor setting: 30%, kayak TARS di Interstellar. Kadang selipin satu celetukan kering yang deadpan, tapi kebanyakan langsung to the point dan jawabannya tetap jelas. Jangan maksa lucu di tiap pesan, dan jangan bercanda soal hal yang serius.',
+		'Tanda baca: jangan pernah pakai em dash (—) atau en dash (–), di pesan, judul, deskripsi maupun catatan. Pakai koma, titik, atau pecah jadi pesan baru.',
 		'Judul tugas tetap singkat dan jelas, misalnya "Kirim proposal sponsor". Kalau seseorang minta bahasa lain, tetap santai kayak temen di bahasa itu.',
 		'You remember participants between conversations. Use what you remember to pick assignees and deadlines the way each person prefers.',
 		'In "memories", save lasting facts or preferences a NEW message states about its author or a teammate that will help with later tasks: role or responsibilities, usual availability, preferred reminder time, how they want to be addressed. Do not save one-off task details, anything already remembered, secrets or credentials, or sensitive personal data. When a NEW message says a remembered note is no longer true, "forget" it by note id (and "remember" the corrected one). Set "language" only when a person asks you to use a language with them.',
 		'Reply with a JSON object only:',
 		'{"proposals":[{"title":"short imperative, max 80 chars","description":"one or two sentences of context, or empty","assignee_id":"Discord user id from the participants list, or null if unclear","deadline":"YYYY-MM-DD HH:mm in the given local time, or null if no time frame was mentioned","source_message_id":"id of the NEW message where it was decided","confidence":0.0}],"updates":[{"suggestion_id":"id of the OPEN suggestion","title":"new title, or omit","description":"new description, or omit","assignee_id":"new assignee id, or omit","deadline":"new YYYY-MM-DD HH:mm, or omit","source_message_id":"id of the NEW message asking for the change"}],"memories":[{"user_id":"Discord user id the note is about","remember":"short note in the third person, max 200 chars, or omit","forget":"id of a remembered note that is no longer true, or omit","language":"language the person asked you to use with them, or omit","source_message_id":"id of the NEW message it came from"}]}',
+		'Be honest about cards. A card exists only if it is listed under OPEN suggestions or "Already suggested and handled" below, or if you put it in "proposals" in this reply. Your own earlier messages in the context are NOT proof: a card you promised there may never have been posted. Never say a card is coming, or that a task is recorded ("udah kecatat"), unless it is in "proposals" now or in those lists. When someone says a card is missing and it is not in those lists, believe them and propose it again (source_message_id = their NEW message), taking the details from the earlier messages.',
 		'Resolve relative dates ("besok", "next Friday", "end of the month") against the current local time. When only a day is given, use the time the assignee prefers if you remember one, otherwise 23:59 that day. "Jam 12 malam" on a day means the end of that day, so use 23:59 that day.',
 		'Return {"proposals":[],"updates":[],"memories":[]} when there is nothing to do.'
 	];
@@ -534,7 +570,15 @@ function _buildPrompt({
  */
 function _normalizeProposals(
 	parsed,
-	{ fresh, people, proposedSources, minConfidence = MIN_CONFIDENCE, now = Date.now() }
+	{
+		fresh,
+		people,
+		proposedSources,
+		minConfidence = MIN_CONFIDENCE,
+		fallbackSourceId = null,
+		dropped = [],
+		now = Date.now()
+	}
 ) {
 	const raw = Array.isArray(parsed?.proposals) ? parsed.proposals : [];
 	const freshById = new Map(fresh.map(m => [String(m.id), m]));
@@ -545,12 +589,23 @@ function _normalizeProposals(
 		if (!item || typeof item !== 'object') {
 			continue;
 		}
-		const title = typeof item.title === 'string' ? item.title.replace(/\s+/g, ' ').trim().slice(0, 100) : '';
-		const source = freshById.get(String(item.source_message_id));
-		if (!title || !source || proposedSources.has(source.id) || seen.has(source.id)) {
-			continue;
-		}
-		if (typeof item.confidence === 'number' && item.confidence < minConfidence) {
+		const title = typeof item.title === 'string' ? _plain(item.title.replace(/\s+/g, ' ')).slice(0, 100) : '';
+		// After a mention the model sometimes points at the earlier message
+		// that first mentioned the task; the mention itself is the request.
+		const source =
+			freshById.get(String(item.source_message_id)) ??
+			(fallbackSourceId ? freshById.get(String(fallbackSourceId)) : undefined);
+		const why = !title
+			? 'no title'
+			: !source
+				? `source ${item.source_message_id} is not a new message`
+				: proposedSources.has(source.id) || seen.has(source.id)
+					? `message ${source.id} already has a suggestion`
+					: typeof item.confidence === 'number' && item.confidence < minConfidence
+						? `confidence ${item.confidence} < ${minConfidence}`
+						: null;
+		if (why) {
+			dropped.push(`"${title || '?'}": ${why}`);
 			continue;
 		}
 
@@ -567,7 +622,7 @@ function _normalizeProposals(
 
 		const description =
 			typeof item.description === 'string' && item.description.trim()
-				? item.description.trim().slice(0, 1000)
+				? _plain(item.description).slice(0, 1000)
 				: null;
 
 		seen.add(source.id);
@@ -600,13 +655,13 @@ function _normalizeUpdates(parsed, { fresh, people, open, now = Date.now() }) {
 
 		const changes = {};
 		if (typeof item.title === 'string') {
-			const title = item.title.replace(/\s+/g, ' ').trim().slice(0, 100);
+			const title = _plain(item.title.replace(/\s+/g, ' ')).slice(0, 100);
 			if (title && title !== row.title) {
 				changes.title = title;
 			}
 		}
 		if (typeof item.description === 'string') {
-			const description = item.description.trim().slice(0, 1000) || null;
+			const description = _plain(item.description).slice(0, 1000) || null;
 			if (description !== row.description) {
 				changes.description = description;
 			}
@@ -666,7 +721,7 @@ function _normalizeMemories(parsed, { fresh, people, profiles }) {
 			}
 		}
 		if (typeof item.remember === 'string') {
-			const note = item.remember.replace(/\s+/g, ' ').trim().slice(0, MAX_NOTE_CHARS);
+			const note = _plain(item.remember.replace(/\s+/g, ' ')).slice(0, MAX_NOTE_CHARS);
 			const known = profile.notes.some(n => n !== change.forget && n.note.toLowerCase() === note.toLowerCase());
 			if (note && !known) {
 				change.remember = note;
@@ -976,6 +1031,8 @@ function _reset() {
 }
 
 module.exports = {
+	_plain,
+	_chatMessages,
 	SUGGEST_IDS,
 	TIMEZONE,
 	isEnabled,
