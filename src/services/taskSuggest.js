@@ -36,6 +36,20 @@ const { logger } = require('../lib/logger');
 
 const suggestLog = logger.child('TaskSuggest');
 
+// Longest model reply quoted in a debug line; trace logs it in full.
+const LOG_REPLY_CHARS = 2000;
+
+/** "#name (id)" for log lines, so a channel is recognisable at a glance. */
+function _where(channel, channelId = channel?.id) {
+	return channel?.name ? `#${channel.name} (${channelId})` : `channel ${channelId}`;
+}
+
+/** Shorten text for a single log line. */
+function _clip(text, max = 120) {
+	const flat = String(text ?? '').replace(/\s+/g, ' ');
+	return flat.length > max ? `${flat.slice(0, max)}…` : flat;
+}
+
 // Wait for this much silence in a channel before analysing it.
 const QUIET_MS = 60_000;
 // Never analyse the same channel more often than this.
@@ -149,10 +163,16 @@ function observe(message) {
 		analyzed: false
 	});
 	_prune(state);
+	suggestLog.trace(
+		`Buffered message ${message.id} from ${message.author.id} in ${_where(message.channel, message.channelId)} (${state.messages.length} buffered): ${_clip(text)}`
+	);
 
 	// A direct mention is a request to look now, not after the discussion ends.
 	if (botId && (message.mentions?.users?.has(botId) || botRoles.length > 0)) {
 		clearTimeout(state.timer);
+		suggestLog.debug(
+			`Mentioned by ${message.author.id} in ${_where(message.channel, message.channelId)} (message ${message.id}${botRoles.length ? ', via bot role' : ''}), analysing now`
+		);
 		_analyze(message.channelId, { trigger: message }).catch(err =>
 			suggestLog.error(`Analysis failed for channel ${message.channelId}: ${err.message}`)
 		);
@@ -181,6 +201,7 @@ function _prune(state) {
 function _schedule(channelId, state) {
 	clearTimeout(state.timer);
 	const delay = Math.max(QUIET_MS, state.lastRunAt + MIN_INTERVAL_MS - Date.now());
+	suggestLog.trace(`Analysis of ${_where(state.channel, channelId)} scheduled in ${Math.round(delay / 1000)}s`);
 	state.timer = setTimeout(() => {
 		_analyze(channelId).catch(err => suggestLog.error(`Analysis failed for channel ${channelId}: ${err.message}`));
 	}, delay);
@@ -211,8 +232,11 @@ async function _sendChat(channel, messages, trigger) {
 		if (i === 0) {
 			await _replyTo(trigger, content);
 		} else {
-			await channel.send({ content, allowedMentions: { parse: [] } }).catch(() => {});
+			await channel
+				.send({ content, allowedMentions: { parse: [] } })
+				.catch(error => suggestLog.warn(`Could not send chat message in ${_where(channel)}: ${error.message}`));
 		}
+		suggestLog.debug(`Chat ${i + 1}/${messages.length} in ${_where(channel)}: ${_clip(content, 300)}`);
 	}
 }
 
@@ -248,7 +272,9 @@ function _plain(text) {
 }
 
 function _replyTo(message, content) {
-	return message.reply({ content, allowedMentions: { parse: [], repliedUser: false } }).catch(() => {});
+	return message
+		.reply({ content, allowedMentions: { parse: [], repliedUser: false } })
+		.catch(error => suggestLog.warn(`Could not reply to message ${message.id}: ${error.message}`));
 }
 
 /**
@@ -270,9 +296,16 @@ async function _analyze(channelId, { trigger = null } = {}) {
 		// Run the mention right after the current pass instead of waiting for
 		// the channel to go quiet again, showing "typing..." in the meantime.
 		if (trigger) {
+			if (state.pendingTrigger && state.pendingTrigger.id !== trigger.id) {
+				suggestLog.debug(`Mention ${state.pendingTrigger.id} superseded by ${trigger.id} while a pass runs`);
+			}
 			state.pendingTrigger = trigger;
 			state.queuedTyping ??= _keepTyping(state.channel);
+			suggestLog.debug(
+				`Mention ${trigger.id} queued behind the running pass in ${_where(state.channel, channelId)}`
+			);
 		} else {
+			suggestLog.trace(`Pass already running in ${_where(state.channel, channelId)}, rescheduling`);
 			_schedule(channelId, state);
 		}
 		return;
@@ -285,6 +318,7 @@ async function _analyze(channelId, { trigger = null } = {}) {
 
 	const fresh = state.messages.filter(m => !m.analyzed);
 	if (fresh.length === 0) {
+		suggestLog.debug(`Nothing new to analyse in ${_where(state.channel, channelId)}`);
 		if (trigger) {
 			await _replyTo(trigger, 'hmm belum ada chat baru buat aku cek nih');
 		}
@@ -296,26 +330,36 @@ async function _analyze(channelId, { trigger = null } = {}) {
 		m.analyzed = true;
 	}
 	const stopTyping = trigger ? _keepTyping(state.channel) : () => {};
+	const where = _where(state.channel, channelId);
+	const passStartedAt = Date.now();
+	suggestLog.debug(
+		`Pass started in ${where}: ${fresh.length} new message(s) [${fresh.map(m => m.id).join(', ')}], ${trigger ? `mention ${trigger.id}` : 'passive'}`
+	);
 
 	try {
 		const context = await _loadContext(state, fresh);
 		const open = await _dropDeletedCards(state.channel, suggestionRepository.listOpenSuggestions(channelId));
 		const handled = suggestionRepository.recentHandled(channelId).filter(r => r.status !== 'open');
 		const profiles = memoryRepository.getProfiles([...state.people.keys()]);
+		suggestLog.debug(
+			`Prompt input for ${where}: ${context.length} context message(s), ${open.length} open suggestion(s) [${open.map(r => `"${_clip(r.title, 40)}"`).join(', ')}], ${handled.length} handled, ${state.people.size} participant(s), ${profiles.size ?? 0} profile(s)`
+		);
 
 		let reply;
 		try {
+			const prompt = _buildPrompt({
+				context,
+				fresh,
+				people: state.people,
+				open,
+				profiles,
+				proposedTitles: handled.filter(r => r.status !== 'dismissed').map(r => r.title),
+				dismissedTitles: handled.filter(r => r.status === 'dismissed').map(r => r.title),
+				botId: trigger ? trigger.client.user.id : null
+			});
+			suggestLog.trace(`Prompt for ${where}:\n${prompt.map(m => `--- ${m.role} ---\n${m.content}`).join('\n')}`);
 			reply = await chatCompletion({
-				messages: _buildPrompt({
-					context,
-					fresh,
-					people: state.people,
-					open,
-					profiles,
-					proposedTitles: handled.filter(r => r.status !== 'dismissed').map(r => r.title),
-					dismissedTitles: handled.filter(r => r.status === 'dismissed').map(r => r.title),
-					botId: trigger ? trigger.client.user.id : null
-				}),
+				messages: prompt,
 				json: true,
 				// Spotting decisions in chat does not need deep reasoning; low effort
 				// keeps replies fast and cheap.
@@ -329,13 +373,28 @@ async function _analyze(channelId, { trigger = null } = {}) {
 			for (const m of fresh) {
 				m.analyzed = false;
 			}
+			suggestLog.warn(`Model call failed for ${where}; ${fresh.length} message(s) will be retried next pass`);
 			if (trigger) {
 				stopTyping();
 				await _replyTo(trigger, `❌ duh, otakku (model AI-nya) lagi nggak nyaut. ${error.message}`);
 			}
 			throw error;
 		}
-		const parsed = parseJsonReply(reply);
+		suggestLog.trace(`Model reply for ${where}:\n${reply}`);
+		let parsed;
+		try {
+			parsed = parseJsonReply(reply);
+		} catch (error) {
+			suggestLog.warn(
+				`Unparseable model reply for ${where} (${error.message}): ${_clip(reply, LOG_REPLY_CHARS)}`
+			);
+			if (trigger) {
+				stopTyping();
+				await _replyTo(trigger, 'duh, jawabanku barusan kacau formatnya. coba mention aku lagi ya');
+			}
+			throw error;
+		}
+		suggestLog.debug(`Model reply for ${where}: ${_clip(reply, LOG_REPLY_CHARS)}`);
 		const dropped = [];
 		const found = _normalizeProposals(parsed, {
 			fresh,
@@ -387,10 +446,12 @@ async function _analyze(channelId, { trigger = null } = {}) {
 			state.channel,
 			_normalizeMemories(parsed, { fresh, people: state.people, profiles })
 		);
-		if (posted > 0 || updated > 0 || learned > 0) {
-			suggestLog.info(
-				`Posted ${posted}, updated ${updated} task suggestion(s) and saved ${learned} memory change(s) in channel ${channelId}`
-			);
+		const raw = key => (Array.isArray(parsed?.[key]) ? parsed[key].length : 0);
+		const summary = `Pass in ${where} done in ${Date.now() - passStartedAt}ms (${trigger ? `mention ${trigger.id}` : 'passive'}): model gave ${raw('proposals')} proposal(s), ${raw('updates')} update(s), ${raw('memories')} memory change(s), ${chat.length} chat message(s); posted ${posted}, updated ${updated}, dropped ${dropped.length}, saved ${learned} memory change(s)`;
+		if (trigger || posted > 0 || updated > 0 || learned > 0 || dropped.length > 0) {
+			suggestLog.info(summary);
+		} else {
+			suggestLog.debug(summary);
 		}
 		if (trigger && chat.length === 0) {
 			if (posted === 0 && updated === 0 && learned === 0) {
@@ -462,6 +523,7 @@ async function _loadContext(state, fresh) {
 				createdAt: m.createdTimestamp
 			});
 		}
+		suggestLog.trace(`Read ${history.size ?? 0} history message(s) in ${_where(state.channel)}`);
 	} catch (error) {
 		suggestLog.warn(`Could not read history for channel ${state.channel.id}: ${error.message}`);
 	}
@@ -753,6 +815,9 @@ function _normalizeMemories(parsed, { fresh, people, profiles }) {
 async function _applyMemories(channel, changes) {
 	const sources = new Set();
 	for (const c of changes) {
+		suggestLog.debug(
+			`Memory for ${c.userId} from message ${c.sourceMessageId}:${c.remember ? ` remember "${_clip(c.remember, 200)}"` : ''}${c.forget ? ` forget #${c.forget.id} "${_clip(c.forget.note, 80)}"` : ''}${c.language ? ` language=${c.language}` : ''}`
+		);
 		if (c.forget) {
 			memoryRepository.removeNote(c.userId, c.forget.id);
 		}
@@ -781,8 +846,12 @@ async function _applyMemories(channel, changes) {
 async function _applyUpdate(channel, { id, changes, sourceMessageId }) {
 	const row = suggestionRepository.updateSuggestion(id, changes);
 	if (!row) {
+		suggestLog.debug(`Update to suggestion ${id} skipped: it was handled in the meantime`);
 		return false;
 	}
+	suggestLog.debug(
+		`Updated suggestion ${id} "${_clip(row.title, 60)}" from message ${sourceMessageId}: ${JSON.stringify(changes)}`
+	);
 	const proposal = _toProposal(row);
 
 	if (row.card_message_id) {
@@ -848,7 +917,13 @@ async function _postProposal(channel, found, { reply = true } = {}) {
 		const source = reply ? await channel.messages.fetch(proposal.sourceMessageId).catch(() => null) : null;
 		const card = await (source ? source.reply(payload) : channel.send(payload));
 		suggestionRepository.setCardMessage(proposal.id, card.id);
+		suggestLog.debug(
+			`Posted suggestion ${proposal.id} "${_clip(proposal.title, 60)}" as card ${card.id} in ${_where(channel)}: assignee=${proposal.assigneeId} deadline=${proposal.deadline ? DateTime.fromSeconds(proposal.deadline).setZone(TIMEZONE).toFormat('yyyy-MM-dd HH:mm') : 'none'} source=${proposal.sourceMessageId}`
+		);
 	} catch (error) {
+		suggestLog.warn(
+			`Could not post card for "${_clip(proposal.title, 60)}" in ${_where(channel)}: ${error.message}`
+		);
 		// No card exists, so drop the row and let a later pass suggest it again.
 		suggestionRepository.deleteSuggestion(proposal.id);
 		throw error;
@@ -1011,6 +1086,9 @@ async function _dropDeletedCards(channel, open) {
 				error => error?.code === UNKNOWN_MESSAGE
 			);
 			if (gone) {
+				suggestLog.info(
+					`Card ${row.card_message_id} for "${_clip(row.title, 60)}" was deleted, dropping its suggestion`
+				);
 				suggestionRepository.deleteByCardMessage(channel.id, row.card_message_id);
 				continue;
 			}

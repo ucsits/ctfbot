@@ -43,6 +43,10 @@ async function chatCompletion({ messages, json = false, temperature = 0, reasoni
 
 	const url = `${config.llm.baseUrl}/chat/completions`;
 	const timeoutMs = config.llm.timeoutMs;
+	const promptChars = messages.reduce((n, m) => n + (m.content?.length ?? 0), 0);
+	llmLog.debug(
+		`Chat completion request: model=${config.llm.model} messages=${messages.length} chars=${promptChars} json=${json} effort=${reasoningEffort ?? 'default'}`
+	);
 	const startedAt = Date.now();
 	let res;
 	try {
@@ -58,6 +62,7 @@ async function chatCompletion({ messages, json = false, temperature = 0, reasoni
 	} catch (error) {
 		// Name the endpoint and model so a slow or unreachable provider is
 		// obvious from the log line alone.
+		llmLog.warn(`Chat completion request failed after ${Date.now() - startedAt}ms: ${error.name}`);
 		if (error.name === 'TimeoutError') {
 			throw new Error(
 				`No reply from ${url} (model ${config.llm.model}) within ${timeoutMs / 1000}s; raise OPENAI_TIMEOUT_MS or use a faster model`
@@ -65,16 +70,28 @@ async function chatCompletion({ messages, json = false, temperature = 0, reasoni
 		}
 		throw new Error(`Request to ${url} failed: ${error.cause?.message ?? error.message}`);
 	}
-	llmLog.debug(`Chat completion from ${config.llm.model} took ${Date.now() - startedAt}ms`);
+	const elapsedMs = Date.now() - startedAt;
 
 	if (!res.ok) {
 		const errBody = await res.text().catch(() => '');
-		llmLog.error(`Chat completion failed (${res.status}): ${errBody.slice(0, 500)}`);
+		llmLog.error(`Chat completion failed (${res.status}) after ${elapsedMs}ms: ${errBody.slice(0, 500)}`);
 		throw new Error(`Chat completion failed (${res.status})`);
 	}
 
 	const data = await res.json();
-	const content = data.choices?.[0]?.message?.content;
+	const choice = data.choices?.[0];
+	const content = choice?.message?.content;
+	const usage = data.usage
+		? ` tokens in=${data.usage.prompt_tokens ?? '?'} out=${data.usage.completion_tokens ?? '?'}${data.usage.completion_tokens_details?.reasoning_tokens ? ` (reasoning ${data.usage.completion_tokens_details.reasoning_tokens})` : ''}`
+		: '';
+	llmLog.debug(
+		`Chat completion from ${config.llm.model} took ${elapsedMs}ms, finish=${choice?.finish_reason ?? '?'}${usage}, reply chars=${typeof content === 'string' ? content.length : 0}`
+	);
+	if (choice?.finish_reason === 'length') {
+		llmLog.warn(
+			`Chat completion from ${config.llm.model} was cut off at the token limit; the reply may be incomplete`
+		);
+	}
 	if (typeof content !== 'string') {
 		throw new Error('Chat completion returned no message content');
 	}

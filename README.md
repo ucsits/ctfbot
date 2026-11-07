@@ -749,6 +749,12 @@ Set the `LOG_LEVEL` environment variable to control verbosity:
 LOG_LEVEL=info
 ```
 
+For the task-suggestion bot (`[TaskSuggest]`, `[LLM]`):
+
+- `info`: one summary per pass that did something or answered a mention (what the model returned, what was posted, updated, dropped and remembered), plus dropped proposals with the reason
+- `debug`: each step of a pass: mention received or queued, prompt inputs, model request size, latency and token usage, the model's reply (first 2000 chars), every chat message, card, update and memory change
+- `trace`: every buffered message, scheduling, history reads, and the full prompt and model reply
+
 ### Where Logs Go
 
 All logs are output to stdout (info/debug/trace) and stderr (error/warn).

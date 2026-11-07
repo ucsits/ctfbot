@@ -465,6 +465,17 @@ describe('taskSuggest direct mentions', () => {
 		expect(channel.send.mock.calls.some(([p]) => p.embeds)).toBe(false);
 	});
 
+	it('answers the mention and logs the raw reply when the model reply is not JSON', async () => {
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+		globalThis.fetch = vi.fn().mockResolvedValue(llmReply('sorry, I cannot help'));
+		const message = makeMessage({ id: 'm1', content: '<@bot-1> cek dong', mentionBot: true });
+		taskSuggest.observe(message);
+		await vi.waitFor(() => expect(message.reply).toHaveBeenCalledTimes(1));
+		expect(message.reply.mock.calls[0][0].content).toContain('kacau formatnya');
+		expect(warn.mock.calls.flat().join(' ')).toContain('sorry, I cannot help');
+		warn.mockRestore();
+	});
+
 	it('tells the model its own earlier messages do not prove a card exists', () => {
 		const [system] = taskSuggest._buildPrompt({ context: [], fresh, people, proposedTitles: [] });
 		expect(system.content).toContain('Your own earlier messages in the context are NOT proof');
