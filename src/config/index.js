@@ -7,6 +7,22 @@ class ConfigurationError extends Error {
 	}
 }
 
+/**
+ * Read a positive integer from the environment, falling back when unset or
+ * malformed. Zero is allowed only when `min` is zero.
+ */
+const envInt = (name, fallback, min = 1) => {
+	const raw = Number(process.env[name]);
+	return Number.isFinite(raw) && raw >= min ? Math.floor(raw) : fallback;
+};
+
+/** Read a comma-separated id list, trimmed and without empty entries. */
+const envList = name =>
+	(process.env[name] || '')
+		.split(',')
+		.map(id => id.trim())
+		.filter(Boolean);
+
 const validateEnv = () => {
 	const required = ['DISCORD_TOKEN', 'CTF_CATEGORY_ID'];
 	const missing = required.filter(key => !process.env[key]);
@@ -117,6 +133,77 @@ const config = {
 	taskSuggestions: {
 		get enabled() {
 			return process.env.TASK_SUGGESTIONS_ENABLED === 'true';
+		}
+	},
+
+	/**
+	 * Proactive chat: the bot may speak up on its own in any channel, using
+	 * tools (web search, channel/user memory) and a budget that adapts when
+	 * people ignore it.
+	 */
+	chat: {
+		get enabled() {
+			return process.env.CHAT_ENABLED === 'true';
+		},
+		/** Wait this long after the last human message before considering a pass. */
+		get quietMs() {
+			return envInt('CHAT_QUIET_MS', 20_000);
+		},
+		/** Never speak twice in the same channel faster than this. */
+		get cooldownMs() {
+			return envInt('CHAT_COOLDOWN_MS', 6 * 60_000);
+		},
+		get maxPerHour() {
+			return envInt('CHAT_MAX_PER_HOUR', 5);
+		},
+		get maxPerDay() {
+			return envInt('CHAT_MAX_PER_DAY', 20);
+		},
+		/** Whole-guild daily cap, so a busy server cannot run up an unbounded bill. */
+		get guildMaxPerDay() {
+			return envInt('CHAT_GUILD_MAX_PER_DAY', 200);
+		},
+		/**
+		 * Chance of speaking in a busy channel with no explicit trigger. Keeps
+		 * the bot from feeling mechanical without making it chatty.
+		 */
+		get sparkProbability() {
+			const raw = Number(process.env.CHAT_SPARK_PROBABILITY);
+			return Number.isFinite(raw) && raw >= 0 && raw <= 1 ? raw : 0.15;
+		},
+		/** Channels the bot must never speak in (announcements, logs, ...). */
+		get denyChannelIds() {
+			return envList('CHAT_DENY_CHANNEL_IDS');
+		},
+		get maxMessageChars() {
+			return envInt('CHAT_MAX_MESSAGE_CHARS', 600);
+		},
+		/** Whether tool calling may be used at all. */
+		get toolsEnabled() {
+			return process.env.LLM_TOOLS_ENABLED !== 'false';
+		},
+		search: {
+			get apiKey() {
+				return process.env.SERPBASE_API_KEY || '';
+			},
+			get isConfigured() {
+				return Boolean(this.apiKey);
+			},
+			get dailyCredits() {
+				return envInt('SERPBASE_DAILY_CREDITS', 100, 0);
+			},
+			get cacheHours() {
+				return envInt('SERPBASE_CACHE_HOURS', 24);
+			},
+			get timeoutMs() {
+				return envInt('SERPBASE_TIMEOUT_MS', 10_000);
+			},
+			get country() {
+				return process.env.SERPBASE_GL || 'id';
+			},
+			get language() {
+				return process.env.SERPBASE_HL || 'id';
+			}
 		}
 	}
 };

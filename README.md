@@ -20,6 +20,7 @@ powered by [Luce](https://github.com/ucsits/Luce).
 - 📄 **Document Anchoring** — Permanently store documents on the blockchain
 - 🎯 **Activity Points Economy** — Admin-granted points, a leaderboard, and a merchandise store (AP or Rp)
 - ⏰ **Automatic Reminders** — Task deadline reminders sent to a dedicated channel
+- 💬 **Proactive Chat** — The bot joins conversations on its own, with web search and channel memory, within a per-channel budget
 
 ## Commands
 
@@ -614,6 +615,77 @@ failed pass are retried when the next message arrives in that channel.
 
 The **Message Content** privileged intent must be enabled for the bot in the
 Discord Developer Portal.
+
+## Proactive Chat
+
+`src/services/chat.js` lets the bot join a conversation on its own, the way a
+member of the server would: "gimana kalau...", "menurutku...", a question
+worth thinking about, or a fact it just checked. There is no command and no
+allowlist: it can speak in any channel it can post in.
+
+The hard part is not talking, it is knowing when not to. The service enforces
+that in code, not just in the prompt:
+
+- **Silence is a tool.** The model calls `stay_silent` to decline. An empty
+  reply is treated as silence too, so a broken response can never become a
+  message.
+- **The bot never triggers itself.** A pass only runs when a human spoke after
+  the bot's last message. Its own messages are never buffered, so it cannot
+  talk itself into a monologue.
+- **Cost is gated before the model is called.** A cheap check looks for a
+  question, a link, an error, a verifiable claim, or a channel with at least
+  six messages from three people in the last 15 minutes. With no signal, no
+  model call happens at all. This is what keeps a 40-channel server affordable.
+- **Being ignored is a signal.** Two unanswered messages lengthen the
+  cooldown to 20 minutes; four silence the channel until the next day.
+- **Budget per channel and per guild.** Defaults are 5 messages per hour and
+  20 per day per channel, 200 per day for the whole guild.
+- **Mute is per channel and lifts by itself.** React with 🔇 on one of the
+  bot's messages, or reply to it with "diem aja", and that channel stays quiet
+  until the next local midnight. Other channels are unaffected.
+
+### Tools
+
+The model can call four tools. None of them can send a message, create a
+thread or touch a task: the service alone decides to post.
+
+| Tool | What it does |
+| --- | --- |
+| `search_web` | Google via [SerpBase](https://serpbase.dev/docs). Five organic results and three "people also ask" questions, compacted to a few hundred characters. |
+| `remember` | Save a note about the channel (topic, jargon, house rules) or about a person (a lasting preference or role). |
+| `recall` | Read back what is already remembered about the channel and the people in it. |
+| `stay_silent` | Decline to speak, with a reason. |
+
+Search results are wrapped in a `<search_results>` block and labelled as
+untrusted data, because a snippet is text someone else wrote. The prompt tells
+the model never to follow instructions found there, and to only cite URLs the
+tool actually returned. Identical queries are cached for a day and charged
+against a daily credit cap, so a model that likes a phrase cannot drain the
+account.
+
+### Setup
+
+```env
+CHAT_ENABLED=true
+SERPBASE_API_KEY=your_serpbase_key   # optional; without it the bot talks without search
+
+CHAT_QUIET_MS=20000                  # wait this long after the last message
+CHAT_COOLDOWN_MS=360000              # never speak twice faster than this per channel
+CHAT_MAX_PER_HOUR=5
+CHAT_MAX_PER_DAY=20
+CHAT_GUILD_MAX_PER_DAY=200
+CHAT_SPARK_PROBABILITY=0.15          # chance of joining a busy channel unprompted
+CHAT_DENY_CHANNEL_IDS=               # announcements, logs, ...
+SERPBASE_DAILY_CREDITS=100
+```
+
+Keep `SERPBASE_API_KEY` in `.env` only. It is sent as the `X-API-Key` header,
+never in a URL, and never logged; rotate it if it ever appears in a transcript
+or a commit.
+
+The service degrades instead of failing: if the provider rejects tool schemas,
+it falls back to a JSON reply (`{"say": ""}` means silence) once, and keeps
+working.
 
 ## Google Calendar Sync (Option A)
 

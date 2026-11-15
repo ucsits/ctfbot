@@ -1,6 +1,7 @@
 const { Listener } = require('@sapphire/framework');
 const { awardReputation } = require('../services/reputation');
 const taskSuggest = require('../services/taskSuggest');
+const chat = require('../services/chat');
 
 // Patterns that trigger +1 or -1 when used as a reply
 const UP_PATTERNS = /^(?:\+1|👍)$/;
@@ -27,6 +28,14 @@ class MessageCreateListener extends Listener {
 			taskSuggest.observe(message);
 		} catch (error) {
 			this.container.logger.error('Error buffering message for task suggestions:', error);
+		}
+
+		// Proactive chat: the bot may join the conversation on its own (no-op
+		// unless CHAT_ENABLED and the model endpoint are set).
+		try {
+			chat.observe(message);
+		} catch (error) {
+			this.container.logger.error('Error buffering message for proactive chat:', error);
 		}
 
 		// Reply-based rep detection:
