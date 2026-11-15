@@ -2,12 +2,12 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { createRequire } from 'module';
 
 // -- Strategy ---------------------------------------------------------------
-// This is the only suite that talks to a real deployment, so it is skipped
-// unless K17_LIVE=1 is set. It is deliberately read-only: it never registers a
+// This is the only suite that talks to a real deployment. It is skipped
+// unless K17_LIVE=1 is set. It is deliberately read-only. It never registers a
 // user, marks a solve or writes to the database, because it runs against the
 // live k17 scoreboard.
 //
-// Environment:
+// Environment variables
 //   K17_LIVE=1                opt in
 //   K17_API_BASE_URL          defaults to https://api-k17ctf.secso.cc
 //   K17_API_TOKEN             optional bearer session token. Without it the
@@ -16,7 +16,7 @@ import { createRequire } from 'module';
 //   K17_DIVISION_ID           optional scoreboard division
 //   K17_API_USERNAME          optional username to look up with findUser
 //
-// The client's rate limiter is left in place, so the suite takes a few seconds
+// The client's rate limiter is left in place. The suite takes a few seconds
 // and never floods the deployment.
 
 const require = createRequire(import.meta.url);
@@ -38,7 +38,7 @@ beforeAll(() => {
 
 /**
  * Probe with a couple of retries. The first request of a cold process can fail
- * on DNS or TLS setup alone, and a live suite that fails on a warm-up blip is
+ * on DNS or TLS setup alone. A live suite that fails on a warm-up blip is
  * worse than useless.
  */
 async function probeConnection(attempts = 3) {

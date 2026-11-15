@@ -3,13 +3,14 @@
  *
  * Image composition uses librsvg (via sharp), which resolves fonts through
  * the local fontconfig database. To keep the rendered layout byte-identical
- * on any server — docker container, bare VPS, CI — we ship the fonts inside
- * the repository and embed them into every SVG as `@font-face` data URIs.
- * That makes output independent of whatever fonts happen to be installed.
+ * on any server, whether a docker container, a bare VPS or CI, we ship the
+ * fonts inside the repository and embed them into every SVG as `@font-face`
+ * data URIs. That makes output independent of whatever fonts happen to be
+ * installed.
  *
  * The ttf files live under assets/fonts/ and are committed. If they are
  * missing (shallow clone, fresh checkout before the files landed), they are
- * provisioned from the local fontconfig database on first use, so the bot
+ * provisioned from the local fontconfig database on first use. The bot then
  * still boots when the system font exists.
  */
 const fs = require('fs');
@@ -18,7 +19,7 @@ const path = require('path');
 const { execFileSync } = require('child_process');
 
 // Font family names used by the poster SVG. Keep the SVG and the @font-face
-// names in sync — librsvg only picks up the embedded font when `font-family`
+// names in sync. librsvg only picks up the embedded font when `font-family`
 // in the document text matches the family declared in the CSS.
 const FONT_CONFIG = [
 	{
@@ -46,7 +47,7 @@ function resolveSystemFont(pattern) {
 			return out;
 		}
 	} catch {
-		// fc-match missing or failing — fall through
+		// fc-match missing or failing. Fall through
 	}
 	return undefined;
 }
@@ -73,7 +74,7 @@ function provisionFonts() {
 			if (source) {
 				fs.copyFileSync(source, target);
 			} else {
-				console.warn(`[store-poster] font ${entry.file} not found locally; text may render with a fallback`);
+				console.warn(`[store-poster] font ${entry.file} not found locally. Text may render with a fallback`);
 			}
 		}
 		return {
@@ -106,13 +107,13 @@ function buildFontStyle() {
 }
 
 /**
- * Public entry point: run a font-blob fetch.
+ * Public entry point. Run a font-blob fetch.
  * @param {import('discord.js').ChatInputCommandInteraction} interaction
  */
 async function pingFont(interaction) {
 	return interaction.reply({
 		content:
-			'store fonts provisioned? see server logs for warnings. font files: ' +
+			'store fonts provisioned? see server logs for warnings. font files are ' +
 			provisionFonts()
 				.map(f => `${f.file} (${f.ttf ? f.ttf.length : 0} bytes)`)
 				.join(', ')

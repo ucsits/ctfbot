@@ -4,13 +4,13 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 
 // ── Strategy ───────────────────────────────────────────────────────────
-// The store used to anchor the blockchain block BEFORE touching the balance, so
-// a double click appended two "completed purchase" blocks while only one debit
-// went through, and a crash between the two left a block with no purchase.
+// The store used to anchor the blockchain block BEFORE touching the balance. A
+// double click then appended two "completed purchase" blocks while only one
+// debit went through. A crash between the two left a block with no purchase.
 //
 // The flow is now reserve -> anchor -> finalize, with release as the
 // compensating action. These tests hold that state machine to account against a
-// real SQLite database:
+// real SQLite database.
 //
 //   * reserve debits and creates the pending AP purchase
 //   * finalize marks it completed and stamps the height on purchase AND ledger
@@ -70,7 +70,7 @@ describe('reserveApPurchase', () => {
 		expect(purchase.status).toBe('pending');
 		expect(purchase.payment_method).toBe('ap');
 		expect(purchase.cost_ap).toBe(30);
-		// Not anchored yet: the height stays null until finalize.
+		// Not anchored yet. The height stays null until finalize.
 		expect(purchase.block_height).toBeNull();
 
 		const ledger = ledgerFor('res-1');
@@ -162,7 +162,7 @@ describe('releaseApPurchase', () => {
 	});
 
 	it('refuses to release a completed purchase', () => {
-		// res-1 was finalized above; releasing it must not undo a real purchase.
+		// res-1 was finalized above. Releasing it must not undo a real purchase.
 		const before = activityRepository.getBalance('buyer-1');
 		expect(activityRepository.releaseApPurchase({ purchaseId: 'res-1' })).toBe(false);
 		expect(activityRepository.getBalance('buyer-1')).toBe(before);
@@ -226,7 +226,7 @@ describe('pending purchase listing and stale sweep', () => {
 		});
 
 		// A reservation made moments ago could still be owned by an in-flight
-		// request, so the sweep must not touch it.
+		// request. The sweep must not touch it.
 		expect(activityRepository.releaseStaleApReservations({ olderThanSeconds: 900 })).toBe(0);
 		expect(activityRepository.getBalance('buyer-6')).toBe(65);
 		expect(db.prepare('SELECT * FROM purchases WHERE id = ?').get('ap-fresh')).toBeDefined();
@@ -242,7 +242,7 @@ describe('buy flow ordering', () => {
 		const ap = src.slice(apStart, rpStart);
 		const rp = src.slice(rpStart);
 
-		// AP: reserve -> append -> finalize
+		// AP flow is reserve, append, finalize
 		const apReserve = ap.indexOf('reserveApPurchase');
 		const apAppend = ap.indexOf('luce.appendBlock');
 		const apFinalize = ap.indexOf('finalizeApPurchase');
@@ -254,7 +254,7 @@ describe('buy flow ordering', () => {
 		// No block may be anchored before the reservation succeeds.
 		expect(ap.indexOf('completeApPurchase')).toBe(-1);
 
-		// RP: create -> append -> stamp
+		// RP flow is create, append, stamp
 		const rpCreate = rp.indexOf('createPurchase');
 		const rpAppend = rp.indexOf('luce.appendBlock');
 		const rpStamp = rp.indexOf('setPurchaseBlockHeight');

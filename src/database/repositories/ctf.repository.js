@@ -26,9 +26,9 @@ const ctfOperations = {
 	/**
 	 * Point a CTF channel at a platform configuration.
 	 *
-	 * Only the fields actually supplied are written, so an operator can rotate a
-	 * token without restating the platform, and can switch platform without
-	 * clearing a division that is still valid for the new one.
+	 * Only the fields actually supplied are written. An operator can then rotate a
+	 * token without restating the platform. Switching platform does not clear a
+	 * division that is still valid for the new one.
 	 *
 	 * @param {string} channelId - Discord channel id of the CTF
 	 * @param {Object} fields

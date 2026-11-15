@@ -1,7 +1,7 @@
 /**
  * CTFd adapter for the normalized platform interface.
  *
- * Wraps the existing CTFdClient without changing it, so the CTFd behaviour that
+ * Wraps the existing CTFdClient without changing it. The CTFd behaviour that
  * predates multi-platform support is preserved byte for byte while the rest of
  * the bot talks to one shape.
  *
@@ -48,12 +48,12 @@ function createCTFdAdapter(baseUrl, apiToken = null) {
 		},
 
 		/**
-		 * CTFd has no bulk solve endpoint: /api/v1/solves is admin-only and
+		 * CTFd has no bulk solve endpoint. /api/v1/solves is admin-only and
 		 * paginates the whole competition, while the per-user endpoint is what
-		 * the sync command already walks. Reject so the caller uses that path.
+		 * the sync command already walks. Reject it so the caller uses that path.
 		 */
 		async getAllSolves() {
-			throw new Error('CTFd does not support bulk solve listing; use the per-user source instead');
+			throw new Error('CTFd does not support bulk solve listing. Use the per-user source instead');
 		},
 
 		async findUser(username) {
@@ -67,9 +67,9 @@ function createCTFdAdapter(baseUrl, apiToken = null) {
 		},
 
 		/**
-		 * CTFd's user listing is admin-only and returns full user objects, so there
-		 * is no cheap id to name lookup to offer here. Returning an empty map lets
-		 * callers keep one code path: they fall back to the id-based label.
+		 * CTFd's user listing is admin-only and returns full user objects. There is
+		 * no cheap id to name lookup to offer here. Returning an empty map lets
+		 * callers keep one code path, where they fall back to the id-based label.
 		 */
 		async resolveUserNames() {
 			return new Map();

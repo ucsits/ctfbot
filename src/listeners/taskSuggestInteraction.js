@@ -19,7 +19,7 @@ const { SUGGEST_IDS, TIMEZONE } = taskSuggest;
 
 /**
  * Handle the buttons and modal on task suggestion cards posted by
- * src/services/taskSuggest.js:
+ * src/services/taskSuggest.js. The custom ids are
  *   tsug_create:<id>   create the task as suggested
  *   tsug_edit:<id>     open a pre-filled modal (tsug_modal:<id>) that creates on submit
  *   tsug_dismiss:<id>  close the suggestion without creating anything
@@ -39,7 +39,7 @@ class TaskSuggestInteractionListener extends Listener {
 			return;
 		}
 
-		const [namespace, proposalId] = interaction.customId.split(':');
+		const [namespace, proposalId] = interaction.customId.split('');
 		if (!proposalId) {
 			return;
 		}
@@ -59,9 +59,9 @@ class TaskSuggestInteractionListener extends Listener {
 				return await this._submitModal(interaction, proposalId);
 			}
 		} catch (error) {
-			this.container.logger.error('Error handling task suggestion interaction:', error);
+			this.container.logger.error('Error handling task suggestion interaction', error);
 			taskSuggest.releaseProposal(proposalId);
-			const reply = { content: '❌ Something went wrong handling this suggestion.', ephemeral: true };
+			const reply = { content: 'Something went wrong handling this suggestion.', ephemeral: true };
 			await (
 				interaction.deferred || interaction.replied ? interaction.followUp(reply) : interaction.reply(reply)
 			).catch(() => {});
@@ -92,7 +92,7 @@ class TaskSuggestInteractionListener extends Listener {
 		if (!proposal.deadline || proposal.deadline <= Math.floor(Date.now() / 1000)) {
 			taskSuggest.releaseProposal(proposalId);
 			return interaction.reply({
-				content: '❌ This suggestion has no future deadline. Use **Edit & create** to set one.',
+				content: 'This suggestion has no future deadline. Use **Edit & create** to set one.',
 				ephemeral: true
 			});
 		}
@@ -186,20 +186,20 @@ class TaskSuggestInteractionListener extends Listener {
 		};
 
 		if (!title || title.length > 100) {
-			return invalid('❌ Task title must be between 1 and 100 characters.');
+			return invalid('Task title must be between 1 and 100 characters.');
 		}
 		if (!assignee) {
-			return invalid('❌ Pick who the task is assigned to.');
+			return invalid('Pick who the task is assigned to.');
 		}
 
 		let deadlineDate;
 		try {
 			deadlineDate = parseLocalDateToUTC(deadlineStr, TIMEZONE);
 		} catch (error) {
-			return invalid(`❌ ${error.message}`);
+			return invalid(`${error.message}`);
 		}
 		if (deadlineDate <= new Date()) {
-			return invalid('❌ Deadline must be in the future.');
+			return invalid('Deadline must be in the future.');
 		}
 
 		await interaction.deferUpdate();
@@ -223,12 +223,12 @@ class TaskSuggestInteractionListener extends Listener {
 		taskSuggest.finishProposal(proposalId, { status: 'dismissed', handledBy: interaction.user.id });
 
 		// Remove the card so dismissed suggestions do not clutter the channel.
-		// The row stays, so the model still knows this was not wanted.
+		// The row stays. The model still knows this was not wanted.
 		await interaction.deferUpdate();
 		try {
 			await interaction.message.delete();
 		} catch (error) {
-			this.container.logger.warn(`Could not delete dismissed suggestion card: ${error.message}`);
+			this.container.logger.warn(`Could not delete dismissed suggestion card ${error.message}`);
 			const embed = new EmbedBuilder()
 				.setColor(0x95a5a6)
 				.setTitle('Suggestion dismissed')
@@ -259,7 +259,7 @@ class TaskSuggestInteractionListener extends Listener {
 
 			const embed = new EmbedBuilder()
 				.setColor(0x00ff00)
-				.setTitle('✅ Task Created')
+				.setTitle('Task Created')
 				.setDescription(`**${title}** has been created on the blockchain.`)
 				.addFields(
 					{ name: 'Assigned To', value: `<@${assignedTo}>`, inline: true },
@@ -274,24 +274,25 @@ class TaskSuggestInteractionListener extends Listener {
 				embed.addFields({ name: 'Description', value: description.slice(0, 1024), inline: false });
 			}
 			if (constants.GOOGLE_CALENDAR_ENABLED) {
-				embed.addFields({ name: 'Google Calendar', value: '📅 Synced to shared calendar', inline: false });
+				embed.addFields({ name: 'Google Calendar', value: 'Synced to shared calendar', inline: false });
 			}
 
 			return interaction.editReply({ embeds: [embed], components: [] });
 		} catch (error) {
-			this.container.logger.error('Error creating task from suggestion:', error);
+			this.container.logger.error('Error creating task from suggestion', error);
 			if (error.message?.includes('Blockchain')) {
 				taskSuggest.releaseProposal(proposal.id);
 				return interaction.followUp({
 					content:
-						'❌ Could not anchor the task on the blockchain. No task was created, so you can try again.',
+						'Could not anchor the task on the blockchain. No task was created. You can try again.',
 					ephemeral: true
 				});
 			}
-			// The block was anchored, so the task exists; never offer the card again.
+			// The block was anchored, which means the task exists. Never offer the card
+			// again.
 			taskSuggest.finishProposal(proposal.id, { status: 'created', handledBy: interaction.user.id, taskId });
 			return interaction.followUp({
-				content: `⚠️ The task was anchored, but the confirmation could not be completed. Task ID: \`${taskId}\`. Please use /task list to verify it.`,
+				content: `The task was anchored, but the confirmation could not be completed. Task ID \`${taskId}\`. Please use /task list to verify it.`,
 				ephemeral: true
 			});
 		}

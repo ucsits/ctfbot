@@ -1,5 +1,5 @@
 /**
- * Actor memory repository — per-user preferences and notes the bot remembers
+ * Actor memory repository for per-user preferences and notes the bot remembers
  * @module database/repositories/actorMemory
  */
 
@@ -9,7 +9,7 @@ const db = () => getConnection();
 
 const nowSeconds = () => Math.floor(Date.now() / 1000);
 
-// Oldest notes are dropped past this, so the prompt stays small.
+// Oldest notes are dropped past this. The prompt stays small.
 const MAX_NOTES_PER_USER = 15;
 
 /**
@@ -100,7 +100,7 @@ function removeNotesFromMessage(sourceMessageId) {
 }
 
 /**
- * Forget everything about a user: notes and preferences.
+ * Forget everything about a user, both notes and preferences.
  */
 function clearUser(userId) {
 	db().prepare('DELETE FROM actor_memories WHERE user_id = ?').run(userId);

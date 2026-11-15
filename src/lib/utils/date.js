@@ -13,7 +13,7 @@ const { ValidationError } = require('../errors');
  * @type {string[]}
  */
 const FLEXIBLE_FORMATS = [
-	// DD-MM-YYYY — highest priority
+	// DD-MM-YYYY has the highest priority
 	'dd-MM-yyyy HH:mm',
 	'dd-MM-yyyy HH:mm:ss',
 	'dd-MM-yyyy',
@@ -35,7 +35,7 @@ const FLEXIBLE_FORMATS = [
 	'yyyy-MM-dd',
 	'yyyy/MM/dd HH:mm',
 	'yyyy/MM/dd',
-	// US-style MM/DD/YYYY (last — highest ambiguity)
+	// US-style MM/DD/YYYY, checked last because it has the highest ambiguity
 	'MM/dd/yyyy HH:mm',
 	'MM/dd/yyyy HH:mm:ss',
 	'MM-dd-yyyy HH:mm',
@@ -46,16 +46,16 @@ const FLEXIBLE_FORMATS = [
 /**
  * Parse a date string in a relaxed, multi-format fashion and convert to UTC.
  *
- * Accepted formats include:
+ * Accepted formats include
  *   `31-12-2025 20:00`      (DD-MM-YYYY HH:MM)
  *   `31-12-2025`            (DD-MM-YYYY date-only → midnight)
  *   `31/12/2025 20:00`      (DD/MM/YYYY HH:MM)
  *   `2025-12-31 20:00`      (YYYY-MM-DD HH:MM)
  *   `31.12.2025 20:00`      (DD.MM.YYYY HH:MM)
  *   `1-12-2025 8:0`         (single-digit day/month/hour)
- *   `12/31/2025 20:00`      (MM/DD/YYYY HH:MM — US style)
+ *   `12/31/2025 20:00`      (MM/DD/YYYY HH:MM, US style)
  *   `2025-12-31T20:00:00Z`  (ISO 8601)
- *   `1735689600`            (Unix timestamp seconds — Discord @time compatible)
+ *   `1735689600`            (Unix timestamp seconds, Discord @time compatible)
  *   `<t:1735689600:F>`      (Discord @time helper format)
  *
  * @param {string} dateStr - Raw user date string
@@ -68,18 +68,18 @@ function parseFlexibleDateToUTC(dateStr, timezone) {
 
 	const trimmed = dateStr.trim();
 
-	// 1. Try Discord @time helper format: <t:UNIX_SECONDS> or <t:UNIX_SECONDS:LETTER>
+	// 1. Try the Discord @time helper format, <t:UNIX_SECONDS> or <t:UNIX_SECONDS:LETTER>
 	const discordTimeMatch = trimmed.match(/^<t:(\d+)(?::[a-zA-Z])?>$/);
 	if (discordTimeMatch) {
 		const unixSeconds = parseInt(discordTimeMatch[1], 10);
 		return new Date(unixSeconds * 1000);
 	}
 
-	// 2. Try raw Unix timestamp (seconds) — 10-digit epoch or any reasonable-length digits
+	// 2. Try a raw Unix timestamp in seconds, a 10-digit epoch or any reasonable-length digits
 	const unixMatch = trimmed.match(/^(\d{8,10})(?:\.\d+)?$/);
 	if (unixMatch) {
 		const unixSeconds = parseInt(unixMatch[1], 10);
-		// Sanity check: year must be between 2000 and 2100
+		// Sanity check. The year must be between 2000 and 2100
 		const d = new Date(unixSeconds * 1000);
 		if (d.getFullYear() >= 2000 && d.getFullYear() <= 2100) {
 			return d;
@@ -94,18 +94,18 @@ function parseFlexibleDateToUTC(dateStr, timezone) {
 		}
 	}
 
-	// 4. Catch-all: try ISO 8601 (handles e.g. "2025-12-31T20:00:00Z")
+	// 4. Catch-all. Try ISO 8601 (handles e.g. "2025-12-31T20:00:00Z")
 	const iso = DateTime.fromISO(trimmed, { zone: timezone });
 	if (iso.isValid) {
 		return iso.toUTC().toJSDate();
 	}
 
 	throw new ValidationError(
-		'❌ Invalid date format. Try one of these examples:\n' +
+		'Invalid date format. Try one of these examples:\n' +
 			'  `31-12-2025 20:00`   (DD-MM-YYYY HH:MM)\n' +
 			'  `2025-12-31 20:00`   (YYYY-MM-DD HH:MM)\n' +
 			'  `31/12/2025 20:00`   (DD/MM/YYYY HH:MM)\n' +
-			'  `1735689600`         (Unix timestamp — Discord @time compatible)'
+			'  `1735689600`         (Unix timestamp, Discord @time compatible)'
 	);
 }
 
@@ -133,8 +133,8 @@ function formatDiscordTimestamp(date, style = 'F') {
  */
 function formatDateInterpretation(dateStr, timezone, utcDate) {
 	const ts = Math.floor(utcDate.getTime() / 1000);
-	return `📅 **Your input:** ${dateStr} (${timezone})
-🌐 **UTC:** <t:${ts}:F> (<t:${ts}:R>)`;
+	return `**Your input** ${dateStr} (${timezone})
+**UTC** <t:${ts}:F> (<t:${ts}:R>)`;
 }
 
 function hoursToMs(hours) {
@@ -147,14 +147,14 @@ function daysToMs(days) {
 
 function validateEventDate(date, fieldName = 'Event') {
 	if (date < new Date()) {
-		throw new Error(`❌ ${fieldName} date must be in the future.`);
+		throw new Error(`${fieldName} date must be in the future.`);
 	}
 	return true;
 }
 
 function validateEndDateAfterStart(startDate, endDate) {
 	if (endDate <= startDate) {
-		throw new Error('❌ End date must be after start date.');
+		throw new Error('End date must be after start date.');
 	}
 	return true;
 }

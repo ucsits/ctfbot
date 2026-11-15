@@ -2,14 +2,14 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createRequire } from 'module';
 
 // -- Strategy ---------------------------------------------------------------
-// The real NoCTFClient runs with only the HTTP boundary faked, so every
+// The real NoCTFClient runs with only the HTTP boundary faked. Every
 // assertion observes what the client would actually put on the wire and what it
 // would actually return to a command. No module mocking is involved, which
 // matters because vitest's vi.mock cannot intercept plain CommonJS `require()`
 // (documented in tests/unit/middleware/ensurePermission.test.js).
 //
-// The client rate limits itself to one request every 200ms, so tests shorten
-// the interval; that is the only field they touch.
+// The client rate limits itself to one request every 200ms. Tests shorten
+// the interval. That is the only field they touch.
 
 const require = createRequire(import.meta.url);
 const { NoCTFClient, createNoCTFClient } = require('../../src/lib/noctf/index.js');
@@ -53,7 +53,7 @@ const CONFIG_ROUTE = '/site/config';
 const DIVISIONS_ROUTE = '/divisions';
 
 beforeEach(() => {
-	// Silence the client's own warnings; the assertions are about behaviour.
+	// Silence the client's own warnings. The assertions are about behaviour.
 	vi.spyOn(console, 'warn').mockImplementation(() => {});
 });
 
@@ -175,7 +175,7 @@ describe('noCTF error handling', () => {
 			throw new Error('ECONNREFUSED');
 		});
 
-		await expect(makeClient().request(CHALLENGE_ROUTE)).rejects.toThrow(/noCTF request failed: ECONNREFUSED/);
+		await expect(makeClient().request(CHALLENGE_ROUTE)).rejects.toThrow(/noCTF request failed ECONNREFUSED/);
 	});
 });
 

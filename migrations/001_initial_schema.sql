@@ -1,6 +1,6 @@
--- Migration: 001_initial_schema
--- Description: Create initial database schema for CTFBot
--- Date: 2025-10-29
+-- Migration 001_initial_schema
+-- Description. Create initial database schema for CTFBot
+-- Date 2025-10-29
 
 -- Create CTFs table
 CREATE TABLE IF NOT EXISTS ctfs (

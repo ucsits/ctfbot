@@ -59,12 +59,12 @@ class CTFdClient {
 				headers
 			});
 
-			this.log.debug(`Response Status: ${response.status} ${response.statusText}`);
+			this.log.debug(`Response Status ${response.status} ${response.statusText}`);
 
 			if (!response.ok) {
 				const text = await response.text();
-				this.log.error(`Error Response Body: ${text}`);
-				throw new Error(`CTFd API error: ${response.status} ${response.statusText}`);
+				this.log.error(`Error Response Body ${text}`);
+				throw new Error(`CTFd API error ${response.status} ${response.statusText}`);
 			}
 
 			const data = await response.json();
@@ -72,12 +72,12 @@ class CTFdClient {
 			// CTFd API returns data in { success: true, data: [...] } format
 			if (!data.success) {
 				this.log.error('API Logic Error', data);
-				throw new Error(`CTFd API returned error: ${JSON.stringify(data)}`);
+				throw new Error(`CTFd API returned error ${JSON.stringify(data)}`);
 			}
 
 			return data;
 		} catch (error) {
-			this.log.error(`Request Failed: ${method} ${url}`, error);
+			this.log.error(`Request Failed ${method} ${url}`, error);
 			throw error;
 		}
 	}

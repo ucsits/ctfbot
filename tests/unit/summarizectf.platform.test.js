@@ -9,11 +9,11 @@ import { SummarizeCTFCommand } from '../../src/commands/summarizectf.js';
 // The real command runs against the real platform registry and the real noCTF
 // client, with only the HTTP boundary faked. vitest's vi.mock cannot intercept
 // the plain CommonJS `require()` inside src/commands/summarizectf.js (the same
-// limitation documented in tests/unit/middleware/ensurePermission.test.js), so a
+// limitation documented in tests/unit/middleware/ensurePermission.test.js). A
 // module mock would silently do nothing and the test would pass while
 // exercising nothing.
 //
-// The database is a real, isolated SQLite file in a temp directory, so the
+// The database is a real, isolated SQLite file in a temp directory. The
 // summary is produced from rows the repositories actually wrote. The rank in
 // the embed can only come from the noCTF scoreboard endpoint, which is what
 // proves the command went through the platform registry instead of hardcoding
@@ -27,7 +27,7 @@ const API_BASE = 'https://api-k17ctf.secso.cc';
 const DIVISION_ID = 2;
 const TEAM_NAME = 'Maverick';
 
-/** routes: Array<[string|RegExp, body|fn]>; first match wins. */
+/** routes as Array<[string|RegExp, body|fn]>. The first match wins. */
 function stubFetch(routes) {
 	const calls = [];
 	globalThis.fetch = vi.fn(async (url, options = {}) => {

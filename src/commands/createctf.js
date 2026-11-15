@@ -121,13 +121,13 @@ class CreateCTFCommand extends Command {
 			await this.sendWelcomeMessage(ctfChannel, options, dates, scheduledEvent);
 
 			// The success reply must be unreachable until the CTF is persisted.
-			// saveToDatabase rethrows on failure, so a database error lands in the
+			// saveToDatabase rethrows on failure. A database error then lands in the
 			// catch below and triggers the rollback.
 			ctfId = await this.saveToDatabase(interaction, ctfChannel, scheduledEvent, options, dates);
 
 			return this.sendConfirmation(interaction, ctfChannel, scheduledEvent, options);
 		} catch (error) {
-			this.container.logger.error('Error creating CTF:', error);
+			this.container.logger.error('Error creating CTF', error);
 			await this._compensateCreate(interaction, ctfChannel, scheduledEvent, ctfId);
 			return interaction.editReply(
 				'Failed to create CTF. The partial setup was rolled back. Please check permissions and try again.'
@@ -138,16 +138,16 @@ class CreateCTFCommand extends Command {
 	/**
 	 * Undo whatever /createctf managed to create before it failed.
 	 *
-	 * Without this the command could fail and still leave a channel, a scheduled
-	 * event, and a welcome message in place with no CTF row behind them, while the
-	 * admin had no way to clean up from Discord. Each step is guarded so a missing
-	 * object or a Discord error cannot mask the original failure.
+	 * Without this a failure could leave a channel, a scheduled event and a
+	 * welcome message in place with no CTF row behind them. The admin would then
+	 * have no way to clean up from Discord. Each step is guarded. A missing object
+	 * or a Discord error cannot mask the original failure.
 	 *
 	 * The database row is removed first. saveToDatabase runs before
-	 * sendConfirmation, so a failure in the confirmation step would otherwise
-	 * leave a permanent ctfs row pointing at a channel and event that were just
-	 * deleted. Deleting the row before the Discord objects keeps the database from
-	 * outliving the objects it references.
+	 * sendConfirmation. A failure in the confirmation step would otherwise leave
+	 * a permanent ctfs row pointing at a channel and event that were just
+	 * deleted. Deleting the row before the Discord objects keeps the database
+	 * from outliving the objects it references.
 	 *
 	 * @param {import('discord.js').ChatInputCommandInteraction} interaction
 	 * @param {object|null} ctfChannel
@@ -160,7 +160,7 @@ class CreateCTFCommand extends Command {
 				ctfOperations.deleteCTF(ctfId);
 				this.container.logger.info(`Rolled back CTF row ${ctfId}`);
 			} catch (error) {
-				this.container.logger.warn(`Could not roll back CTF row ${ctfId}: ${error.message}`);
+				this.container.logger.warn(`Could not roll back CTF row ${ctfId} ${error.message}`);
 			}
 		}
 
@@ -170,17 +170,17 @@ class CreateCTFCommand extends Command {
 				this.container.logger.info(`Rolled back scheduled event ${scheduledEvent.id}`);
 			} catch (error) {
 				this.container.logger.warn(
-					`Could not roll back scheduled event ${scheduledEvent.id}: ${error.message}`
+					`Could not roll back scheduled event ${scheduledEvent.id} ${error.message}`
 				);
 			}
 		}
 
 		if (ctfChannel) {
 			try {
-				await ctfChannel.delete('CTF creation failed; rolling back');
+				await ctfChannel.delete('CTF creation failed. Rolling back');
 				this.container.logger.info(`Rolled back channel ${ctfChannel.id}`);
 			} catch (error) {
-				this.container.logger.warn(`Could not roll back channel ${ctfChannel.id}: ${error.message}`);
+				this.container.logger.warn(`Could not roll back channel ${ctfChannel.id} ${error.message}`);
 			}
 		}
 	}
@@ -215,7 +215,7 @@ class CreateCTFCommand extends Command {
 			try {
 				eventEndDate = parseLocalDateToUTC(options.endDateStr, options.timezone);
 			} catch (error) {
-				throw new Error(`Invalid end date: ${error.message}`);
+				throw new Error(`Invalid end date ${error.message}`);
 			}
 		} else {
 			eventEndDate = new Date(eventDate.getTime() + 24 * 60 * 60 * 1000);
@@ -306,7 +306,7 @@ class CreateCTFCommand extends Command {
 			.setTimestamp();
 
 		if (options.voiceChannel) {
-			embed.addFields({ name: '🔊 Channel', value: options.voiceChannel.toString(), inline: true });
+			embed.addFields({ name: 'Channel', value: options.voiceChannel.toString(), inline: true });
 		}
 
 		embed.addFields({
@@ -323,7 +323,7 @@ class CreateCTFCommand extends Command {
 	}
 
 	async saveToDatabase(interaction, channel, event, options, dates) {
-		// Deliberately NOT wrapped in try/catch: a failure here must abort the
+		// Deliberately NOT wrapped in try/catch. A failure here must abort the
 		// command so the catch in chatInputRun can roll the Discord objects back.
 		// Swallowing it used to let the command report "CTF Created Successfully"
 		// with no database row behind it.
@@ -340,7 +340,7 @@ class CreateCTFCommand extends Command {
 			team_mode: options.teamMode ? 1 : 0,
 			created_by: interaction.user.id
 		});
-		this.container.logger.info(`Stored CTF "${options.ctfName}" in database (ID: ${ctfId})`);
+		this.container.logger.info(`Stored CTF "${options.ctfName}" in database (ID ${ctfId})`);
 		return ctfId;
 	}
 
@@ -361,7 +361,7 @@ class CreateCTFCommand extends Command {
 			.setTimestamp();
 
 		if (options.voiceChannel) {
-			embed.addFields({ name: '🔊 Voice Channel', value: options.voiceChannel.toString(), inline: true });
+			embed.addFields({ name: 'Voice Channel', value: options.voiceChannel.toString(), inline: true });
 		}
 
 		embed.addFields({ name: 'Event Link', value: `[View Event](${event.url})`, inline: false });

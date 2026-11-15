@@ -14,7 +14,7 @@ async function sendResponse(interaction, embed, options = {}) {
 async function sendErrorResponse(interaction, message, options = {}) {
 	const { ephemeral = true, defer = false } = options;
 
-	const embed = new EmbedBuilder().setColor(0xff0000).setTitle('❌ Error').setDescription(message).setTimestamp();
+	const embed = new EmbedBuilder().setColor(0xff0000).setTitle('Error').setDescription(message).setTimestamp();
 
 	if (defer) {
 		await interaction.deferReply({ ephemeral });
@@ -29,7 +29,7 @@ async function sendSuccessResponse(interaction, title, description, options = {}
 
 	const embed = new EmbedBuilder()
 		.setColor(0x00ff00)
-		.setTitle(`✅ ${title}`)
+		.setTitle(title)
 		.setDescription(description)
 		.setTimestamp();
 

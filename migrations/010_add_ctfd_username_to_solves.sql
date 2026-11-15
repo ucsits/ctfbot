@@ -1,5 +1,5 @@
--- Migration: 010_add_ctfd_username_to_solves
--- Description: Add ctfd_username column to ctf_challenge_solves for unregistered user tracking
+-- Migration 010_add_ctfd_username_to_solves
+-- Description. Add ctfd_username column to ctf_challenge_solves for unregistered user tracking
 
 CREATE TABLE IF NOT EXISTS ctf_challenge_solves_new (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,

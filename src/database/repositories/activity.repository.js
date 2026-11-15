@@ -1,7 +1,7 @@
 /**
- * Activity points repository: database operations for the activity economy.
- * Every AP transaction is backed by a Luce blockchain block; the ledger row
- * records the block height that anchors it.
+ * Activity points repository for the activity economy. Every AP transaction is
+ * backed by a Luce blockchain block. The ledger row records the block height
+ * that anchors it.
  * @module database/repositories/activity.repository
  */
 
@@ -82,10 +82,10 @@ function grantPoints({ userId, amount, grantedBy, note, blockHeight }) {
 /**
  * Grant APs to many users as a single all-or-nothing batch.
  *
- * A role grant or a CSV bulk grant is anchored by one blockchain block, so the
- * database half has to behave like one unit: every recipient is credited or
- * none is. The batch key makes a retry safe, because the block and the batch
- * both carry the same interaction id and the second attempt is reported as
+ * A role grant or a CSV bulk grant is anchored by one blockchain block. The
+ * database half therefore has to behave like one unit, where every recipient is
+ * credited or none is. The batch key makes a retry safe. The block and the batch
+ * both carry the same interaction id. The second attempt is then reported as
  * already applied instead of double-crediting.
  *
  * @param {object} params
@@ -140,11 +140,11 @@ function grantPointsMany({ batchKey, entries, grantedBy, note, blockHeight }) {
 /**
  * Reserve an AP purchase before anchoring it on the blockchain.
  *
- * The purchase used to be anchored first and only then debited, so a double
- * click appended two "completed purchase" blocks while a single debit went
- * through, and a crash after the block left a purchase that had no balance
- * movement. Reserving first reverses the dependency: the debit and the pending
- * purchase row commit together, and the block is anchored against an existing
+ * The purchase used to be anchored first and only then debited. A double click
+ * then appended two "completed purchase" blocks while a single debit went
+ * through. A crash after the block left a purchase that had no balance
+ * movement. Reserving first reverses the dependency. The debit and the pending
+ * purchase row commit together. The block is anchored against an existing
  * reservation. That row is created with block_height 0 and status 'pending'
  * until finalizeApPurchase stamps the confirmed height.
  *
@@ -249,9 +249,9 @@ function finalizeApPurchase({ purchaseId, blockHeight }) {
 /**
  * Roll back a reserved AP purchase, restoring the spent points.
  *
- * Used when the blockchain append fails, and by the startup sweep that releases
- * reservations abandoned by a crash. Only a still-pending AP purchase can be
- * released, so a completed purchase is never undone.
+ * Called when the blockchain append fails and by the startup sweep that
+ * releases reservations abandoned by a crash. Only a still-pending AP purchase can be
+ * released. A completed purchase is never undone.
  *
  * @param {object} params
  * @param {string} params.purchaseId
@@ -282,7 +282,7 @@ function releaseApPurchase({ purchaseId }) {
 		db().prepare('DELETE FROM purchases WHERE id = ?').run(purchaseId);
 
 		// Put the reserved points back. The conditional debit already proved the
-		// cost was covered, so this restore can never take a balance negative.
+		// cost was covered. This restore can never take a balance negative.
 		db()
 			.prepare('UPDATE activity_balances SET balance = balance + ? WHERE user_id = ?')
 			.run(purchase.cost_ap, purchase.user_id);
@@ -294,7 +294,7 @@ function releaseApPurchase({ purchaseId }) {
 }
 
 /**
- * Release AP reservations abandoned by a crash, so startup does not strand a
+ * Release AP reservations abandoned by a crash. Startup then does not strand a
  * user's points behind a purchase that was never anchored.
  *
  * @param {object} [params]
@@ -323,9 +323,9 @@ function releaseStaleApReservations({ olderThanSeconds = 900 } = {}) {
 }
 
 /**
- * Complete an AP purchase atomically: spend the points (with an insufficient-
- * funds guard) and create the completed purchase row in one DB transaction.
- * Returns the new balance, or null if the user cannot afford it.
+ * Complete an AP purchase atomically. Spend the points (with an
+ * insufficient-funds guard) and create the completed purchase row in one DB
+ * transaction. Returns the new balance, or null if the user cannot afford it.
  *
  * @param {object} params
  * @param {string} params.purchaseId
@@ -343,7 +343,7 @@ function completeApPurchase({ purchaseId, userId, itemId, apCost, blockHeight })
 		// outside the transaction could go stale between the check and the write,
 		// which is exactly the hole that would allow a negative balance if a
 		// second writer ever appeared. Zero changed rows means the user could not
-		// afford it, and nothing else is written.
+		// afford it. Nothing else is written.
 		const debit = db()
 			.prepare(
 				`
@@ -396,8 +396,8 @@ function spendPoints({ userId, amount, purchaseId, blockHeight }) {
 	const now = Math.floor(Date.now() / 1000);
 
 	const tx = db().transaction(() => {
-		// Same pattern as completeApPurchase: the conditional debit is the guard,
-		// so it cannot be separated from the write by a stale read.
+		// Same pattern as completeApPurchase. The conditional debit is the guard,
+		// and a stale read cannot separate it from the write.
 		const debit = db()
 			.prepare(
 				`
@@ -522,7 +522,7 @@ function listPendingPurchases() {
 /**
  * Claim a pending purchase for confirmation, before anchoring a block.
  *
- * The claim is a conditional update, so exactly one caller can win an
+ * The claim is a conditional update, which lets exactly one caller win an
  * unclaimed (or lease-expired) pending purchase. Without it two admins could
  * both read `pending`, both anchor a confirmation block, and both report
  * success while only one row changed.

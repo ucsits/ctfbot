@@ -27,7 +27,7 @@ class ScheduleCommand extends Command {
 					.addStringOption(option =>
 						option
 							.setName('event_date')
-							.setDescription('Event date — DD-MM-YYYY HH:MM or Unix timestamp (@time compatible)')
+							.setDescription('Event date as DD-MM-YYYY HH:MM or a Unix timestamp (@time compatible)')
 							.setRequired(true)
 					)
 					.addStringOption(option =>
@@ -75,11 +75,11 @@ class ScheduleCommand extends Command {
 			try {
 				eventDate = parseLocalDateToUTC(dateStr, timezone);
 			} catch (error) {
-				return interaction.editReply(`❌ ${error.message}`);
+				return interaction.editReply(`${error.message}`);
 			}
 
 			if (eventDate < new Date()) {
-				return interaction.editReply('❌ Event date must be in the future.');
+				return interaction.editReply('Event date must be in the future.');
 			}
 
 			const isVoiceEvent = voiceChannel !== null;
@@ -114,19 +114,19 @@ class ScheduleCommand extends Command {
 			const interpretation = formatDateInterpretation(dateStr, timezone, eventDate);
 			const embed = new EmbedBuilder()
 				.setColor(0x00ff00)
-				.setTitle('✅ Event Scheduled')
+				.setTitle('Event Scheduled')
 				.setDescription(`**${title}** has been scheduled!\n\n${interpretation}`)
 				.addFields(
-					{ name: '📅 Date & Time', value: `<t:${Math.floor(eventDate.getTime() / 1000)}:F>`, inline: false },
-					{ name: '📝 Description', value: description, inline: false }
+					{ name: 'Date & Time', value: `<t:${Math.floor(eventDate.getTime() / 1000)}:F>`, inline: false },
+					{ name: 'Description', value: description, inline: false }
 				)
 				.setTimestamp();
 
 			if (isVoiceEvent) {
-				embed.addFields({ name: '🔊 Channel', value: voiceChannel.toString(), inline: true });
+				embed.addFields({ name: 'Channel', value: voiceChannel.toString(), inline: true });
 			}
 
-			embed.addFields({ name: '🔗 Event Link', value: `[View Event](${scheduledEvent.url})`, inline: false });
+			embed.addFields({ name: 'Event Link', value: `[View Event](${scheduledEvent.url})`, inline: false });
 
 			if (banner) {
 				embed.setImage(banner.url);
@@ -134,8 +134,8 @@ class ScheduleCommand extends Command {
 
 			return interaction.editReply({ embeds: [embed] });
 		} catch (error) {
-			this.container.logger.error('Error scheduling event:', error);
-			return interaction.editReply('❌ Failed to schedule event. Please check the date format and try again.');
+			this.container.logger.error('Error scheduling event', error);
+			return interaction.editReply('Failed to schedule event. Please check the date format and try again.');
 		}
 	}
 }

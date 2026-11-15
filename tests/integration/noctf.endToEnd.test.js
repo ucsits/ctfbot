@@ -11,15 +11,15 @@ import { RegisterCTFCommand } from '../../src/commands/registerctf.js';
 // end to end, against a real SQLite database and the real noCTF client. Only
 // globalThis.fetch is faked.
 //
-// The scenario is the one that motivated per-platform synthetic user ids: a
-// player solves a challenge before running /registerctf, so the sync has nobody
+// The scenario is the one that motivated per-platform synthetic user ids. A
+// player solves a challenge before running /registerctf. The sync has nobody
 // to attribute the solve to. The solve is parked under noctf:<platform user
-// id>, and /registerctf has to claim exactly that row once the player registers.
+// id>. /registerctf has to claim exactly that row once the player registers.
 // If the two commands disagreed about the prefix, the row would stay orphaned
 // and the player would lose the solve.
 //
 // vitest's vi.mock cannot intercept the plain CommonJS `require()` inside the
-// commands (documented in tests/unit/middleware/ensurePermission.test.js), so a
+// commands (documented in tests/unit/middleware/ensurePermission.test.js). A
 // module mock would silently do nothing.
 
 const require = createRequire(import.meta.url);
@@ -30,7 +30,7 @@ const API_BASE = 'https://api-k17ctf.secso.cc';
 const PLATFORM_USER_ID = 1875;
 const CHALLENGE_TITLE = 'DriveOne';
 
-/** routes: Array<[string|RegExp, body|fn]>; first match wins. */
+/** routes as Array<[string|RegExp, body|fn]>. The first match wins. */
 function stubFetch(routes) {
 	const calls = [];
 	globalThis.fetch = vi.fn(async (url, options = {}) => {
@@ -207,9 +207,9 @@ function seedNoCTFCtf() {
 /**
  * Register a linked teammate, which is what puts their team in the sync's scope.
  *
- * The bulk solve listing is division-wide, so the sync only records solves from
+ * The bulk solve listing is division-wide. The sync only records solves from
  * teams the channel already has registrations for. Their platform user id never
- * appears in the stubbed scoreboard, so they never own the solve under test.
+ * appears in the stubbed scoreboard. They never own the solve under test.
  */
 function seedTeammate(ctf, { userId, username, platformUserId, teamName }) {
 	registrationOperations.registerUser({
@@ -225,13 +225,13 @@ function seedTeammate(ctf, { userId, username, platformUserId, teamName }) {
 describe('noCTF end to end: sync then register', () => {
 	it('parks an unregistered solve under noctf: and lets /registerctf claim it', async () => {
 		const ctf = seedNoCTFCtf();
-		// The sync is scoped to the teams this channel has registrations for, so a
+		// The sync is scoped to the teams this channel has registrations for. A
 		// teammate is registered up front. Their solve is never in the scoreboard
 		// below, which leaves the parked solve to be claimed by /registerctf.
 		seedTeammate(ctf, { userId: 'discord-teammate', username: 'Teammate', platformUserId: 1481, teamName: 'w larp' });
 
 		// 1. Sync before the solver registers. The bulk listing is the only source
-		//    that attributes the solve to a user, so that is the path under test.
+		//    that attributes the solve to a user. That is the path under test.
 		//    The name lookup is what lets the report name the solver rather than
 		//    print their numeric platform id.
 		stubFetch([
@@ -269,15 +269,15 @@ describe('noCTF end to end: sync then register', () => {
 		registerInteraction.channel.id = ctf.channel_id;
 		await makeCommand(RegisterCTFCommand).chatInputRun(registerInteraction);
 
-		// 3. The solve now belongs to the Discord user, and nothing is left
-		//    parked under the synthetic id.
+		// 3. The solve now belongs to the Discord user. Nothing is left parked under
+		//    the synthetic id.
 		const claimed = challengeOperations.getChallengeSolvers(challenge.id);
 		expect(claimed).toHaveLength(1);
 		expect(claimed[0].user_id).toBe('discord-1');
 		expect(challengeOperations.hasCtfdUserSolved(challenge.id, PLATFORM_USER_ID, 'noctf')).toBeFalsy();
 
 		const registration = registrationOperations.getUserRegistration(ctf.id, 'discord-1');
-		// SQLite stores the id with TEXT affinity, so it can come back as '1875.0'.
+		// SQLite stores the id with TEXT affinity. It can come back as '1875.0'.
 		// Every lookup normalises through parseInt, which is why that is asserted
 		// rather than the raw string.
 		expect(parseInt(registration.ctfd_user_id, 10)).toBe(PLATFORM_USER_ID);
@@ -305,7 +305,7 @@ describe('noCTF end to end: sync then register', () => {
 		const challenge = challengeOperations.getChallengeByName(ctf.id, CHALLENGE_TITLE);
 
 		// Same numeric platform user id, but the CTF is now bound to CTFd. The
-		// prefixes differ, so the pending noCTF row must survive untouched.
+		// prefixes differ. The pending noCTF row must survive untouched.
 		ctfOperations.setCTFPlatform(ctf.channel_id, { platform: 'ctfd' });
 
 		const transfer = challengeOperations.transferPendingSolves(

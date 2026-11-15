@@ -2,8 +2,8 @@
  * Platform registry.
  *
  * Every CTF channel is bound to exactly one platform (ctfs.platform). Commands
- * never construct a platform client directly; they go through
- * createPlatformClient so a new platform only has to be registered here.
+ * never construct a platform client directly. They go through
+ * createPlatformClient. A new platform then only has to be registered here.
  *
  * ## Normalized client interface
  *
@@ -14,7 +14,7 @@
  *
  * @typedef {Object} NormalizedChallenge
  * @property {number|string} id - Platform challenge id
- * @property {string} name - Display name (noCTF: title, falling back to slug)
+ * @property {string} name - Display name (noCTF uses title, falling back to slug)
  * @property {string} slug - Stable identifier
  * @property {string} category - Challenge category, 'uncategorized' when unknown
  * @property {number} points - Current point value
@@ -36,21 +36,21 @@
  * @property {string} platform - Platform id this client speaks
  * @property {string} apiBaseUrl - API origin in use
  * @property {Object} [raw] - The underlying platform client on adapters that wrap
- *   one (CTFd exposes its CTFdClient here). Absent on native clients, so callers
+ *   one (CTFd exposes its CTFdClient here). Absent on native clients. Callers
  *   must guard before using it, which is what the per-user sync path does.
  * @property {() => Promise<NormalizedChallenge[]>} getChallenges
  * @property {(challengeId: number|string) => Promise<NormalizedSolve[]>} getChallengeSolves
- * @property {() => Promise<NormalizedSolve[]>} getAllSolves - Bulk solve listing;
- *   rejects on platforms that do not offer one, and the caller falls back
+ * @property {() => Promise<NormalizedSolve[]>} getAllSolves - Bulk solve listing.
+ *   Rejects on platforms that do not offer one. The caller then falls back
  * @property {(username: string) => Promise<{userId: string, username: string, teamName: string|null, teamId: number|string|null}>} findUser
  * @property {() => Promise<NormalizedScoreboardEntry[]>} getScoreboard
  * @property {(teamId: number|string) => Promise<string|null>} resolveTeamName
  * @property {(userIds: Array<number|string>) => Promise<Map<string, string>>} [resolveUserNames]
  *   Optional. Resolves platform user ids to display names in one call. Present
- *   on noCTF, absent on CTFd, so callers must guard before using it.
+ *   on noCTF and absent on CTFd. Callers must guard before using it.
  * @property {(teamIds: Array<number|string>) => Promise<Map<string, string>>} [resolveTeamNames]
  *   Optional. Resolves platform team ids to team names in one call, keyed by
- *   the String form of the id. Present on noCTF, absent on CTFd, so callers
+ *   the String form of the id. Present on noCTF and absent on CTFd. Callers
  *   must guard before using it. A caller that treats a missing name as "not my
  *   team" has to fail closed when the resolver is unavailable.
  * @property {() => Promise<{ok: boolean, platform: string, apiBaseUrl: string, details: Object}>} testConnection
@@ -61,9 +61,9 @@
 const { PLATFORMS, DEFAULT_PLATFORM, PLATFORM_CHOICES, isKnownPlatform } = require('../constants/platforms');
 
 /**
- * Factories are resolved lazily so a platform whose module is missing only
- * breaks when it is actually selected, and so this registry can be required by
- * tests without pulling in every adapter.
+ * Factories are resolved lazily. A platform whose module is missing only breaks
+ * when it is actually selected. This registry can then be required by tests
+ * without pulling in every adapter.
  */
 const FACTORIES = {
 	ctfd: (baseUrl, token, options) => require('./ctfd.adapter').createCTFdAdapter(baseUrl, token, options),
@@ -101,7 +101,7 @@ function getPlatform(id) {
 function createPlatformClient(platformId, apiBaseUrl, token = null, options = {}) {
 	if (!isKnownPlatform(platformId)) {
 		throw new Error(
-			`Unknown CTF platform "${platformId}". Registered platforms: ${Object.keys(PLATFORMS).join(', ')}`
+			`Unknown CTF platform "${platformId}". Registered platforms ${Object.keys(PLATFORMS).join(', ')}`
 		);
 	}
 

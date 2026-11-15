@@ -28,7 +28,7 @@ const validateEnv = () => {
 	const missing = required.filter(key => !process.env[key]);
 
 	if (missing.length > 0) {
-		throw new ConfigurationError(`Missing required environment variables: ${missing.join(', ')}`);
+		throw new ConfigurationError(`Missing required environment variables ${missing.join(', ')}`);
 	}
 };
 
@@ -137,7 +137,7 @@ const config = {
 	},
 
 	/**
-	 * Proactive chat: the bot may speak up on its own in any channel, using
+	 * Proactive chat lets the bot speak up on its own in any channel, using
 	 * tools (web search, channel/user memory) and a budget that adapts when
 	 * people ignore it.
 	 */
@@ -159,7 +159,7 @@ const config = {
 		get maxPerDay() {
 			return envInt('CHAT_MAX_PER_DAY', 20);
 		},
-		/** Whole-guild daily cap, so a busy server cannot run up an unbounded bill. */
+		/** Whole-guild daily cap. A busy server cannot run up an unbounded bill. */
 		get guildMaxPerDay() {
 			return envInt('CHAT_GUILD_MAX_PER_DAY', 200);
 		},

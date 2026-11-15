@@ -9,7 +9,7 @@ import { CreateCTFCommand } from '../../src/commands/createctf.js';
 // `TypeError: Cannot read properties of undefined (reading 'getTime')` and line
 // 317 silently produced `Invalid Date`, which rendered as `<t:NaN:F>`.
 //
-// The existing ctfSaga.source.test.js only asserts on source text, so it could
+// The existing ctfSaga.source.test.js only asserts on source text. It could
 // never catch this. These tests execute sendConfirmation against a REAL
 // GuildScheduledEvent built from the raw API payload shape, which is what makes
 // the wrong property name observable.
@@ -33,7 +33,7 @@ const API_EVENT = {
 const START_UNIX = 1789120800;
 
 /**
- * The GuildScheduledEvent constructor resolves the creator and the guild, so a
+ * The GuildScheduledEvent constructor resolves the creator and the guild. A
  * minimal client stub is required to build a real structure in a unit test.
  */
 function makeClientStub() {
@@ -50,7 +50,7 @@ function makeEvent(overrides = {}) {
 /** Instantiate the command without running the Sapphire constructor. */
 function makeCommand() {
 	const command = Object.create(CreateCTFCommand.prototype);
-	// `container` is a getter on the Sapphire Piece prototype, so it has to be
+	// `container` is a getter on the Sapphire Piece prototype. It has to be
 	// shadowed with an own property rather than assigned.
 	Object.defineProperty(command, 'container', {
 		value: { logger: { info() {}, warn() {}, error() {} } },
@@ -98,7 +98,7 @@ describe('createctf sendConfirmation against a real GuildScheduledEvent', () => 
 
 		// The v13-style name the command used to read is not on the structure.
 		expect(event.scheduledStartTime).toBeUndefined();
-		// The v14 read-back property is a Date; the numeric form also exists.
+		// The v14 read-back property is a Date. The numeric form also exists.
 		expect(event.scheduledStartAt).toBeInstanceOf(Date);
 		expect(event.scheduledStartAt.toISOString()).toBe('2026-09-11T10:00:00.000Z');
 		expect(event.scheduledStartTimestamp).toBe(Date.parse('2026-09-11T10:00:00.000Z'));
@@ -153,7 +153,7 @@ describe('createctf sendConfirmation against a real GuildScheduledEvent', () => 
 
 		const embed = captured.embeds[0];
 		expect(findField(embed, 'Start Time').value).toBe(`<t:${START_UNIX}:F>`);
-		expect(findField(embed, '🔊 Voice Channel').value).toBe('<#123456789012345678>');
+		expect(findField(embed, 'Voice Channel').value).toBe('<#123456789012345678>');
 	});
 
 	it('renders the interpretation for a non-default timezone', async () => {

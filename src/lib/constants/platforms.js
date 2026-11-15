@@ -2,7 +2,7 @@
  * Supported CTF platform identifiers.
  *
  * Each entry describes one adapter the bot can drive. The `id` is what gets
- * persisted in ctfs.platform, so treat these strings as stable.
+ * persisted in ctfs.platform. Treat these strings as stable.
  *
  * @module constants/platforms
  */
@@ -32,14 +32,14 @@ const PLATFORMS = {
 };
 
 /**
- * Used whenever a CTF has no platform recorded, so every pre-existing row keeps
- * behaving exactly as it did before multi-platform support.
+ * Used whenever a CTF has no platform recorded. Every pre-existing row then
+ * keeps behaving exactly as it did before multi-platform support.
  */
 const DEFAULT_PLATFORM = 'ctfd';
 
 /**
- * Discord chat input choices built from the registry, so adding a platform in
- * one place updates the command option too.
+ * Discord chat input choices built from the registry. Adding a platform in one
+ * place then updates the command option too.
  */
 const PLATFORM_CHOICES = Object.values(PLATFORMS).map(({ id, label, description }) => ({
 	name: `${label} - ${description}`,

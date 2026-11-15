@@ -100,8 +100,8 @@ const challengeOperations = {
 			)
 			.all(pendingUserId, ctfId);
 
-		// The whole transfer is one transaction: every pending solve is claimed
-		// or none is, so a failure partway through cannot leave a partially
+		// The whole transfer is one transaction. Every pending solve is claimed
+		// or none is. A failure partway through cannot leave a partially
 		// migrated solve set behind. A UNIQUE collision is expected (the discord
 		// user already solved it) and is handled by dropping that one row.
 		return runInTransaction(() => {

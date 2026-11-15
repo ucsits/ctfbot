@@ -13,7 +13,7 @@ function createBaseEmbed() {
 }
 
 function createSuccessEmbed(title, description, fields = []) {
-	const embed = createBaseEmbed().setColor(COLORS.SUCCESS).setTitle(`✅ ${title}`);
+	const embed = createBaseEmbed().setColor(COLORS.SUCCESS).setTitle(title);
 
 	if (description) {
 		embed.setDescription(description);
@@ -27,7 +27,7 @@ function createSuccessEmbed(title, description, fields = []) {
 }
 
 function createErrorEmbed(title, description, fields = []) {
-	const embed = createBaseEmbed().setColor(COLORS.ERROR).setTitle(`❌ ${title}`);
+	const embed = createBaseEmbed().setColor(COLORS.ERROR).setTitle(title);
 
 	if (description) {
 		embed.setDescription(description);
@@ -41,7 +41,7 @@ function createErrorEmbed(title, description, fields = []) {
 }
 
 function createInfoEmbed(title, description, fields = []) {
-	const embed = createBaseEmbed().setColor(COLORS.INFO).setTitle(`ℹ️ ${title}`);
+	const embed = createBaseEmbed().setColor(COLORS.INFO).setTitle(title);
 
 	if (description) {
 		embed.setDescription(description);
@@ -55,7 +55,7 @@ function createInfoEmbed(title, description, fields = []) {
 }
 
 function createWarningEmbed(title, description, fields = []) {
-	const embed = createBaseEmbed().setColor(COLORS.WARNING).setTitle(`⚠️ ${title}`);
+	const embed = createBaseEmbed().setColor(COLORS.WARNING).setTitle(title);
 
 	if (description) {
 		embed.setDescription(description);

@@ -3,14 +3,14 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 
 // ── Strategy ───────────────────────────────────────────────────────────
-// /createctf ran four side effects with no compensation: create the channel,
+// /createctf ran four side effects with no compensation. It created the channel,
 // create the scheduled event, post the welcome message, then write the CTF row.
 // saveToDatabase swallowed its error and the command still reported
-// "CTF Created Successfully", so a failure left a channel and event behind with
+// "CTF Created Successfully". A failure left a channel and event behind with
 // no database row.
 //
 // Separately, formatDateInterpretation was called in sendWelcomeMessage and
-// sendConfirmation but never imported, so the command threw a ReferenceError
+// sendConfirmation but never imported. The command threw a ReferenceError
 // after the channel and event already existed. That is the confirmed cause of
 // the reported "errors out and completes partially" incident.
 //
@@ -24,7 +24,7 @@ const archiveCtf = readFileSync(join(root, 'src/commands/archivectf.js'), 'utf8'
 
 describe('createctf helper imports', () => {
 	it('imports formatDateInterpretation, which it calls twice', () => {
-		// The regression: two call sites, no import.
+		// The regression was two call sites with no import.
 		const utilsImport = createCtf
 			.split('\n')
 			.find(line => line.includes("require('../lib/utils')"));
@@ -90,7 +90,7 @@ describe('createctf compensation', () => {
 	});
 
 	it('captures the persisted row id and hands it to the rollback', () => {
-		// saveToDatabase runs before sendConfirmation, so a failure in the
+		// saveToDatabase runs before sendConfirmation. A failure in the
 		// confirmation step used to leave a permanent ctfs row behind while the
 		// channel and event were deleted.
 		const run = createCtf.slice(
@@ -153,6 +153,6 @@ describe('archivectf compensation', () => {
 		expect(archiveCtf).toContain('catch (dbError)');
 		const restoreAt = archiveCtf.indexOf('await channel.setParent(originalParentId');
 		expect(restoreAt).toBeGreaterThan(archiveAt);
-		expect(archiveCtf).toContain('restoring original category');
+		expect(archiveCtf).toContain('Restoring the original category');
 	});
 });

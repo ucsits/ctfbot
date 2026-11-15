@@ -7,12 +7,12 @@ import { RegisterCTFCommand } from '../../src/commands/registerctf.js';
 
 // -- Strategy ---------------------------------------------------------------
 // The command is executed for real against the real platform registry and the
-// real noCTF client; only the HTTP boundary is faked. vitest's vi.mock cannot
+// real noCTF client. Only the HTTP boundary is faked. vitest's vi.mock cannot
 // intercept the plain CommonJS `require()` inside src/commands/registerctf.js
-// (documented in tests/unit/middleware/ensurePermission.test.js), so a module
+// (documented in tests/unit/middleware/ensurePermission.test.js). A module
 // mock would silently do nothing.
 //
-// The database is a real, isolated SQLite file in a temp directory, so the
+// The database is a real, isolated SQLite file in a temp directory. The
 // assertions read back the row the registration repository actually wrote
 // rather than a spy's arguments.
 
@@ -202,7 +202,7 @@ describe('/registerctf platform integration', () => {
 
 		await makeCommand(logger).chatInputRun(interaction);
 
-		// No HTTP at all: there is nothing to verify against.
+		// No HTTP at all, because there is nothing to verify against.
 		expect(calls).toHaveLength(0);
 
 		const row = registrationOperations.getUserRegistration(ctf.id, 'discord-1');

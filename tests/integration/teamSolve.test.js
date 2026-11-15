@@ -5,7 +5,7 @@ import { join } from 'path';
 import { createRequire } from 'module';
 
 // ── Strategy ───────────────────────────────────────────────────────────
-// The one-solve-per-team rule used to be application-only: the commands checked
+// The one-solve-per-team rule used to be application-only. The commands checked
 // every team member and then inserted, while the schema only guaranteed
 // UNIQUE(challenge_id, user_id), which is per user. Team mode now stores the
 // team name as team_key and a partial unique index enforces one solve per team.
@@ -77,7 +77,7 @@ describe('team solve uniqueness', () => {
 		expect(thrown).toBeTruthy();
 		expect(thrown.message).toContain('UNIQUE constraint failed');
 
-		// Exactly one solve survives, and it is the first member's.
+		// Exactly one solve survives. It is the first member's.
 		const rows = solvesFor(challengeId);
 		expect(rows.length).toBe(1);
 		expect(rows[0].user_id).toBe('member-a');
@@ -98,7 +98,7 @@ describe('team solve uniqueness', () => {
 	it('leaves individual solves unaffected (NULL team key)', () => {
 		const challengeId = seedChallenge();
 
-		// Two users, no team key: the partial index must not apply, so both are
+		// Two users, no team key. The partial index must not apply. Both are
 		// recorded even though the challenge is identical.
 		challengeOperations.markChallengeSolved(challengeId, 'solo-1');
 		challengeOperations.markChallengeSolved(challengeId, 'solo-2');

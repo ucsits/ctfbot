@@ -20,8 +20,8 @@ const adminRepository = {
 	},
 
 	/**
-	 * Add an admin. Returns the number of rows changed, so 0 means the user was
-	 * already an admin. INSERT OR IGNORE makes this atomic, so the caller does not
+	 * Add an admin. Returns the number of rows changed. Zero means the user was
+	 * already an admin. INSERT OR IGNORE makes this atomic. The caller does not
 	 * need a separate exists() check that could race.
 	 *
 	 * @param {string} userId

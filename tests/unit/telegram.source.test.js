@@ -3,8 +3,8 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 
 // ── Strategy ───────────────────────────────────────────────────────────
-// Same approach as task.lifecycle.source.test.js: this project's modules are
-// CommonJS and vitest cannot reliably `vi.mock` CJS `require()` calls here, so
+// Same approach as task.lifecycle.source.test.js. This project's modules are
+// CommonJS. vitest cannot reliably `vi.mock` CJS `require()` calls here.
 // behavior guarantees are enforced with source-inspection assertions.
 
 const root = process.cwd();

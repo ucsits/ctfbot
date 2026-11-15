@@ -35,7 +35,7 @@ class StoreCommand extends Command {
 				builder
 					.setName(this.name)
 					.setDescription(this.description)
-					// No subcommands: bare /store shows the catalog directly.
+					// No subcommands. A bare /store shows the catalog directly.
 					// The admin-only confirmation lives in its own /store-confirm command
 					// because Discord does not allow invoking a container command that
 					// has subcommands.
@@ -66,16 +66,16 @@ class StoreCommand extends Command {
 		try {
 			const items = activityRepository.getStoreItems();
 
-			// Linear one-line-per-item listing, emojis kept:
-			// `1. Sticker (💰 10 AP / 💵 Rp 1.000)`
+			// Linear one-line-per-item listing.
+			// `1. Sticker (10 AP / Rp 1.000)`
 			const lines = items.map(
 				(item, i) =>
-					`**${i + 1}. ${item.name}** (💰 ${item.ap_price} AP / 💵 Rp ${item.rp_price.toLocaleString('id-ID')})`
+					`**${i + 1}. ${item.name}** (${item.ap_price} AP or Rp ${item.rp_price.toLocaleString('id-ID')})`
 			);
 
 			const embed = new EmbedBuilder()
 				.setColor(0x00e5ff)
-				.setTitle('🛍️ Activity Merchandise Store')
+				.setTitle('Activity Merchandise Store')
 				.setDescription(
 					'Spend your activity points (AP) or pay with Rp.\nChoose an item below to buy it.\n\n' +
 						lines.join('\n')
@@ -102,8 +102,8 @@ class StoreCommand extends Command {
 				files: [{ name: 'catalog.png', attachment: poster }]
 			});
 		} catch (error) {
-			this.container.logger.error('Error showing store:', error);
-			return interaction.editReply('❌ Failed to load the store.');
+			this.container.logger.error('Error showing store', error);
+			return interaction.editReply('Failed to load the store.');
 		}
 	}
 }

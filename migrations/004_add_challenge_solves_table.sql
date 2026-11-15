@@ -1,6 +1,6 @@
--- Migration: 004_add_challenge_solves_table
--- Description: Add challenge solves table for tracking multiple solvers per challenge
--- Date: 2025-10-30
+-- Migration 004_add_challenge_solves_table
+-- Description. Add challenge solves table for tracking multiple solvers per challenge
+-- Date 2025-10-30
 
 -- Create challenge solves table (many-to-many relationship)
 CREATE TABLE IF NOT EXISTS ctf_challenge_solves (

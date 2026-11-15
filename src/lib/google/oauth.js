@@ -23,7 +23,7 @@ let cachedToken = null;
  * Exchange a refresh token for a short-lived access token.
  *
  * Caches the token in memory and only refreshes when it is within 60 seconds
- * of expiry, so the calendar API calls are not slowed by a token refresh on
+ * of expiry. The calendar API calls are then not slowed by a token refresh on
  * every request.
  *
  * @param {string} clientId
@@ -54,7 +54,7 @@ async function getAccessToken(clientId, clientSecret, refreshToken) {
 
 	if (!res.ok) {
 		const errBody = await res.text().catch(() => '');
-		oauthLog.error(`Token refresh failed (${res.status}): ${errBody}`);
+		oauthLog.error(`Token refresh failed (${res.status}) ${errBody}`);
 		throw new Error(`Google OAuth token refresh failed (${res.status})`);
 	}
 
@@ -74,9 +74,9 @@ async function getAccessToken(clientId, clientSecret, refreshToken) {
  * one-time code, which exchangeCode then trades for a refresh token.
  *
  * Google blocked the out-of-band (urn:ietf:wg:oauth:2.0:oob) redirect in
- * 2023, so the redirect must be a loopback address (http://127.0.0.1:<port>)
- * served by a local listener. Desktop app OAuth clients accept any loopback
- * port without registering it.
+ * 2023. The redirect must therefore be a loopback address
+ * (http://127.0.0.1:<port>) served by a local listener. Desktop app OAuth
+ * clients accept any loopback port without registering it.
  *
  * @param {string} clientId
  * @param {string} redirectUri - Loopback URI the local listener serves
@@ -120,7 +120,7 @@ async function exchangeCode(clientId, clientSecret, code, redirectUri) {
 
 	if (!res.ok) {
 		const errBody = await res.text().catch(() => '');
-		throw new Error(`Google OAuth code exchange failed (${res.status}): ${errBody}`);
+		throw new Error(`Google OAuth code exchange failed (${res.status}) ${errBody}`);
 	}
 
 	return res.json();

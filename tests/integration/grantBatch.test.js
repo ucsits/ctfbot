@@ -4,9 +4,9 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 
 // ── Strategy ───────────────────────────────────────────────────────────
-// A role grant or CSV bulk grant is anchored by ONE blockchain block, so the
+// A role grant or CSV bulk grant is anchored by ONE blockchain block. The
 // database half must be all-or-nothing and safe to retry. These tests run
-// against a real SQLite database to prove:
+// against a real SQLite database to prove three things.
 //
 //   * every recipient is credited in a single call
 //   * a mid-batch failure rolls the whole batch back
@@ -98,7 +98,7 @@ describe('grantPointsMany', () => {
 			})
 		).toThrow();
 
-		// Nothing was applied, and the batch key was not consumed, so a corrected
+		// Nothing was applied. The batch key was not consumed either. A corrected
 		// retry can still succeed.
 		expect(activityRepository.getBalance('atomic-a')).toBe(0);
 		expect(activityRepository.getBalance('atomic-c')).toBe(0);
@@ -120,7 +120,7 @@ describe('grantPointsMany', () => {
 		expect(activityRepository.getBalance('atomic-c')).toBe(5);
 	});
 
-	it('applies a batch only once, so a retry cannot double-credit', () => {
+	it('applies a batch only once, and a retry cannot double-credit', () => {
 		const entries = [
 			{ discord_id: 'idem-a', points: 7 },
 			{ discord_id: 'idem-b', points: 7 }

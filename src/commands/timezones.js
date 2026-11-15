@@ -43,7 +43,7 @@ class TimezonesCommand extends Command {
 
 		const region = interaction.options.getString('region');
 
-		const embed = new EmbedBuilder().setColor(0x3498db).setTitle('🕐 Common Timezones').setTimestamp();
+		const embed = new EmbedBuilder().setColor(0x3498db).setTitle('Common Timezones').setTimestamp();
 
 		if (region && COMMON_TIMEZONES[region]) {
 			embed.setDescription(`**${region}**`);

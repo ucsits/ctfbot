@@ -48,13 +48,13 @@ class ChalPtsCommand extends Command {
 			// Get CTF from database
 			const ctf = ctfOperations.getCTFByChannelId(channel.id);
 			if (!ctf) {
-				return interaction.editReply('❌ This channel is not registered as a CTF channel in the database.');
+				return interaction.editReply('This channel is not registered as a CTF channel in the database.');
 			}
 
 			// Get challenge
 			const challenge = challengeOperations.getChallengeByName(ctf.id, chalName);
 			if (!challenge) {
-				return interaction.editReply(`❌ Challenge **${chalName}** not found in this CTF.`);
+				return interaction.editReply(`Challenge **${chalName}** not found in this CTF.`);
 			}
 
 			// Update points
@@ -62,18 +62,18 @@ class ChalPtsCommand extends Command {
 
 			const embed = new EmbedBuilder()
 				.setColor(0x00ff00)
-				.setTitle('✅ Points Updated')
+				.setTitle('Points Updated')
 				.setDescription(`Points for challenge **${chalName}** have been updated.`)
 				.addFields(
-					{ name: '📝 Challenge', value: chalName, inline: true },
-					{ name: '💯 Points', value: points.toString(), inline: true }
+					{ name: 'Challenge', value: chalName, inline: true },
+					{ name: 'Points', value: points.toString(), inline: true }
 				)
 				.setTimestamp();
 
 			await interaction.editReply({ embeds: [embed] });
 		} catch (error) {
 			this.container.logger.error(error);
-			return interaction.editReply('❌ An error occurred while updating challenge points.');
+			return interaction.editReply('An error occurred while updating challenge points.');
 		}
 	}
 }

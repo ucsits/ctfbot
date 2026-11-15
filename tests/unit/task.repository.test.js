@@ -106,7 +106,7 @@ describe('task repository lifecycle', () => {
 		).run('task-6', 'Owned', 'a', 'c', 2000000005, 1, 1);
 		expect(repo.claimTaskTransition({ taskId: 'task-6', actorId: 'a' })).toBe(true);
 		repo.releaseTaskTransition({ taskId: 'task-6', actorId: 'z' });
-		// Still claimed by 'a' — z's release was a no-op
+		// Still claimed by 'a'. The release by z was a no-op
 		expect(repo.claimTaskTransition({ taskId: 'task-6', actorId: 'b' })).toBe(false);
 	});
 
@@ -268,7 +268,7 @@ describe('migration upgrades', () => {
 	});
 });
 
-// ── createTaskWithReminders: all-or-nothing task + schedule write ───────
+// ── createTaskWithReminders, an all-or-nothing task + schedule write ────
 describe('createTaskWithReminders', () => {
 	it('writes the task and every reminder together', () => {
 		repo.createTaskWithReminders({
@@ -299,7 +299,7 @@ describe('createTaskWithReminders', () => {
 	});
 
 	it('rolls back the task when a reminder cannot be written', () => {
-		// A NULL remind_at violates NOT NULL, so the transaction must abort and
+		// A NULL remind_at violates NOT NULL. The transaction must abort and
 		// leave neither the task nor any reminder behind.
 		expect(() =>
 			repo.createTaskWithReminders({
@@ -324,8 +324,8 @@ describe('createTaskWithReminders', () => {
 
 // ── Task transition block idempotency (H6) ──────────────────────────────
 // A retry after a lost response must not anchor a second block for the same
-// transition. beginTaskTransition records the attempt; setTaskTransitionBlock
-// records the height, and a non-null height tells the caller to skip the append.
+// transition. beginTaskTransition records the attempt. setTaskTransitionBlock
+// records the height. A non-null height tells the caller to skip the append.
 describe('task transition block idempotency', () => {
 	it('creates one row per (task, action) and returns the same row twice', () => {
 		const first = repo.beginTaskTransition({ taskId: 'task-1', action: 'done', actorId: 'actor-a' });
@@ -335,7 +335,7 @@ describe('task transition block idempotency', () => {
 		expect(first.block_height).toBeNull();
 
 		const second = repo.beginTaskTransition({ taskId: 'task-1', action: 'done', actorId: 'actor-b' });
-		// INSERT OR IGNORE: the original actor and the null height are preserved.
+		// INSERT OR IGNORE keeps the original actor and the null height.
 		expect(second.actor_id).toBe('actor-a');
 		expect(second.block_height).toBeNull();
 

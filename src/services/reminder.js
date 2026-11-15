@@ -43,11 +43,11 @@ function startReminderService(client) {
 		return;
 	}
 	intervalHandle = setInterval(() => {
-		poll().catch(error => container.logger.error('Reminder poll failed:', error));
+		poll().catch(error => container.logger.error('Reminder poll failed', error));
 	}, interval);
 
 	// Also run once immediately
-	poll().catch(error => container.logger.error('Initial reminder poll failed:', error));
+	poll().catch(error => container.logger.error('Initial reminder poll failed', error));
 }
 
 /**
@@ -61,7 +61,8 @@ function stopReminderService() {
 }
 
 /**
- * Single poll cycle: check due per-task reminders, weekly digest, daily digest.
+ * Single poll cycle. Check due per-task reminders, the weekly digest and the
+ * daily digest.
  */
 async function poll() {
 	if (pollInProgress) {
@@ -96,7 +97,7 @@ async function pollReminders() {
 				const channel = await clientRef.channels.fetch(reminder.channel_id);
 				if (!channel) {
 					container.logger.warn(
-						`Reminder channel ${reminder.channel_id} not found; suppressing reminder ${reminder.id}`
+						`Reminder channel ${reminder.channel_id} not found. Suppressing reminder ${reminder.id}`
 					);
 					taskRepository.releaseReminder(reminder.id, 'Reminder channel not found', true);
 					continue;
@@ -106,7 +107,7 @@ async function pollReminders() {
 				const deadlineStr = `<t:${reminder.deadline}:R>`;
 
 				await channel.send({
-					content: `⏰ **Reminder** ${userMention}`,
+					content: `**Reminder** ${userMention}`,
 					allowedMentions: { users: [reminder.assigned_to] },
 					embeds: [
 						{
@@ -125,7 +126,7 @@ async function pollReminders() {
 				taskRepository.markReminderSent(reminder.id);
 				container.logger.info(`Sent reminder for task ${reminder.task_id}`);
 			} catch (err) {
-				container.logger.error(`Failed to send reminder ${reminder.id}:`, err);
+				container.logger.error(`Failed to send reminder ${reminder.id}`, err);
 				const permanent =
 					[403, 404].includes(err.code) || /Missing Access|Cannot send messages/i.test(err.message || '');
 				taskRepository.releaseReminder(reminder.id, err.message, permanent);
@@ -133,7 +134,7 @@ async function pollReminders() {
 			}
 		}
 	} catch (error) {
-		container.logger.error('Reminder poll error:', error);
+		container.logger.error('Reminder poll error', error);
 	}
 }
 
@@ -148,7 +149,7 @@ const MAX_EMBED_TOTAL = 6000;
 
 /**
  * Group tasks so each group's formatted text fits within Discord's 1024-character
- * embed field value limit. Every task is preserved; none are silently dropped.
+ * embed field value limit. Every task is preserved. None are silently dropped.
  * Returns an array of task arrays (one per field chunk).
  *
  * @param {Array<object>} tasks
@@ -185,7 +186,7 @@ function _groupTasksForFields(tasks) {
  */
 function _formatTaskGroup(group) {
 	if (group.length === 0) {
-		return '✅ No pending tasks.';
+		return 'No pending tasks.';
 	}
 	return group.map(t => `• **${t.title}** - <@${t.assigned_to}> - <t:${t.deadline}:R>`).join('\n');
 }
@@ -213,8 +214,8 @@ function _estimateMentionsLength(tasks) {
 /**
  * Send a task digest as one or more Discord messages.
  *
- * Each message carries an embed whose fields list a batch of tasks, and its
- * leading content @mentions ONLY the people whose tasks appear in that message.
+ * Each message carries an embed whose fields list a batch of tasks. Its leading
+ * content @mentions ONLY the people whose tasks appear in that message.
  * Tasks are split across fields (<=1024 chars each) and across messages
  * (<=25 fields, <=6000 chars total, <=2000 chars of mentions) so the digest
  * never hits Discord's embed limits and never pings people outside the batch
@@ -332,8 +333,8 @@ function _buildMentions(tasks) {
 
 /**
  * Join assignee mentions into a content string, capped so the message
- * content never exceeds 2000 characters. Discord ignores mentions
- * inside embed fields, so the pings live in the main message content.
+ * content never exceeds 2000 characters. Discord ignores mentions inside embed
+ * fields. The pings therefore live in the main message content.
  *
  * @param {string} label - Bold label that prefixes the mentions
  * @param {string[]} mentions - Unique user mention strings
@@ -404,15 +405,15 @@ async function pollWeeklyDigest() {
 		const channel = await clientRef.channels.fetch(constants.REMINDER_CHANNEL_ID);
 		if (channel?.isTextBased()) {
 			await _sendDigest(channel, {
-				title: `📋 Weekly Task Digest - Week ${currentWeek}`,
+				title: `Weekly Task Digest - Week ${currentWeek}`,
 				color: 0x9b59b6,
 				description: 'Good morning! Here is an overview of pending tasks.',
 				footer: `Sent Monday ${nowJakarta.toLocaleString(DateTime.DATE_HUGE)} at 5AM Jakarta time`,
-				mentionLabel: '📋 **Weekly Task Digest**',
+				mentionLabel: '**Weekly Task Digest**',
 				digestKey,
 				sections: [
-					{ heading: `🗓️ This Week (${weekTasks.length} tasks)`, tasks: weekTasks },
-					{ heading: `📅 This Month (${monthTasks.length} tasks)`, tasks: monthTasks }
+					{ heading: `This Week (${weekTasks.length} tasks)`, tasks: weekTasks },
+					{ heading: `This Month (${monthTasks.length} tasks)`, tasks: monthTasks }
 				]
 			});
 			taskRepository.markDigestSent(digestKey);
@@ -420,7 +421,7 @@ async function pollWeeklyDigest() {
 			return true;
 		}
 	} catch (error) {
-		container.logger.error('Failed to send weekly digest:', error);
+		container.logger.error('Failed to send weekly digest', error);
 		// Reset so it retries next poll cycle (within the same Monday window)
 		lastDigestWeek = null;
 	}
@@ -478,20 +479,20 @@ async function pollDailyDigest() {
 		const channel = await clientRef.channels.fetch(constants.REMINDER_CHANNEL_ID);
 		if (channel?.isTextBased()) {
 			await _sendDigest(channel, {
-				title: `📅 Daily Task Digest - ${nowJakarta.toISODate()}`,
+				title: `Daily Task Digest - ${nowJakarta.toISODate()}`,
 				color: 0x3498db,
 				description: 'Good morning! Here are the tasks for today until the end of this week.',
 				footer: `Sent ${nowJakarta.toLocaleString(DateTime.DATE_HUGE)} at 4AM Jakarta time`,
-				mentionLabel: '📅 **Daily Task Digest**',
+				mentionLabel: '**Daily Task Digest**',
 				digestKey,
-				sections: [{ heading: `🗓️ Today → End of Week (${tasks.length} tasks)`, tasks }]
+				sections: [{ heading: `Today → End of Week (${tasks.length} tasks)`, tasks }]
 			});
 			taskRepository.markDigestSent(digestKey);
 			container.logger.info(`Daily digest sent (${lastDigestDate})`);
 			return true;
 		}
 	} catch (error) {
-		container.logger.error('Failed to send daily digest:', error);
+		container.logger.error('Failed to send daily digest', error);
 		// Reset so it retries next poll cycle (within the same 4AM window)
 		lastDigestDate = null;
 	}

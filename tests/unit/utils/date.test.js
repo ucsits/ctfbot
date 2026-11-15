@@ -16,7 +16,7 @@ describe('Date Utils', () => {
 		});
 
 		it('computes Asia/Jakarta month boundaries', () => {
-			// Mid-February Jakarta time; month starts Feb 1 00:00 +07
+			// Mid-February Jakarta time. The month starts Feb 1 00:00 +07
 			const midFeb = Math.floor(Date.parse('2026-02-15T12:00:00+07:00') / 1000);
 			const range = computePeriodRange('month', midFeb, 'Asia/Jakarta');
 			expect(range.start).toBe(Math.floor(Date.parse('2026-02-01T00:00:00+07:00') / 1000));

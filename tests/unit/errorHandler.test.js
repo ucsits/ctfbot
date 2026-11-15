@@ -17,12 +17,12 @@ describe('Error Handler', () => {
 		it('should return default message when error has no message', () => {
 			const error = new Error();
 			const result = formatError(error);
-			expect(result).toBe('❌ An unknown error occurred. Please try again later.');
+			expect(result).toBe('An unknown error occurred. Please try again later.');
 		});
 
 		it('should return default message when error is null', () => {
 			const result = formatError(null);
-			expect(result).toBe('❌ An unknown error occurred. Please try again later.');
+			expect(result).toBe('An unknown error occurred. Please try again later.');
 		});
 	});
 

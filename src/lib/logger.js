@@ -5,9 +5,9 @@
  * Provides a consistent logging interface that works both before and
  * after the SapphireClient is initialized.
  *
- * - Pre-init: falls back to timestamped console output
- * - Post-init: delegates to Sapphire's container.logger (if available)
- * - Respects LOG_LEVEL env var: error, warn, info, debug, trace
+ * - Pre-init falls back to timestamped console output
+ * - Post-init delegates to Sapphire's container.logger (if available)
+ * - Respects the LOG_LEVEL env var, which accepts error, warn, info, debug and trace
  * - Supports child loggers with context prefixes (e.g. "[CTFd]", "[DB]")
  */
 
@@ -99,7 +99,7 @@ function createLogger(context) {
 		const sapphireLogger = getSapphireLogger();
 
 		if (sapphireLogger && LOG_LEVELS[level] >= LOG_LEVELS.info) {
-			// SapphireLogger has: trace, debug, info, warn, error
+			// SapphireLogger has trace, debug, info, warn and error
 			if (sapphireLogger[level]) {
 				const { formatted, extra } = formatMessage(context, message, args);
 				if (extra !== undefined) {
@@ -111,7 +111,7 @@ function createLogger(context) {
 			}
 		}
 
-		// Fallback: formatted console output
+		// Fallback to formatted console output
 		const { formatted, extra } = formatMessage(context, message, args);
 		const ts = timestamp();
 		const levelTag = level.toUpperCase().padEnd(5);

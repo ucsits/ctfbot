@@ -1,9 +1,10 @@
 /**
- * Channel memory repository — what the bot knows about a channel.
+ * Channel memory repository for what the bot knows about a channel.
  *
  * Separate from actor_memories (per-user). A channel note is a fact about the
- * room itself: what it is for, its jargon, house rules ("jangan bahas
- * politik"), and the things the bot already said so it stops repeating them.
+ * room itself, such as what it is for, its jargon, house rules ("jangan bahas
+ * politik"), and the things the bot already said. That stops it from repeating
+ * them.
  *
  * @module database/repositories/channelMemory
  */
@@ -14,7 +15,7 @@ const db = () => getConnection();
 
 const nowSeconds = () => Math.floor(Date.now() / 1000);
 
-// Oldest notes are dropped past this, so the prompt stays small.
+// Oldest notes are dropped past this. The prompt stays small.
 const MAX_NOTES_PER_CHANNEL = 30;
 const MAX_NOTE_CHARS = 240;
 
@@ -73,7 +74,7 @@ function addNote(channelId, note, { kind = 'topic', sourceMessageId = null } = {
 }
 
 /**
- * The bot's own recent messages, newest last, so the prompt can tell it not
+ * The bot's own recent messages, newest last. The prompt can then tell it not
  * to repeat itself. Stored as ordinary notes with kind 'said'.
  *
  * @returns {string[]}
@@ -91,7 +92,7 @@ function clearChannel(channelId) {
 	db().prepare('DELETE FROM channel_memory WHERE channel_id = ?').run(channelId);
 }
 
-/** Test helper: forget every channel note. */
+/** Test helper. Forget every channel note. */
 function _reset() {
 	db().prepare('DELETE FROM channel_memory').run();
 }

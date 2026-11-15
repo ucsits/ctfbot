@@ -50,7 +50,7 @@ describe('Luce audit block embeds', () => {
 			createdBy: '111',
 			assignedTo: '222'
 		}));
-		expect(embed.data.title).toBe('📋 Task Created');
+		expect(embed.data.title).toBe('Task Created');
 		expect(embed.data.description).toBe('Fix the parser');
 		expect(embed.data.fields.map(f => f.value)).toEqual(
 			expect.arrayContaining(['<@111>', '<@222>', '#42'])
@@ -66,7 +66,7 @@ describe('Luce audit block embeds', () => {
 			completedBy: '111',
 			assignedTo: '222'
 		}));
-		expect(embed.data.title).toBe('✅ Task Completed');
+		expect(embed.data.title).toBe('Task Completed');
 		expect(embed.data.description).toBe('Fix the parser');
 		expect(embed.data.fields.map(f => f.value)).toEqual(
 			expect.arrayContaining(['<@111>', '<@222>'])
@@ -82,7 +82,7 @@ describe('Luce audit block embeds', () => {
 			cancelledBy: '333',
 			assignedTo: '222'
 		}));
-		expect(embed.data.title).toBe('🗑️ Task Cancelled');
+		expect(embed.data.title).toBe('Task Cancelled');
 		expect(embed.data.description).toBe('Cancel me');
 		expect(embed.data.fields.map(f => f.value)).toEqual(
 			expect.arrayContaining(['<@333>', '<@222>', '#42'])
@@ -103,14 +103,14 @@ describe('Luce audit block embeds', () => {
 	it('handles malformed block data without throwing', async () => {
 		const luce = await loadLuce();
 		const embed = luce._buildBlockEmbed({ data: 'not-json{{{', height: 7, timestamp: 1 });
-		expect(embed.data.title).toBe('⛓️ New Block');
+		expect(embed.data.title).toBe('New Block');
 		expect(embed.data.description).toContain('#7');
 	});
 
 	it('handles unknown block types with a generic embed', async () => {
 		const luce = await loadLuce();
 		const embed = luce._buildBlockEmbed({ data: JSON.stringify({ type: 'mystery_event' }), author: '111', height: 7, timestamp: 1 });
-		expect(embed.data.title).toBe('⛓️ New Block');
+		expect(embed.data.title).toBe('New Block');
 		expect(embed.data.fields.map(f => f.value)).toEqual(expect.arrayContaining(['<@111>', 'mystery_event']));
 	});
 });
@@ -157,11 +157,11 @@ describe('Luce audit notification fallback', () => {
 			}
 		};
 		luce.setDiscordClient(client);
-		// Malformed data — content stays empty, generic embed is sent
+		// Malformed data. Content stays empty and a generic embed is sent
 		await luce._notifyBlock({ data: '{{{', height: 9, timestamp: 1 });
 		expect(send).toHaveBeenCalledTimes(1);
 		const payload = send.mock.calls[0][0];
-		expect(payload.embeds[0].data.title).toBe('⛓️ New Block');
+		expect(payload.embeds[0].data.title).toBe('New Block');
 		expect(payload.content).toBeUndefined();
 	});
 

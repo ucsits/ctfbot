@@ -1,8 +1,8 @@
 /**
- * Calendar repository — database operations for the Google Calendar sync layer.
- * Stores the shared org OAuth credentials, the incremental sync cursor, and the
- * calendar_event_id linkage on tasks so the sync service can push new tasks and
- * reconcile bot-owned calendar events back into the task DB.
+ * Calendar repository for the Google Calendar sync layer. It stores the shared
+ * org OAuth credentials, the incremental sync cursor, and the calendar_event_id
+ * linkage on tasks. The sync service then pushes new tasks and reconciles
+ * bot-owned calendar events back into the task DB.
  *
  * @module database/repositories/calendar
  */
@@ -87,8 +87,8 @@ function clearSyncToken() {
 }
 
 /**
- * Pending, non-cancelled tasks that still need to be pushed to the calendar:
- * either they have no linked calendar event yet, or they were never marked as
+ * Pending, non-cancelled tasks that still need to be pushed to the calendar.
+ * Either they have no linked calendar event yet, or they were never marked as
  * synced.
  *
  * @param {object} [params]

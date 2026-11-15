@@ -1,10 +1,10 @@
--- Migration 024: Enforce one solve per team in the database
+-- Migration 024. Enforce one solve per team in the database
 --
--- Team-mode deduplication was application-only: solvectf and syncchallenges
+-- Team-mode deduplication was application-only. solvectf and syncchallenges
 -- checked every team member for an existing solve and then inserted. The only
--- schema guarantee was UNIQUE(challenge_id, user_id), which is per user, so two
--- team members could both be recorded for the same challenge if the check was
--- bypassed or a second process raced it.
+-- schema guarantee was UNIQUE(challenge_id, user_id), which is per user. Two
+-- team members could therefore both be recorded for the same challenge if the
+-- check was bypassed or a second process raced it.
 --
 -- team_key carries the team name for team-mode solves and stays NULL for
 -- individual solves. The partial unique index then enforces one solve per team

@@ -205,7 +205,7 @@ describe('purchase confirmation claim', () => {
 		expect(released.confirm_claim_by).toBeNull();
 		expect(released.confirm_claim_until).toBeNull();
 
-		// Released, so anyone may claim it again.
+		// Released. Anyone may claim it again.
 		expect(
 			activityRepository.claimPurchaseConfirmation({ id: 'p-claim-1', claimedBy: 'admin-c' })
 		).toBe(true);
@@ -261,7 +261,7 @@ describe('store-confirm command ordering', () => {
 // ── Debit guard inside the transaction (M6) ─────────────────────────────
 // completeApPurchase and spendPoints used to call getBalance() before opening
 // their transaction and then debit unconditionally. The guard is now part of the
-// debit statement itself, so the check cannot go stale against the write.
+// debit statement itself. The check cannot go stale against the write.
 describe('AP debit guard', () => {
 	it('rejects an unaffordable debit and writes nothing', () => {
 		activityRepository.grantPoints({ userId: 'guard-1', amount: 25, grantedBy: 'admin', blockHeight: 1 });

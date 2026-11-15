@@ -35,12 +35,13 @@ class MessageReactionAddListener extends Listener {
 			user = partialUser.partial ? await partialUser.fetch() : partialUser;
 			message = reaction.message.partial ? await reaction.message.fetch() : reaction.message;
 		} catch (error) {
-			this.container.logger.debug(`Could not resolve reaction: ${error.message}`);
+			this.container.logger.debug(`Could not resolve reaction ${error.message}`);
 			return;
 		}
 
-		// Reactions on the bot's own messages drive proactive chat: 🔇 mutes the
-		// channel, anything else tells the bot the channel is paying attention.
+		// Reactions on the bot's own messages drive proactive chat. The mute emoji
+		// mutes the channel. Anything else tells the bot the channel is paying
+		// attention.
 		if (message.author?.bot) {
 			try {
 				if (emoji === MUTE) {
@@ -50,12 +51,12 @@ class MessageReactionAddListener extends Listener {
 					chat.noteEngaged(message.channelId);
 				}
 			} catch (error) {
-				this.container.logger.error('Error handling reaction on a bot message:', error);
+				this.container.logger.error('Error handling reaction on a bot message', error);
 			}
 			return;
 		}
 
-		// The rest is reputation: only 👍 and 👎 count.
+		// The rest is reputation. Only the up and down reactions count.
 		if (emoji !== THUMBS_UP && emoji !== THUMBS_DOWN) {
 			return;
 		}
@@ -69,7 +70,7 @@ class MessageReactionAddListener extends Listener {
 
 		try {
 			// The daily slot is claimed atomically inside awardReputation before
-			// the chain write, so a second reaction from the same user cannot
+			// the chain write. A second reaction from the same user cannot
 			// also append a block. 'already-given' is ignored silently here.
 			await awardReputation({
 				toUser: message.author.id,
@@ -80,7 +81,7 @@ class MessageReactionAddListener extends Listener {
 				fromTag: user.tag
 			});
 		} catch (error) {
-			this.container.logger.error('Error processing rep reaction:', error);
+			this.container.logger.error('Error processing rep reaction', error);
 		}
 	}
 }

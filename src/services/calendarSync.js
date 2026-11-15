@@ -4,17 +4,18 @@
  * Background poller that pushes bot tasks to a shared Google Calendar and
  * pulls incremental changes from bot-owned events back into the task DB.
  *
- * Push direction (bot → calendar):
+ * Push direction (bot → calendar).
  *   - Tasks created via /task add are pushed as new events.
  *   - Tasks completed via /task done have their events deleted.
  *   - Tasks cancelled via /task cancel have their events patched to
  *     status=cancelled.
  *
- * Pull direction (calendar → bot):
+ * Pull direction (calendar → bot).
  *   - Uses Google's incremental sync (syncToken) to reduce API quota.
  *   - Only processes events with the bot-owned extendedProperties marker
- *     (x-ctfbot-task=true), so foreign events are never imported.
- *   - Detects: title changes, deadline changes, event cancellation/deletion.
+ *     (x-ctfbot-task=true). Foreign events are never imported.
+ *   - Detects title changes, deadline changes, and event cancellation or
+ *     deletion.
  *
  * The service is a no-op when GOOGLE_CALENDAR_ENABLED is false or credentials
  * are not provisioned.
@@ -117,11 +118,11 @@ function startCalendarSyncService(_client) {
 		return;
 	}
 	intervalHandle = setInterval(() => {
-		_syncCycle().catch(error => syncLog.error('Calendar sync poll failed:', error));
+		_syncCycle().catch(error => syncLog.error('Calendar sync poll failed', error));
 	}, interval);
 
 	// Run once immediately
-	_syncCycle().catch(error => syncLog.error('Initial calendar sync failed:', error));
+	_syncCycle().catch(error => syncLog.error('Initial calendar sync failed', error));
 }
 
 /**
@@ -139,17 +140,17 @@ function stopCalendarSyncService() {
  */
 function forceResync() {
 	calendarRepository.clearSyncToken();
-	syncLog.info('Calendar sync token cleared — next cycle will do a full re-scan');
+	syncLog.info('Calendar sync token cleared. The next cycle will do a full re-scan');
 }
 
 // ──────────────────────────────────────────────
-//  Push: bot → Calendar
+//  Push, bot → Calendar
 // ──────────────────────────────────────────────
 
 /**
- * Push a task update to the Google Calendar. Best-effort — never throws to
- * the caller. Errors are logged and the task is left in a state that the
- * reconciliation cycle will pick up.
+ * Push a task update to the Google Calendar. This is best-effort and never
+ * throws to the caller. Errors are logged and the task is left in a state that
+ * the reconciliation cycle will pick up.
  *
  * @param {object} task - Full task row from the DB
  * @param {string} action - 'create' | 'delete' | 'cancel'
@@ -158,9 +159,9 @@ function forceResync() {
 /**
  * Find a calendar event that was already created for a task.
  *
- * Used to make the 'create' push idempotent: an earlier push may have created
- * the event but failed to record the linkage, and the reconciliation cycle
- * selects tasks with a null calendar_event_id, so without this check it would
+ * Used to make the 'create' push idempotent. An earlier push may have created
+ * the event but failed to record the linkage. The reconciliation cycle selects
+ * tasks with a null calendar_event_id. Without this check it would
  * create a duplicate event on every pass.
  *
  * The lookup runs a FULL sync (no syncToken), because Google rejects
@@ -179,7 +180,7 @@ async function findEventForTask(creds, taskId) {
 		return null;
 	}
 
-	// The API filter is advisory; confirm the marker before adopting.
+	// The API filter is advisory. Confirm the marker before adopting.
 	return (
 		result.items.find(event => {
 			const patch = calendarApi.calendarEventToTaskPatch(event);
@@ -195,14 +196,14 @@ async function pushTaskUpdate(task, action) {
 
 	const creds = resolveCredentials();
 	if (!creds) {
-		syncLog.warn('Calendar push skipped: no credentials available');
+		syncLog.warn('Calendar push skipped. No credentials available');
 		return { success: false };
 	}
 
 	try {
 		switch (action) {
 			case 'create': {
-				// Idempotency first: adopt an event that already exists for this task
+				// Idempotency first. Adopt an event that already exists for this task
 				// rather than creating a second one.
 				const existing = await findEventForTask(creds, task.task_id);
 				if (existing) {
@@ -243,11 +244,11 @@ async function pushTaskUpdate(task, action) {
 				return { success: true };
 			}
 			default:
-				syncLog.warn(`Unknown calendar push action: ${action}`);
+				syncLog.warn(`Unknown calendar push action ${action}`);
 				return { success: false };
 		}
 	} catch (error) {
-		syncLog.error(`Calendar push (${action}) failed for task ${task.task_id}: ${error.message}`);
+		syncLog.error(`Calendar push (${action}) failed for task ${task.task_id} ${error.message}`);
 		return { success: false };
 	}
 }
@@ -257,7 +258,7 @@ async function pushTaskUpdate(task, action) {
 // ──────────────────────────────────────────────
 
 /**
- * Single sync cycle: push outstanding tasks and pull incremental changes.
+ * Single sync cycle. Push outstanding tasks and pull incremental changes.
  */
 async function _syncCycle() {
 	if (!isEnabled() || syncInProgress) {
@@ -269,7 +270,7 @@ async function _syncCycle() {
 		await _reconcileOutstanding();
 		await _pullCalendarChanges();
 	} catch (error) {
-		syncLog.error('Calendar sync cycle error:', error);
+		syncLog.error('Calendar sync cycle error', error);
 	} finally {
 		syncInProgress = false;
 	}
@@ -304,12 +305,12 @@ async function _pullCalendarChanges() {
 	const syncState = calendarRepository.getSyncToken();
 	const syncToken = syncState?.sync_token || null;
 
-	syncLog.debug(`Pulling calendar changes (syncToken: ${syncToken ? 'present' : 'none'})`);
+	syncLog.debug(`Pulling calendar changes (syncToken ${syncToken ? 'present' : 'none'})`);
 
 	const result = await calendarApi.listAllEvents(creds, { syncToken });
 
 	if (result.tokenExpired) {
-		// Sync token too old — clear it and retry on the next cycle (full sync)
+		// Sync token too old. Clear it and retry on the next cycle (full sync)
 		syncLog.warn('Sync token expired, clearing for full re-sync');
 		calendarRepository.clearSyncToken();
 		return;
@@ -366,7 +367,7 @@ async function _pullCalendarChanges() {
 		}
 
 		if (Object.keys(updates).length > 0) {
-			syncLog.info(`Updating task ${dbTask.task_id} from calendar: ${JSON.stringify(updates)}`);
+			syncLog.info(`Updating task ${dbTask.task_id} from calendar ${JSON.stringify(updates)}`);
 			_updateTaskFromCalendar(dbTask.task_id, updates);
 		}
 	}

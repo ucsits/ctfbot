@@ -41,28 +41,28 @@ class ActivityLeaderboardCommand extends Command {
 			const rows = activityRepository.getLeaderboard(limit);
 
 			if (rows.length === 0) {
-				return interaction.editReply('📊 No activity points yet. Ask an admin to award some!');
+				return interaction.editReply('No activity points yet. Ask an admin to award some!');
 			}
 
 			const embed = new EmbedBuilder()
 				.setColor(0x9b59b6)
-				.setTitle('🏆 Activity Points Leaderboard')
+				.setTitle('Activity Points Leaderboard')
 				.setTimestamp();
 
 			const lines = [];
 			for (let i = 0; i < rows.length; i++) {
-				const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`;
+				const medal = `${i + 1}.`;
 				const user = await interaction.client.users.fetch(rows[i].user_id).catch(() => null);
 				const name = user ? user.tag : `\`${rows[i].user_id}\``;
-				lines.push(`${medal} **${name}** — ${rows[i].balance} AP`);
+				lines.push(`${medal} **${name}** ${rows[i].balance} AP`);
 			}
 
 			embed.setDescription(lines.join('\n'));
 
 			return interaction.editReply({ embeds: [embed] });
 		} catch (error) {
-			this.container.logger.error('Error fetching activity leaderboard:', error);
-			return interaction.editReply('❌ Failed to fetch leaderboard.');
+			this.container.logger.error('Error fetching activity leaderboard', error);
+			return interaction.editReply('Failed to fetch leaderboard.');
 		}
 	}
 }

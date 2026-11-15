@@ -1,9 +1,9 @@
--- Migration 022: Confirmation claim for pending Rp purchases
+-- Migration 022. Confirmation claim for pending Rp purchases
 --
 -- /store-confirm read the purchase, checked its status, appended the
--- confirmation block, and then called confirmPurchase, discarding the boolean
+-- confirmation block, then called confirmPurchase and discarded the boolean
 -- result. Two rapid invocations both saw "pending", both anchored a
--- confirmation block, and both reported success while only one row changed.
+-- confirmation block. Both then reported success while only one row changed.
 --
 -- The claim columns let one invocation reserve the purchase before the block is
 -- anchored. The lease makes an abandoned claim (crashed process) recoverable.

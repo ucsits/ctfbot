@@ -1,5 +1,5 @@
 /**
- * Google Calendar API v3 — fetch-based client.
+ * Google Calendar API v3 client, fetch based.
  *
  * Thin wrappers around the Calendar API REST endpoints, using the project's
  * existing global fetch (Node 18+) and the OAuth module for token management.
@@ -20,8 +20,8 @@ const calLog = logger.child('Google|Calendar');
 const BASE = 'https://www.googleapis.com/calendar/v3';
 
 /**
- * Retrieve the appropriate access token, making a signed request, and
- * transparently retry once on 401 (expired token) after clearing the cache.
+ * Retrieve the appropriate access token, make the signed request, and retry
+ * once on 401 (expired token) after clearing the cache.
  *
  * @param {string} url
  * @param {object} options
@@ -40,7 +40,7 @@ async function _authorizedFetch(url, options = {}, creds) {
 		}
 	});
 
-	// Expired or revoked token — clear cache and retry exactly once
+	// Expired or revoked token. Clear the cache and retry exactly once
 	if (res.status === 401) {
 		calLog.warn('Got 401 from Calendar API, refreshing token and retrying');
 		oauth.clearTokenCache();
@@ -55,7 +55,7 @@ async function _authorizedFetch(url, options = {}, creds) {
 		});
 		if (!retryRes.ok) {
 			const body = await retryRes.text().catch(() => '');
-			calLog.error(`Calendar API retry failed (${retryRes.status}): ${body}`);
+			calLog.error(`Calendar API retry failed (${retryRes.status}) ${body}`);
 		}
 		return retryRes;
 	}
@@ -81,8 +81,9 @@ async function listEvents(creds, opts = {}) {
 		maxResults: String(opts.maxResults || 250),
 		...(opts.syncToken ? { syncToken: opts.syncToken } : {}),
 		...(opts.pageToken ? { pageToken: opts.pageToken } : {}),
-		// Google expects `key=value`; used to find an event already created for
-		// a given task so a push can adopt it instead of creating a duplicate.
+		// Google expects `key=value`. It is used to find an event already created
+		// for a given task. A push can then adopt it instead of creating a
+		// duplicate.
 		...(opts.privateExtendedProperty ? { privateExtendedProperty: opts.privateExtendedProperty } : {})
 	});
 
@@ -90,13 +91,13 @@ async function listEvents(creds, opts = {}) {
 	const res = await _authorizedFetch(url, {}, creds);
 
 	if (!res.ok) {
-		// 410: syncToken is too old — caller must fall back to a full sync
+		// 410 means the syncToken is too old. The caller must fall back to a full sync
 		if (res.status === 410) {
-			calLog.warn('syncToken expired (410 Gone) — caller should force a full re-sync');
+			calLog.warn('syncToken expired (410 Gone). The caller should force a full re-sync');
 			return { items: [], nextSyncToken: null, tokenExpired: true };
 		}
 		const body = await res.text().catch(() => '');
-		throw new Error(`Calendar API listEvents failed (${res.status}): ${body}`);
+		throw new Error(`Calendar API listEvents failed (${res.status}) ${body}`);
 	}
 
 	const data = await res.json();
@@ -112,9 +113,9 @@ async function listEvents(creds, opts = {}) {
  * When a syncToken is provided and still valid, returns only the incremental
  * changes. When no syncToken is provided, returns the full event set.
  *
- * Note: `privateExtendedProperty` is only valid on a FULL sync. Google
- * rejects it together with a syncToken, so callers that filter must not pass a
- * syncToken at the same time.
+ * `privateExtendedProperty` is only valid on a FULL sync. Google rejects it
+ * together with a syncToken. Callers that filter must not pass a syncToken at
+ * the same time.
  *
  * @param {object} creds
  * @param {object} [opts]
@@ -160,7 +161,7 @@ async function createEvent(creds, event) {
 
 	if (!res.ok) {
 		const body = await res.text().catch(() => '');
-		throw new Error(`Calendar API createEvent failed (${res.status}): ${body}`);
+		throw new Error(`Calendar API createEvent failed (${res.status}) ${body}`);
 	}
 
 	return res.json();
@@ -180,7 +181,7 @@ async function patchEvent(creds, eventId, fields) {
 
 	if (!res.ok) {
 		const body = await res.text().catch(() => '');
-		throw new Error(`Calendar API patchEvent failed (${res.status}): ${body}`);
+		throw new Error(`Calendar API patchEvent failed (${res.status}) ${body}`);
 	}
 
 	return res.json();
@@ -198,14 +199,14 @@ async function deleteEvent(creds, eventId) {
 	const res = await _authorizedFetch(url, { method: 'DELETE' }, creds);
 
 	if (!res.ok && res.status !== 404) {
-		// 404 is acceptable — the event might have been deleted externally
+		// 404 is acceptable. The event might have been deleted externally
 		const body = await res.text().catch(() => '');
-		throw new Error(`Calendar API deleteEvent failed (${res.status}): ${body}`);
+		throw new Error(`Calendar API deleteEvent failed (${res.status}) ${body}`);
 	}
 }
 
 // ─────────────────────────────────────────────────────────────
-//  Mapper: bot task → Google Calendar event JSON
+//  Mapper for a bot task to Google Calendar event JSON
 // ─────────────────────────────────────────────────────────────
 
 /**
@@ -245,16 +246,16 @@ function taskToCalendarEvent(task) {
 	};
 
 	if (task.description) {
-		event.description = `Discord task: ${task.title}\nAssigned to: <@${task.assigned_to}>\nTask ID: ${task.task_id}\n\n${task.description}`;
+		event.description = `Discord task ${task.title}\nAssigned to <@${task.assigned_to}>\nTask ID ${task.task_id}\n\n${task.description}`;
 	} else {
-		event.description = `Discord task: ${task.title}\nAssigned to: <@${task.assigned_to}>\nTask ID: ${task.task_id}`;
+		event.description = `Discord task ${task.title}\nAssigned to <@${task.assigned_to}>\nTask ID ${task.task_id}`;
 	}
 
 	return event;
 }
 
 // ─────────────────────────────────────────────────────────────
-//  Mapper: Calendar event → bot task fields (for reconciliation)
+//  Mapper for a Calendar event to bot task fields (for reconciliation)
 // ─────────────────────────────────────────────────────────────
 
 /**

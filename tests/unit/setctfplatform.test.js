@@ -7,7 +7,7 @@ import { ctfOperations } from '../../src/database/index.js';
 // the real noCTF client, with only the network boundary faked. That matters
 // because vitest's vi.mock cannot intercept the plain CommonJS `require()` calls
 // inside src/commands/setctfplatform.js (the same limitation documented in
-// tests/unit/middleware/ensurePermission.test.js), so a module-level mock would
+// tests/unit/middleware/ensurePermission.test.js). A module-level mock would
 // silently do nothing and the test would pass while exercising nothing.
 //
 // ctfOperations is stubbed by replacing properties on the shared module object,

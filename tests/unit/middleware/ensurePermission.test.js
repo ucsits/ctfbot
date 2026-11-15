@@ -8,7 +8,7 @@ import { checkPermission, PermissionError, PermissionFlagsBits } from '../../../
 /**
  * ensurePermission calls isAdmin via a plain CommonJS `require('./ensureAdmin')`.
  * Vitest's vi.mock only intercepts ESM imports / Vite-processed requires, NOT raw
- * require() calls inside plain-CJS source files, so mocking the connection chain
+ * require() calls inside plain-CJS source files. Mocking the connection chain
  * here never reaches the real isAdmin. Instead we point the real DB at a temp dir
  * (same pattern as tests/integration/activity.repository.test.js) and seed a real
  * admins row, letting the genuine isAdmin path run end-to-end.

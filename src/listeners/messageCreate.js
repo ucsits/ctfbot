@@ -20,26 +20,26 @@ class MessageCreateListener extends Listener {
 			return;
 		}
 
-		this.container.logger.debug(`${message.author.tag}: ${message.content}`);
+		this.container.logger.debug(`${message.author.tag} ${message.content}`);
 
 		// Buffer governance-channel messages for task suggestions (no-op unless
 		// TASK_SUGGESTIONS_ENABLED and the OpenAI-compatible endpoint are set).
 		try {
 			taskSuggest.observe(message);
 		} catch (error) {
-			this.container.logger.error('Error buffering message for task suggestions:', error);
+			this.container.logger.error('Error buffering message for task suggestions', error);
 		}
 
-		// Proactive chat: the bot may join the conversation on its own (no-op
-		// unless CHAT_ENABLED and the model endpoint are set).
+		// Proactive chat lets the bot join the conversation on its own. This is a
+		// no-op unless CHAT_ENABLED and the model endpoint are set.
 		try {
 			chat.observe(message);
 		} catch (error) {
-			this.container.logger.error('Error buffering message for proactive chat:', error);
+			this.container.logger.error('Error buffering message for proactive chat', error);
 		}
 
-		// Reply-based rep detection:
-		// check if this message is a reply and matches +1/-1/👍/👎
+		// Reply-based rep detection.
+		// Check whether this message is a reply and matches the +1/-1 or thumb patterns
 		if (message.reference?.messageId) {
 			const trimmed = message.content.trim();
 			let amount = null;
@@ -60,7 +60,7 @@ class MessageCreateListener extends Listener {
 		try {
 			const repliedTo = await message.channel.messages.fetch(message.reference.messageId);
 
-			// Guard: no self-rep, no bot-rep
+			// Guard against self-rep and bot-rep
 			if (repliedTo.author.bot) {
 				return;
 			}
@@ -69,7 +69,7 @@ class MessageCreateListener extends Listener {
 			}
 
 			// The daily slot is claimed atomically inside awardReputation before
-			// the chain write, so two rapid replies cannot both append a block.
+			// the chain write. Two rapid replies cannot both append a block.
 			const status = await awardReputation({
 				toUser: repliedTo.author.id,
 				fromUser: message.author.id,
@@ -80,15 +80,15 @@ class MessageCreateListener extends Listener {
 			});
 
 			if (status === 'awarded') {
-				// Confirm with a ✅ reaction
+				// Confirm with a check reaction
 				await message.react('✅').catch(() => {});
 				return;
 			}
 
-			// 'already-given' or 'failed': signal that nothing was recorded.
+			// 'already-given' or 'failed'. Signal that nothing was recorded.
 			await message.react('❌').catch(() => {});
 		} catch (error) {
-			this.container.logger.error('Error processing reply rep:', error);
+			this.container.logger.error('Error processing reply rep', error);
 			await message.react('❌').catch(() => {});
 		}
 	}

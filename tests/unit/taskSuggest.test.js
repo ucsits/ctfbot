@@ -130,7 +130,7 @@ describe('taskSuggest._buildPrompt', () => {
 		});
 		expect(system.role).toBe('system');
 		expect(system.content).toContain('JSON');
-		expect(user.content).toContain('Current local time: 2026-10-30 23:00 Friday (Asia/Jakarta)');
+		expect(user.content).toContain('Current local time is 2026-10-30 23:00 Friday (Asia/Jakarta)');
 		expect(user.content).toContain('- Budi (u2)');
 		expect(user.content).toContain('"Book venue"');
 		expect(user.content).toContain('id=222');
@@ -267,7 +267,8 @@ describe('taskSuggest direct mentions', () => {
 		await vi.advanceTimersByTimeAsync(0);
 		expect(globalThis.fetch).toHaveBeenCalledTimes(1);
 		expect(channel.sendTyping).toHaveBeenCalledTimes(1);
-		// Nothing is posted before the model answers; "typing..." is the feedback.
+		// Nothing is posted before the model answers. The "typing..." indicator is
+	// the feedback.
 		expect(message.reply).not.toHaveBeenCalled();
 		expect(channel.send).not.toHaveBeenCalled();
 
@@ -344,7 +345,7 @@ describe('taskSuggest direct mentions', () => {
 			.mockImplementationOnce(() => new Promise(resolve => (resolveFirst = resolve)))
 			.mockResolvedValue(llmReply('{"proposals":[]}'));
 
-		// The quiet timer starts a background pass, and the model is slow.
+		// The quiet timer starts a background pass. The model is slow.
 		taskSuggest.observe(makeMessage({ id: 'm1', content: 'kita rapat jumat ya' }));
 		await vi.advanceTimersByTimeAsync(61_000);
 		expect(globalThis.fetch).toHaveBeenCalledTimes(1);
@@ -742,7 +743,7 @@ describe('task suggestion persistence', () => {
 		expect(repo.recentTitles(channel.id)).toEqual(['Kirim proposal sponsor']);
 	});
 
-	it('drops the row when the card cannot be posted, so it can be suggested later', async () => {
+	it('drops the row when the card cannot be posted, letting a later pass suggest it', async () => {
 		channel.send.mockRejectedValue(new Error('Missing Access'));
 		await expect(taskSuggest._postProposal(channel, found())).rejects.toThrow('Missing Access');
 		expect(repo.suggestedSourceIds(channel.id, [`src-${n}`]).size).toBe(0);
@@ -759,7 +760,7 @@ describe('task suggestion persistence', () => {
 		taskSuggest.releaseProposal(id);
 		expect(taskSuggest.claimProposal(id)).not.toBeNull();
 
-		// A crash mid-creation leaves the lease behind; it lapses after 2 minutes.
+		// A crash mid-creation leaves the lease behind. It lapses after 2 minutes.
 		vi.useFakeTimers();
 		vi.setSystemTime(Date.now() + 3 * 60 * 1000);
 		expect(taskSuggest.claimProposal(id)).not.toBeNull();
@@ -772,7 +773,7 @@ describe('task suggestion persistence', () => {
 		taskSuggest.claimProposal(created);
 		taskSuggest.finishProposal(created, { status: 'created', handledBy: 'u9', taskId: 'task-1' });
 		expect(taskSuggest.claimProposal(created)).toBeNull();
-		expect(taskSuggest.unavailableMessage(created)).toBe('✅ <@u9> already created this task (`task-1`).');
+		expect(taskSuggest.unavailableMessage(created)).toBe('<@u9> already created this task (`task-1`).');
 
 		channel.send.mockClear();
 		await taskSuggest._postProposal(channel, found({ sourceMessageId: `src-${n}-b` }));
@@ -844,9 +845,9 @@ describe('actor memory', () => {
 		expect(system.content).toContain('in Indonesian (Bahasa Indonesia) by default');
 		expect(system.content).toContain('"memories"');
 		expect(user.content).toContain(
-			'- Alice (u1): language=default (Indonesian); notes: [7] Prefers reminders at 20:00'
+			'- Alice (u1). language=default (Indonesian). Notes [7] Prefers reminders at 20:00'
 		);
-		expect(user.content).toContain('- Budi (u2): language=English; notes: none');
+		expect(user.content).toContain('- Budi (u2). language=English. Notes none');
 	});
 
 	it('only accepts memory changes from new messages about known people', () => {
@@ -1150,7 +1151,8 @@ describe('deleted messages', () => {
 
 		expect(suggestions.getSuggestion(`open-${n}`)).toBeUndefined();
 		expect(suggestions.getSuggestion(`made-${n}`).status).toBe('created');
-		// Dismiss deletes the card itself; the model should still know it was not wanted.
+		// Dismiss deletes the card itself. The model should still know it was not
+	// wanted.
 		expect(suggestions.getSuggestion(`nope-${n}`).status).toBe('dismissed');
 		expect(memory.listNotes('u1').map(x => x.note)).not.toContain(`note-${n}`);
 	});
@@ -1195,7 +1197,7 @@ describe('deleted messages', () => {
 	it('asks the model to chat like a classmate, with humor at 10%', () => {
 		const [system] = taskSuggest._buildPrompt({ context: [], fresh, people, proposedTitles: [] });
 		expect(system.content).toContain('temen sekelas');
-		expect(system.content).toContain('Humor setting: 10%, kayak TARS di Interstellar');
+		expect(system.content).toContain('Humor setting 10%, kayak TARS di Interstellar');
 		expect(system.content).toContain('"Jam 12 malam" on a day means the end of that day');
 	});
 });
@@ -1282,7 +1284,7 @@ describe('what counts as a task', () => {
 		expect(system.content).toContain('"siap mas" → nothing');
 		expect(system.content).toContain('When unsure, propose nothing');
 		expect(user.content).toContain(
-			'Dismissed by the team (they did not want these tracked): "Latihan personal finance: catat pengeluaran & laporan PDF"'
+			'Dismissed by the team, who did not want these tracked. "Latihan personal finance: catat pengeluaran & laporan PDF"'
 		);
 	});
 
@@ -1311,8 +1313,8 @@ describe('what counts as a task', () => {
 		await taskSuggest._analyze(channel.id);
 
 		const prompt = JSON.parse(globalThis.fetch.mock.calls[0][1].body).messages[1].content;
-		expect(prompt).toContain('Already suggested and handled: "Title created"');
-		expect(prompt).toContain('Dismissed by the team (they did not want these tracked): "Title dismissed"');
+		expect(prompt).toContain('Already suggested and handled. "Title created"');
+		expect(prompt).toContain('Dismissed by the team, who did not want these tracked. "Title dismissed"');
 	});
 
 	it('needs more confidence for an unprompted card than for an answer to a mention', async () => {

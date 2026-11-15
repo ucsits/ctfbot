@@ -65,7 +65,7 @@ class AdminCommand extends Command {
 					return interaction.editReply('Unknown subcommand.');
 			}
 		} catch (error) {
-			this.container.logger.error('Error in admin command:', error);
+			this.container.logger.error('Error in admin command', error);
 			return interaction.editReply('An error occurred while processing the command.');
 		}
 	}
@@ -79,15 +79,15 @@ class AdminCommand extends Command {
 
 		if (config.admin.isEnvConfigured) {
 			return interaction.editReply(
-				'❌ Cannot add admins when ADMIN_IDS environment variable is set. Remove it from .env to use database-based admin management.'
+				'Cannot add admins when ADMIN_IDS environment variable is set. Remove it from .env to use database-based admin management.'
 			);
 		}
 
-		// The insert is atomic (INSERT OR IGNORE), so there is no exists() pre-check
-		// that could race with a concurrent /admin add. A zero result means the user
-		// was already an admin.
+		// The insert is atomic (INSERT OR IGNORE). No exists() pre-check can race
+		// with a concurrent /admin add. A zero result means the user was already
+		// an admin.
 		if (adminRepository.add(user.id, interaction.user.id) === 0) {
-			return interaction.editReply(`❌ ${user.tag} is already an admin.`);
+			return interaction.editReply(`${user.tag} is already an admin.`);
 		}
 
 		const embed = new EmbedBuilder()
@@ -112,12 +112,12 @@ class AdminCommand extends Command {
 
 		if (config.admin.isEnvConfigured) {
 			return interaction.editReply(
-				'❌ Cannot remove admins when ADMIN_IDS environment variable is set. Remove it from .env to use database-based admin management.'
+				'Cannot remove admins when ADMIN_IDS environment variable is set. Remove it from .env to use database-based admin management.'
 			);
 		}
 
 		if (!adminRepository.exists(user.id)) {
-			return interaction.editReply(`❌ ${user.tag} is not an admin.`);
+			return interaction.editReply(`${user.tag} is not an admin.`);
 		}
 
 		adminRepository.remove(user.id);

@@ -90,7 +90,7 @@ describe('Reminder Service', () => {
 
 	describe('_formatTaskGroup', () => {
 		it('returns empty message for empty group', () => {
-			expect(mod._formatTaskGroup([])).toBe('✅ No pending tasks.');
+			expect(mod._formatTaskGroup([])).toBe('No pending tasks.');
 		});
 	});
 
@@ -116,8 +116,8 @@ describe('Reminder Service', () => {
 		});
 
 		it('prefixes mentions with label', () => {
-			const result = mod._buildMentionContent('📋 **Digest**', ['<@1>', '<@2>']);
-			expect(result).toContain('📋 **Digest**');
+			const result = mod._buildMentionContent('**Digest**', ['<@1>', '<@2>']);
+			expect(result).toContain('**Digest**');
 			expect(result).toContain('<@1>');
 			expect(result).toContain('<@2>');
 		});
@@ -172,11 +172,11 @@ describe('Reminder Service', () => {
 
 		function baseOpts(overrides = {}) {
 			return {
-				title: '📋 Weekly Task Digest',
+				title: 'Weekly Task Digest',
 				color: 0x9B59B6,
 				description: 'Good morning! Here is an overview of pending tasks.',
 				footer: 'Sent Monday at 5AM Jakarta time',
-				mentionLabel: '📋 **Weekly Task Digest**',
+				mentionLabel: '**Weekly Task Digest**',
 				...overrides
 			};
 		}
@@ -184,12 +184,12 @@ describe('Reminder Service', () => {
 		it('sends an explicit empty-state digest when there are no tasks', async () => {
 			const channel = makeChannel();
 			await mod._sendDigest(channel, baseOpts({
-				sections: [{ heading: '🗓️ This Week (0 tasks)', tasks: [] }]
+				sections: [{ heading: 'This Week (0 tasks)', tasks: [] }]
 			}));
 			expect(channel.send).toHaveBeenCalledTimes(1);
 			const embed = channel.send.mock.calls[0][0].embeds[0];
 			// Explicit empty state rather than a silent/dropped digest
-			expect(embed.data.fields[0].value).toBe('✅ No pending tasks.');
+			expect(embed.data.fields[0].value).toBe('No pending tasks.');
 		});
 
 		it('splits large digests into multiple messages', async () => {
@@ -200,12 +200,12 @@ describe('Reminder Service', () => {
 				deadline: 2000000000 + i
 			}));
 			await mod._sendDigest(channel, baseOpts({
-				title: '📅 Daily Task Digest',
+				title: 'Daily Task Digest',
 				color: 0x3498DB,
 				description: 'Good morning! Here are the tasks until end of week.',
 				footer: 'Sent today at 4AM Jakarta time',
-				mentionLabel: '📅 **Daily Task Digest**',
-				sections: [{ heading: '🗓️ Today', tasks }]
+				mentionLabel: '**Daily Task Digest**',
+				sections: [{ heading: 'Today', tasks }]
 			}));
 			expect(channel.send.mock.calls.length).toBeGreaterThan(1);
 			// Every task is preserved across all messages (fields hold multiple tasks)
@@ -222,8 +222,8 @@ describe('Reminder Service', () => {
 				deadline: 2000000000 + i
 			}));
 			await mod._sendDigest(channel, baseOpts({
-				title: '📅 Daily Task Digest',
-				sections: [{ heading: '🗓️ Today', tasks }]
+				title: 'Daily Task Digest',
+				sections: [{ heading: 'Today', tasks }]
 			}));
 			for (const call of channel.send.mock.calls) {
 				const content = call[0].content || '';
@@ -243,7 +243,7 @@ describe('Reminder Service', () => {
 				deadline: 2000000000 + i
 			}));
 			await mod._sendDigest(channel, baseOpts({
-				sections: [{ heading: '🗓️ Today', tasks }]
+				sections: [{ heading: 'Today', tasks }]
 			}));
 			for (const call of channel.send.mock.calls) {
 				const { content = '', embeds = [] } = call[0];

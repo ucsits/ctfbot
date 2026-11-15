@@ -37,7 +37,7 @@ class ApplicationCommandRegistriesRegisteredListener extends Listener {
 					}
 					commandIds[command.name].push(id);
 					updated = true;
-					this.container.logger.info(`Captured ID for command "${command.name}": ${id}`);
+					this.container.logger.info(`Captured ID for command "${command.name}" ${id}`);
 				}
 			}
 
@@ -53,7 +53,7 @@ class ApplicationCommandRegistriesRegisteredListener extends Listener {
 						}
 						commandIds[command.name].push(id);
 						updated = true;
-						this.container.logger.info(`Captured guild ID for command "${command.name}": ${id}`);
+						this.container.logger.info(`Captured guild ID for command "${command.name}" ${id}`);
 					}
 				}
 			}
@@ -64,7 +64,7 @@ class ApplicationCommandRegistriesRegisteredListener extends Listener {
 				this.container.logger.info('Command IDs saved to commandIds.json');
 			}
 		} catch (error) {
-			this.container.logger.error('Failed to fetch command IDs:', error);
+			this.container.logger.error('Failed to fetch command IDs', error);
 		}
 	}
 }

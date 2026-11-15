@@ -1,9 +1,9 @@
 /**
- * Search cache repository — cached SerpBase results and daily credit spend.
+ * Search cache repository for cached SerpBase results and daily credit spend.
  *
- * Two small tables: `search_cache` keeps a compacted result payload per
- * normalised query for a day, and `search_spend` counts credits so a loop or a
- * popular question cannot drain the account.
+ * It uses two small tables. `search_cache` keeps a compacted result payload per
+ * normalised query for a day. `search_spend` counts credits. A loop or a popular
+ * question cannot then drain the account.
  *
  * @module database/repositories/searchCache
  */
@@ -16,7 +16,7 @@ const db = () => getConnection();
 
 const nowSeconds = () => Math.floor(Date.now() / 1000);
 
-/** Local calendar day, so the credit cap resets at local midnight. */
+/** Local calendar day. The credit cap resets at local midnight. */
 function dayBucket() {
 	return DateTime.now().setZone(DEFAULT_TIMEZONE).toFormat('yyyy-MM-dd');
 }
@@ -87,7 +87,7 @@ function addSpend(credits) {
 	return spentToday();
 }
 
-/** Test helper: drop cached results and spend counters. */
+/** Test helper. Drop cached results and spend counters. */
 function _reset() {
 	db().prepare('DELETE FROM search_cache').run();
 	db().prepare('DELETE FROM search_spend').run();

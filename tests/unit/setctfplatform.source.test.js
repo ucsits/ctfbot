@@ -5,13 +5,13 @@ import { createRequire } from 'module';
 
 // ── Strategy ───────────────────────────────────────────────────────────
 // These are source-level assertions about contracts that are easy to break
-// silently and that the functional suite cannot see:
+// silently and that the functional suite cannot see.
 //
-//   * both guards reply on their own, so they must run before deferReply.
+//   * both guards reply on their own. They must run before deferReply.
 //     Deferring first would make the guard's reply a second response and the
 //     permission denial would never reach the user.
 //   * the token is a credential. It must never be interpolated into anything
-//     sent back to Discord; the reply may only say whether one is set.
+//     sent back to Discord. The reply may only say whether one is set.
 //   * the platform choices must come from the registry, otherwise adding a
 //     platform in one place would leave the command's option list stale.
 //
@@ -55,7 +55,7 @@ describe('/setctfplatform command declaration', () => {
 		expect(source).toContain('PLATFORM_CHOICES');
 		expect(source).toMatch(/\.addChoices\(\.\.\.PLATFORM_CHOICES\)/);
 
-		// The registry really does export it, so the spread is not a no-op.
+		// The registry really does export it. The spread is not a no-op.
 		const { PLATFORM_CHOICES } = require('../../src/lib/platform/index.js');
 		expect(Array.isArray(PLATFORM_CHOICES)).toBe(true);
 		expect(PLATFORM_CHOICES.length).toBeGreaterThan(0);
@@ -101,7 +101,7 @@ describe('/setctfplatform permission guard', () => {
 		expect(channelLine).toBeDefined();
 		expect(deferLine).toBeDefined();
 
-		// Both guards reply directly, so deferring first would break them.
+		// Both guards reply directly. Deferring first would break them.
 		expect(permissionLine).toBeLessThan(deferLine);
 		expect(channelLine).toBeLessThan(deferLine);
 	});

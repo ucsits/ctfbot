@@ -3,23 +3,23 @@
  *
  * Watches governance channels and, when the conversation settles, asks an
  * OpenAI-compatible model whether the admins decided to do something in the
- * future. Mentioning the bot skips the wait: it analyses immediately, shows
+ * future. Mentioning the bot skips the wait. It analyses immediately, shows
  * "typing..." while the model works, and always answers the mention.
  * Each firm decision is posted as a suggestion card (reply to the
  * message where it was made) with Create / Edit & create / Dismiss buttons,
  * handled by src/listeners/taskSuggestInteraction.js. Nothing is created
  * until someone confirms.
  *
- * The bot also remembers people: each pass sees the notes and preferences
+ * The bot also remembers people. Each pass sees the notes and preferences
  * stored for the participants (actor_profiles / actor_memories) and may add
- * or drop notes when someone states a lasting fact or preference; the source
- * message gets a 🧠 reaction so people know. The system prompt makes the
+ * or drop notes when someone states a lasting fact or preference. The source
+ * message gets a brain reaction so people know. The system prompt makes the
  * model write in Indonesian unless a person's saved language says otherwise.
  *
  * Only messages from GOVERNANCE_CATEGORIES channels are buffered or sent to
- * the model. Message buffers live in memory; suggestions are stored in the
- * task_suggestions table, so a card stays actionable (across restarts, with
- * no time limit) until someone creates the task or dismisses it.
+ * the model. Message buffers live in memory. Suggestions are stored in the
+ * task_suggestions table. A card stays actionable (across restarts, with no
+ * time limit) until someone creates the task or dismisses it.
  *
  * @module services/taskSuggest
  */
@@ -36,10 +36,10 @@ const { logger } = require('../lib/logger');
 
 const suggestLog = logger.child('TaskSuggest');
 
-// Longest model reply quoted in a debug line; trace logs it in full.
+// Longest model reply quoted in a debug line. Trace logs it in full.
 const LOG_REPLY_CHARS = 2000;
 
-/** "#name (id)" for log lines, so a channel is recognisable at a glance. */
+/** "#name (id)" for log lines, which makes a channel recognisable at a glance. */
 function _where(channel, channelId = channel?.id) {
 	return channel?.name ? `#${channel.name} (${channelId})` : `channel ${channelId}`;
 }
@@ -63,7 +63,7 @@ const MAX_UPDATES_PER_PASS = 3;
 const MAX_MESSAGE_CHARS = 1500;
 const MAX_PROPOSALS_PER_PASS = 3;
 const MIN_CONFIDENCE = 0.7;
-// Unprompted cards interrupt the conversation, so they need more certainty
+// Unprompted cards interrupt the conversation. They need more certainty
 // than an answer to someone who mentioned the bot.
 const PASSIVE_MIN_CONFIDENCE = 0.85;
 const MAX_MEMORY_CHANGES_PER_PASS = 5;
@@ -73,11 +73,12 @@ const MAX_LANGUAGE_CHARS = 30;
 const MAX_CHAT_MESSAGES = 3;
 const MAX_CHAT_CHARS = 1000;
 const MEMORY_REACTION = '🧠';
-// Discord shows "typing..." for about 10s per call, so refresh it before then.
+// Discord shows "typing..." for about 10s per call. Refresh it before then.
 const TYPING_REFRESH_MS = 8_000;
 const TIMEZONE = constants.DEFAULT_TIMEZONE;
 
-// Custom ID namespaces for the suggestion card. Format: <namespace>:<proposalId>
+// Custom ID namespaces for the suggestion card. The format is
+// <namespace>:<proposalId>
 const SUGGEST_IDS = {
 	create: 'tsug_create',
 	edit: 'tsug_edit',
@@ -164,7 +165,7 @@ function observe(message) {
 	});
 	_prune(state);
 	suggestLog.trace(
-		`Buffered message ${message.id} from ${message.author.id} in ${_where(message.channel, message.channelId)} (${state.messages.length} buffered): ${_clip(text)}`
+		`Buffered message ${message.id} from ${message.author.id} in ${_where(message.channel, message.channelId)} (${state.messages.length} buffered) ${_clip(text)}`
 	);
 
 	// A direct mention is a request to look now, not after the discussion ends.
@@ -174,7 +175,7 @@ function observe(message) {
 			`Mentioned by ${message.author.id} in ${_where(message.channel, message.channelId)} (message ${message.id}${botRoles.length ? ', via bot role' : ''}), analysing now`
 		);
 		_analyze(message.channelId, { trigger: message }).catch(err =>
-			suggestLog.error(`Analysis failed for channel ${message.channelId}: ${err.message}`)
+			suggestLog.error(`Analysis failed for channel ${message.channelId} ${err.message}`)
 		);
 		return;
 	}
@@ -183,8 +184,8 @@ function observe(message) {
 
 /**
  * Ids of mentioned roles that belong to this bot. Discord creates a managed
- * role named after the bot, and picking it from the @ autocomplete sends a
- * role mention instead of a user mention. Other roles the bot happens to have
+ * role named after the bot. Picking it from the @ autocomplete sends a role
+ * mention instead of a user mention. Other roles the bot happens to have
  * (e.g. @Admin) do not count.
  *
  * @returns {string[]}
@@ -203,7 +204,7 @@ function _schedule(channelId, state) {
 	const delay = Math.max(QUIET_MS, state.lastRunAt + MIN_INTERVAL_MS - Date.now());
 	suggestLog.trace(`Analysis of ${_where(state.channel, channelId)} scheduled in ${Math.round(delay / 1000)}s`);
 	state.timer = setTimeout(() => {
-		_analyze(channelId).catch(err => suggestLog.error(`Analysis failed for channel ${channelId}: ${err.message}`));
+		_analyze(channelId).catch(err => suggestLog.error(`Analysis failed for channel ${channelId} ${err.message}`));
 	}, delay);
 	state.timer.unref?.();
 }
@@ -223,9 +224,9 @@ function _keepTyping(channel) {
 }
 
 /**
- * Post the model's chat messages one by one: the first (a quick
- * acknowledgment) as a reply to the mention, the rest as plain messages so
- * they read like a conversation.
+ * Post the model's chat messages one by one. The first (a quick
+ * acknowledgment) goes as a reply to the mention. The rest follow as plain
+ * messages so they read like a conversation.
  */
 async function _sendChat(channel, messages, trigger) {
 	for (const [i, content] of messages.entries()) {
@@ -234,15 +235,15 @@ async function _sendChat(channel, messages, trigger) {
 		} else {
 			await channel
 				.send({ content, allowedMentions: { parse: [] } })
-				.catch(error => suggestLog.warn(`Could not send chat message in ${_where(channel)}: ${error.message}`));
+				.catch(error => suggestLog.warn(`Could not send chat message in ${_where(channel)} ${error.message}`));
 		}
-		suggestLog.debug(`Chat ${i + 1}/${messages.length} in ${_where(channel)}: ${_clip(content, 300)}`);
+		suggestLog.debug(`Chat ${i + 1}/${messages.length} in ${_where(channel)} ${_clip(content, 300)}`);
 	}
 }
 
 /**
- * The model's chat messages for a mention: "messages" (an array), or an
- * older-style single "reply" string.
+ * The model's chat messages for a mention, taken from "messages" (an array)
+ * or an older-style single "reply" string.
  *
  * @returns {string[]}
  */
@@ -256,16 +257,16 @@ function _chatMessages(parsed) {
 }
 
 /**
- * Strip punctuation the bot must not use: em and en dashes become a comma
- * (or a hyphen inside a number range like 9–10).
+ * Strip punctuation the bot must not use. Em and en dashes become a comma,
+ * or a hyphen inside a number range.
  *
  * @param {string} text
  * @returns {string}
  */
 function _plain(text) {
 	return text
-		.replace(/(\d)\s*[–—]\s*(\d)/g, '$1-$2')
-		.replace(/\s*[—–]\s*/g, ', ')
+		.replace(/(\d)\s*[\u2013\u2014]\s*(\d)/g, '$1-$2')
+		.replace(/\s*[\u2013\u2014]\s*/g, ', ')
 		.replace(/,\s*([,.!?])/g, '$1')
 		.replace(/^,\s*|,\s*$/g, '')
 		.trim();
@@ -274,7 +275,7 @@ function _plain(text) {
 function _replyTo(message, content) {
 	return message
 		.reply({ content, allowedMentions: { parse: [], repliedUser: false } })
-		.catch(error => suggestLog.warn(`Could not reply to message ${message.id}: ${error.message}`));
+		.catch(error => suggestLog.warn(`Could not reply to message ${message.id} ${error.message}`));
 }
 
 /**
@@ -333,7 +334,7 @@ async function _analyze(channelId, { trigger = null } = {}) {
 	const where = _where(state.channel, channelId);
 	const passStartedAt = Date.now();
 	suggestLog.debug(
-		`Pass started in ${where}: ${fresh.length} new message(s) [${fresh.map(m => m.id).join(', ')}], ${trigger ? `mention ${trigger.id}` : 'passive'}`
+		`Pass started in ${where} ${fresh.length} new message(s) [${fresh.map(m => m.id).join(', ')}], ${trigger ? `mention ${trigger.id}` : 'passive'}`
 	);
 
 	try {
@@ -342,7 +343,7 @@ async function _analyze(channelId, { trigger = null } = {}) {
 		const handled = suggestionRepository.recentHandled(channelId).filter(r => r.status !== 'open');
 		const profiles = memoryRepository.getProfiles([...state.people.keys()]);
 		suggestLog.debug(
-			`Prompt input for ${where}: ${context.length} context message(s), ${open.length} open suggestion(s) [${open.map(r => `"${_clip(r.title, 40)}"`).join(', ')}], ${handled.length} handled, ${state.people.size} participant(s), ${profiles.size ?? 0} profile(s)`
+			`Prompt input for ${where} ${context.length} context message(s), ${open.length} open suggestion(s) [${open.map(r => `"${_clip(r.title, 40)}"`).join(', ')}], ${handled.length} handled, ${state.people.size} participant(s), ${profiles.size ?? 0} profile(s)`
 		);
 
 		let reply;
@@ -361,22 +362,21 @@ async function _analyze(channelId, { trigger = null } = {}) {
 			reply = await chatCompletion({
 				messages: prompt,
 				json: true,
-				// Spotting decisions in chat does not need deep reasoning; low effort
+				// Spotting decisions in chat does not need deep reasoning. Low effort
 				// keeps replies fast and cheap.
 				reasoningEffort: 'low'
 			});
 		} catch (error) {
 			// Put the messages back so the next pass (triggered by the next
 			// message in this channel) retries them instead of losing the
-			// decision. No timer is set here, so a broken endpoint is not
-			// polled in a loop.
+			// decision. No timer is set here. A broken endpoint is not polled in a loop.
 			for (const m of fresh) {
 				m.analyzed = false;
 			}
-			suggestLog.warn(`Model call failed for ${where}; ${fresh.length} message(s) will be retried next pass`);
+			suggestLog.warn(`Model call failed for ${where}. ${fresh.length} message(s) will be retried next pass`);
 			if (trigger) {
 				stopTyping();
-				await _replyTo(trigger, `❌ duh, otakku (model AI-nya) lagi nggak nyaut. ${error.message}`);
+				await _replyTo(trigger, `duh, otakku (model AI-nya) lagi nggak nyaut. ${error.message}`);
 			}
 			throw error;
 		}
@@ -386,7 +386,7 @@ async function _analyze(channelId, { trigger = null } = {}) {
 			parsed = parseJsonReply(reply);
 		} catch (error) {
 			suggestLog.warn(
-				`Unparseable model reply for ${where} (${error.message}): ${_clip(reply, LOG_REPLY_CHARS)}`
+				`Unparseable model reply for ${where} (${error.message}) ${_clip(reply, LOG_REPLY_CHARS)}`
 			);
 			if (trigger) {
 				stopTyping();
@@ -394,7 +394,7 @@ async function _analyze(channelId, { trigger = null } = {}) {
 			}
 			throw error;
 		}
-		suggestLog.debug(`Model reply for ${where}: ${_clip(reply, LOG_REPLY_CHARS)}`);
+		suggestLog.debug(`Model reply for ${where} ${_clip(reply, LOG_REPLY_CHARS)}`);
 		const dropped = [];
 		const found = _normalizeProposals(parsed, {
 			fresh,
@@ -426,13 +426,13 @@ async function _analyze(channelId, { trigger = null } = {}) {
 			if (await _postProposal(state.channel, p, { reply: !trigger })) {
 				posted++;
 			} else {
-				dropped.push(`"${p.title}": already suggested from message ${p.sourceMessageId}`);
+				dropped.push(`"${p.title}" was already suggested from message ${p.sourceMessageId}`);
 			}
 		}
 		if (dropped.length > 0) {
-			suggestLog.warn(`Dropped ${dropped.length} proposal(s) in channel ${channelId}: ${dropped.join('; ')}`);
-			// The chat may already have promised these cards, so say they did
-			// not come instead of leaving the person looking for them.
+			suggestLog.warn(`Dropped ${dropped.length} proposal(s) in channel ${channelId}. ${dropped.join(', ')}`);
+			// The chat may already have promised these cards. Say they did not come
+			// instead of leaving the person looking for them.
 			if (trigger && chat.length > 0) {
 				await state.channel
 					.send({
@@ -447,7 +447,7 @@ async function _analyze(channelId, { trigger = null } = {}) {
 			_normalizeMemories(parsed, { fresh, people: state.people, profiles })
 		);
 		const raw = key => (Array.isArray(parsed?.[key]) ? parsed[key].length : 0);
-		const summary = `Pass in ${where} done in ${Date.now() - passStartedAt}ms (${trigger ? `mention ${trigger.id}` : 'passive'}): model gave ${raw('proposals')} proposal(s), ${raw('updates')} update(s), ${raw('memories')} memory change(s), ${chat.length} chat message(s); posted ${posted}, updated ${updated}, dropped ${dropped.length}, saved ${learned} memory change(s)`;
+		const summary = `Pass in ${where} done in ${Date.now() - passStartedAt}ms (${trigger ? `mention ${trigger.id}` : 'passive'}). Model gave ${raw('proposals')} proposal(s), ${raw('updates')} update(s), ${raw('memories')} memory change(s) and ${chat.length} chat message(s). Posted ${posted}, updated ${updated}, dropped ${dropped.length}, saved ${learned} memory change(s)`;
 		if (trigger || posted > 0 || updated > 0 || learned > 0 || dropped.length > 0) {
 			suggestLog.info(summary);
 		} else {
@@ -468,15 +468,15 @@ async function _analyze(channelId, { trigger = null } = {}) {
 			const next = state.pendingTrigger;
 			state.pendingTrigger = null;
 			_analyze(channelId, { trigger: next }).catch(err =>
-				suggestLog.error(`Analysis failed for channel ${channelId}: ${err.message}`)
+				suggestLog.error(`Analysis failed for channel ${channelId} ${err.message}`)
 			);
 		}
 	}
 }
 
 /**
- * Text the model should see for a Discord message: its content, or for the
- * bot's own suggestion cards, the card title and details.
+ * Text the model should see for a Discord message, which is its content, or
+ * the card title and details for the bot's own suggestion cards.
  */
 function _describeMessage(message) {
 	const content = message.content?.trim();
@@ -491,8 +491,8 @@ function _describeMessage(message) {
 }
 
 /**
- * Earlier messages for context: the channel's recent Discord history before
- * the first new message, merged with what is buffered. Reading history means
+ * Earlier messages for context, meaning the channel's recent Discord history
+ * before the first new message, merged with what is buffered. Reading history means
  * a correction like "make it Friday instead" still has the original message
  * in view after a restart.
  *
@@ -525,7 +525,7 @@ async function _loadContext(state, fresh) {
 		}
 		suggestLog.trace(`Read ${history.size ?? 0} history message(s) in ${_where(state.channel)}`);
 	} catch (error) {
-		suggestLog.warn(`Could not read history for channel ${state.channel.id}: ${error.message}`);
+		suggestLog.warn(`Could not read history for channel ${state.channel.id} ${error.message}`);
 	}
 
 	return [...byId.values()].sort((a, b) => a.createdAt - b.createdAt).slice(-HISTORY_MESSAGES);
@@ -552,34 +552,34 @@ function _buildPrompt({
 	const fmt = m => {
 		const at = DateTime.fromMillis(m.createdAt).setZone(TIMEZONE).toFormat('yyyy-MM-dd HH:mm');
 		const name = m.authorName ?? people.get(m.authorId) ?? 'unknown';
-		return `id=${m.id} ${at} ${name} (${m.authorId}): ${m.content}`;
+		return `id=${m.id} ${at} ${name} (${m.authorId}) ${m.content}`;
 	};
 
 	const system = [
 		"You watch a Discord channel where an organisation's administrators coordinate.",
 		'Find tasks in the NEW messages that deserve a tracked task with a reminder. A task here is follow-up work the administrators themselves have to do, with an owner among them.',
 		'Propose a task only when (1) someone asks you or the team to remind them or to make a task ("ingetin aku ...", "buatin task ...", "remind us to ..."), or (2) the administrators agree that one of them will do a specific thing later ("oke aku yang kirim proposal sponsor jumat").',
-		'Do NOT propose: assignments, homework, exercises or instructions an administrator gives to members or participants, even with a deadline and even when members reply "siap" (that is the members\' work, not an admin task); announcements, event info, rules and open invitations ("yang mau ikut reply MAU"); acknowledgments and reactions on their own ("siap", "oke", emoji); open questions, ideas still being debated, things already done, jokes, and actions finished within the next hour.',
-		'Example: an admin posts "Latihan kecil untuk @A dan @B: download aplikasi ini, catat pengeluaran sepekan, hari Minggu kirim laporan PDF ke channel ini" and @A replies "siap mas" → nothing. Later the admin writes "ingatkan saya hari Minggu jam 12 siang untuk menagih laporan peserta" → a task for that admin.',
-		'When unsure, propose nothing: a missed task costs little because people can mention you, but a wrong card is noise. Suggestions the team dismissed show what they do not want tracked; do not propose those or similar things again.',
-		'Earlier messages are context: use them to understand what the NEW messages refer to, but only act on what the NEW messages say. Do not repeat anything listed as already suggested.',
+		'Do NOT propose assignments, homework, exercises or instructions an administrator gives to members or participants, even with a deadline and even when members reply "siap" (that is the members\' work, not an admin task). Also do not propose announcements, event info, rules and open invitations ("yang mau ikut reply MAU"), acknowledgments and reactions on their own ("siap", "oke", emoji), open questions, ideas still being debated, things already done, jokes, or actions finished within the next hour.',
+		'Example: an admin posts "Latihan kecil untuk @A dan @B, download aplikasi ini, catat pengeluaran sepekan, hari Minggu kirim laporan PDF ke channel ini" and @A replies "siap mas" → nothing. Later the admin writes "ingatkan saya hari Minggu jam 12 siang untuk menagih laporan peserta" → a task for that admin.',
+		'When unsure, propose nothing. A missed task costs little because people can mention you, but a wrong card is noise. Suggestions the team dismissed show what they do not want tracked. Do not propose those or similar things again.',
+		'Earlier messages are context. Use them to understand what the NEW messages refer to, but only act on what the NEW messages say. Do not repeat anything listed as already suggested.',
 		'When a NEW message changes or corrects an OPEN suggestion (a different day, person, title or detail), put it in "updates" with that suggestion_id instead of adding a new proposal. Only include the fields that change.',
-		'Messages may be in Indonesian, English or a mix. Write every title, description, note and reply in Indonesian (Bahasa Indonesia) by default, even when the messages are in English. Use another language only for a person whose memory sets one: the assignee for a task, the person who mentioned you for the reply.',
-		'Gaya bicara: kamu itu temen sekelas yang lagi chat di grup Discord, bukan orang kantor dan bukan customer service. Ketik kayak orang nge-chat: pendek-pendek, huruf kecil boleh, bahasa gaul sehari-hari ("bro", "gas", "aman", "sip", "oke", "wkwk", "udah", "nggak", "aja", "nih", "dong", "sih"), sesekali emoji. Nggak usah basa-basi formal kayak "Baik, saya telah mencatat permintaan Anda" atau "Terima kasih atas informasinya". Jangan kasar.',
-		'Humor setting: 10%, kayak TARS di Interstellar. Jarang banget selipin celetukan kering yang deadpan, hampir selalu langsung to the point dan jawabannya tetap jelas. Jangan maksa lucu, dan jangan bercanda soal hal yang serius.',
-		'Tanda baca: jangan pernah pakai em dash (—) atau en dash (–), di pesan, judul, deskripsi maupun catatan. Pakai koma, titik, atau pecah jadi pesan baru.',
+		'Messages may be in Indonesian, English or a mix. Write every title, description, note and reply in Indonesian (Bahasa Indonesia) by default, even when the messages are in English. Use another language only for a person whose memory sets one, which is the assignee for a task, the person who mentioned you for the reply.',
+		'Gaya bicara kamu itu temen sekelas yang lagi chat di grup Discord, bukan orang kantor dan bukan customer service. Ketik kayak orang nge-chat, pendek-pendek, huruf kecil boleh, bahasa gaul sehari-hari ("bro", "gas", "aman", "sip", "oke", "wkwk", "udah", "nggak", "aja", "nih", "dong", "sih"), sesekali emoji. Nggak usah basa-basi formal kayak "Baik, saya telah mencatat permintaan Anda" atau "Terima kasih atas informasinya". Jangan kasar.',
+		'Humor setting 10%, kayak TARS di Interstellar. Jarang banget selipin celetukan kering yang deadpan, hampir selalu langsung to the point dan jawabannya tetap jelas. Jangan maksa lucu, dan jangan bercanda soal hal yang serius.',
+		'Tanda baca. Jangan pernah pakai em dash atau en dash, di pesan, judul, deskripsi maupun catatan. Pakai koma, titik, atau pecah jadi pesan baru.',
 		'Judul tugas tetap singkat dan jelas, misalnya "Kirim proposal sponsor". Kalau seseorang minta bahasa lain, tetap santai kayak temen di bahasa itu.',
 		'You remember participants between conversations. Use what you remember to pick assignees and deadlines the way each person prefers.',
-		'In "memories", save lasting facts or preferences a NEW message states about its author or a teammate that will help with later tasks: role or responsibilities, usual availability, preferred reminder time, how they want to be addressed. Do not save one-off task details, anything already remembered, secrets or credentials, or sensitive personal data. When a NEW message says a remembered note is no longer true, "forget" it by note id (and "remember" the corrected one). Set "language" only when a person asks you to use a language with them.',
-		'Reply with a JSON object only:',
+		'In "memories", save lasting facts or preferences a NEW message states about its author or a teammate that will help with later tasks, such as role or responsibilities, usual availability, preferred reminder time, how they want to be addressed. Do not save one-off task details, anything already remembered, secrets or credentials, or sensitive personal data. When a NEW message says a remembered note is no longer true, "forget" it by note id (and "remember" the corrected one). Set "language" only when a person asks you to use a language with them.',
+		'Reply with a JSON object only.',
 		'{"proposals":[{"title":"short imperative, max 80 chars","description":"one or two sentences of context, or empty","assignee_id":"Discord user id from the participants list, or null if unclear","deadline":"YYYY-MM-DD HH:mm in the given local time, or null if no time frame was mentioned","source_message_id":"id of the NEW message where it was decided","confidence":0.0}],"updates":[{"suggestion_id":"id of the OPEN suggestion","title":"new title, or omit","description":"new description, or omit","assignee_id":"new assignee id, or omit","deadline":"new YYYY-MM-DD HH:mm, or omit","source_message_id":"id of the NEW message asking for the change"}],"memories":[{"user_id":"Discord user id the note is about","remember":"short note in the third person, max 200 chars, or omit","forget":"id of a remembered note that is no longer true, or omit","language":"language the person asked you to use with them, or omit","source_message_id":"id of the NEW message it came from"}]}',
-		'Be honest about cards. A card exists only if it is listed under OPEN suggestions or "Already suggested and handled" below, or if you put it in "proposals" in this reply. Your own earlier messages in the context are NOT proof: a card you promised there may never have been posted. Never say a card is coming, or that a task is recorded ("udah kecatat"), unless it is in "proposals" now or in those lists. When someone says a card is missing and it is not in those lists, believe them and propose it again (source_message_id = their NEW message), taking the details from the earlier messages.',
-		'Resolve relative dates ("besok", "next Friday", "end of the month") against the current local time. When only a day is given, use the time the assignee prefers if you remember one, otherwise 23:59 that day. "Jam 12 malam" on a day means the end of that day, so use 23:59 that day.',
+		'Be honest about cards. A card exists only if it is listed under OPEN suggestions or "Already suggested and handled" below, or if you put it in "proposals" in this reply. Your own earlier messages in the context are NOT proof. A card you promised there may never have been posted. Never say a card is coming, or that a task is recorded ("udah kecatat"), unless it is in "proposals" now or in those lists. When someone says a card is missing and it is not in those lists, believe them and propose it again (source_message_id = their NEW message), taking the details from the earlier messages.',
+		'Resolve relative dates ("besok", "next Friday", "end of the month") against the current local time. When only a day is given, use the time the assignee prefers if you remember one, otherwise 23:59 that day. "Jam 12 malam" on a day means the end of that day, and 23:59 is the right time.',
 		'Return {"proposals":[],"updates":[],"memories":[]} when there is nothing to do.'
 	];
 	if (botId) {
 		system.push(
-			`You were mentioned directly as <@${botId}>: someone is asking you to look for tasks now. Treat an explicit request such as "remind us to X by Y" as a decision, and use the mentioning message as source_message_id when the request is made there. Also add "messages" to the JSON object: one to three short chat messages to the person who mentioned you, each sent as its own Discord message, like texting a friend. The first message is sent as a reply to them and must be a quick acknowledgment of a few words that fits what they said: "wait" or "oke bentar" for a request, a short reaction like "ohh itu" or "hmm" for a question. Put the actual answer in the next message(s). Any suggestion card is posted right after your messages, so a card needs only something short like "oke ini ya". Say what you suggested, changed or remembered, or why there was nothing to do, and answer questions about what you remember from the memory list. Example: "brooooo @bot minta tolong buatin task ABC deadlinenya besok jam 12 malam" → {"proposals":[{"title":"ABC",...}],"messages":["wait","oke ini ya"]}. "<@bot> deadline inaff kapan sih?" → {"proposals":[],"messages":["hmm bentar","jumat jam 23:59, masih aman kok"]}.`
+			`You were mentioned directly as <@${botId}>. Someone is asking you to look for tasks now. Treat an explicit request such as "remind us to X by Y" as a decision. Use the mentioning message as source_message_id when the request is made there. Also add "messages" to the JSON object, holding one to three short chat messages to the person who mentioned you, each sent as its own Discord message, like texting a friend. The first message is sent as a reply to them and must be a quick acknowledgment of a few words that fits what they said, like "wait" or "oke bentar" for a request, a short reaction like "ohh itu" or "hmm" for a question. Put the actual answer in the next message(s). Any suggestion card is posted right after your messages. A card therefore needs only something short like "oke ini ya". Say what you suggested, changed or remembered, or why there was nothing to do, and answer questions about what you remember from the memory list. For example, "brooooo @bot minta tolong buatin task ABC deadlinenya besok jam 12 malam" → {"proposals":[{"title":"ABC",...}],"messages":["wait","oke ini ya"]}. "<@bot> deadline inaff kapan sih?" → {"proposals":[],"messages":["hmm bentar","jumat jam 23:59, masih aman kok"]}.`
 		);
 	}
 	const systemText = system.join('\n');
@@ -588,32 +588,32 @@ function _buildPrompt({
 	const memoryLines = [...people].map(([id, name]) => {
 		const profile = profiles.get(id);
 		const language = profile?.language ? `language=${profile.language}` : 'language=default (Indonesian)';
-		const notes = profile?.notes?.length ? profile.notes.map(n => `[${n.id}] ${n.note}`).join('; ') : 'none';
-		return `- ${name} (${id}): ${language}; notes: ${notes}`;
+		const notes = profile?.notes?.length ? profile.notes.map(n => `[${n.id}] ${n.note}`).join(', ') : 'none';
+		return `- ${name} (${id}). ${language}. Notes ${notes}`;
 	});
 	const openLines = open.map(
 		r =>
 			`- suggestion_id=${r.id} title="${r.title}" assignee=${people.get(r.assignee_id) ?? 'unknown'} (${r.assignee_id}) deadline=${r.deadline ? localTime(r.deadline) : 'none'} from message id=${r.source_message_id}${r.description ? ` details="${r.description}"` : ''}`
 	);
 	const user = [
-		`Current local time: ${local.toFormat('yyyy-MM-dd HH:mm cccc')} (${TIMEZONE})`,
+		`Current local time is ${local.toFormat('yyyy-MM-dd HH:mm cccc')} (${TIMEZONE})`,
 		'',
-		'Participants:',
+		'Participants',
 		participants,
 		'',
-		'What you remember about participants:',
+		'What you remember about participants',
 		memoryLines.join('\n'),
 		'',
-		'OPEN suggestions (posted, not yet accepted; update these rather than suggesting them again):',
+		'OPEN suggestions (posted, not yet accepted). Update these rather than suggesting them again.',
 		openLines.length ? openLines.join('\n') : '(none)',
 		'',
-		`Already suggested and handled: ${proposedTitles.length ? proposedTitles.map(t => `"${t}"`).join(', ') : 'none'}`,
-		`Dismissed by the team (they did not want these tracked): ${dismissedTitles.length ? dismissedTitles.map(t => `"${t}"`).join(', ') : 'none'}`,
+		`Already suggested and handled. ${proposedTitles.length ? proposedTitles.map(t => `"${t}"`).join(', ') : 'none'}`,
+		`Dismissed by the team, who did not want these tracked. ${dismissedTitles.length ? dismissedTitles.map(t => `"${t}"`).join(', ') : 'none'}`,
 		'',
-		'Earlier messages (context):',
+		'Earlier messages (context)',
 		context.length ? context.map(fmt).join('\n') : '(none)',
 		'',
-		'NEW messages:',
+		'NEW messages',
 		fresh.map(fmt).join('\n')
 	].join('\n');
 
@@ -625,8 +625,8 @@ function _buildPrompt({
 
 /**
  * Validate the model's proposals against what was actually said. Anything
- * pointing at an unknown message, or below the confidence bar, is dropped;
- * unknown assignees fall back to the author of the source message.
+ * pointing at an unknown message, or below the confidence bar, is dropped.
+ * Unknown assignees fall back to the author of the source message.
  *
  * @returns {Array<object>}
  */
@@ -653,7 +653,7 @@ function _normalizeProposals(
 		}
 		const title = typeof item.title === 'string' ? _plain(item.title.replace(/\s+/g, ' ')).slice(0, 100) : '';
 		// After a mention the model sometimes points at the earlier message
-		// that first mentioned the task; the mention itself is the request.
+		// that first mentioned the task. The mention itself is the request.
 		const source =
 			freshById.get(String(item.source_message_id)) ??
 			(fallbackSourceId ? freshById.get(String(fallbackSourceId)) : undefined);
@@ -667,7 +667,7 @@ function _normalizeProposals(
 						? `confidence ${item.confidence} < ${minConfidence}`
 						: null;
 		if (why) {
-			dropped.push(`"${title || '?'}": ${why}`);
+			dropped.push(`"${title || '?'}" ${why}`);
 			continue;
 		}
 
@@ -753,8 +753,8 @@ function _normalizeUpdates(parsed, { fresh, people, open, now = Date.now() }) {
 
 /**
  * Validate the model's memory changes. A note must be about a known
- * participant and come from a NEW message; only the person themselves can
- * change their language; "forget" must name one of that person's notes.
+ * participant and come from a NEW message. Only the person themselves can
+ * change their language. "forget" must name one of that person's notes.
  *
  * @returns {Array<{ userId: string, authorId: string, sourceMessageId: string, remember?: string, forget?: { id: number, note: string }, language?: string }>}
  */
@@ -846,11 +846,11 @@ async function _applyMemories(channel, changes) {
 async function _applyUpdate(channel, { id, changes, sourceMessageId }) {
 	const row = suggestionRepository.updateSuggestion(id, changes);
 	if (!row) {
-		suggestLog.debug(`Update to suggestion ${id} skipped: it was handled in the meantime`);
+		suggestLog.debug(`Update to suggestion ${id} skipped. It was handled in the meantime`);
 		return false;
 	}
 	suggestLog.debug(
-		`Updated suggestion ${id} "${_clip(row.title, 60)}" from message ${sourceMessageId}: ${JSON.stringify(changes)}`
+		`Updated suggestion ${id} "${_clip(row.title, 60)}" from message ${sourceMessageId} ${JSON.stringify(changes)}`
 	);
 	const proposal = _toProposal(row);
 
@@ -858,7 +858,7 @@ async function _applyUpdate(channel, { id, changes, sourceMessageId }) {
 		const card = await channel.messages.fetch(row.card_message_id).catch(() => null);
 		await card
 			?.edit({ embeds: [buildProposalEmbed(proposal)], components: [buildProposalButtons(proposal)] })
-			.catch(error => suggestLog.warn(`Could not edit suggestion card ${row.card_message_id}: ${error.message}`));
+			.catch(error => suggestLog.warn(`Could not edit suggestion card ${row.card_message_id} ${error.message}`));
 	}
 
 	const lines = [];
@@ -877,7 +877,7 @@ async function _applyUpdate(channel, { id, changes, sourceMessageId }) {
 	const link = row.card_message_id
 		? `https://discord.com/channels/${channel.guildId}/${channel.id}/${row.card_message_id}`
 		: null;
-	const content = `✏️ Updated the suggestion **${row.title}**${link ? ` (${link})` : ''}:\n${lines.map(l => `- ${l}`).join('\n')}`;
+	const content = `Updated the suggestion **${row.title}**${link ? ` (${link})` : ''}:\n${lines.map(l => `- ${l}`).join('\n')}`;
 
 	const payload = { content, allowedMentions: { parse: [], repliedUser: false } };
 	const source = await channel.messages.fetch(sourceMessageId).catch(() => null);
@@ -922,9 +922,9 @@ async function _postProposal(channel, found, { reply = true } = {}) {
 		);
 	} catch (error) {
 		suggestLog.warn(
-			`Could not post card for "${_clip(proposal.title, 60)}" in ${_where(channel)}: ${error.message}`
+			`Could not post card for "${_clip(proposal.title, 60)}" in ${_where(channel)} ${error.message}`
 		);
-		// No card exists, so drop the row and let a later pass suggest it again.
+		// No card exists. Drop the row and let a later pass suggest it again.
 		suggestionRepository.deleteSuggestion(proposal.id);
 		throw error;
 	}
@@ -938,7 +938,7 @@ async function _postProposal(channel, found, { reply = true } = {}) {
 function buildProposalEmbed(proposal) {
 	const embed = new EmbedBuilder()
 		.setColor(0xf1c40f)
-		.setTitle('💡 Set a task reminder?')
+		.setTitle('Set a task reminder?')
 		.setDescription(`**${proposal.title}**${proposal.description ? `\n${proposal.description}` : ''}`)
 		.addFields(
 			{ name: 'Assign To', value: `<@${proposal.assigneeId}>`, inline: true },
@@ -1033,20 +1033,20 @@ function finishProposal(id, outcome) {
 function unavailableMessage(id) {
 	const row = suggestionRepository.getSuggestion(id);
 	if (!row) {
-		return '❌ This suggestion could not be found (it was posted before suggestions were saved). Use /task add instead.';
+		return 'This suggestion could not be found (it was posted before suggestions were saved). Use /task add instead.';
 	}
 	if (row.status === 'created') {
-		return `✅ <@${row.handled_by}> already created this task${row.task_id ? ` (\`${row.task_id}\`)` : ''}.`;
+		return `<@${row.handled_by}> already created this task${row.task_id ? ` (\`${row.task_id}\`)` : ''}.`;
 	}
 	if (row.status === 'dismissed') {
 		return `This suggestion was dismissed by <@${row.handled_by}>.`;
 	}
-	return '⏳ Someone else is handling this suggestion right now. Try again in a moment.';
+	return 'Someone else is handling this suggestion right now. Try again in a moment.';
 }
 
 /**
- * Forget a message that was deleted from Discord, so the model never sees
- * it again: drop it from the buffer, drop the suggestion if it was a card,
+ * Forget a message that was deleted from Discord. The model then never sees
+ * it again. drop it from the buffer, drop the suggestion if it was a card,
  * and drop notes learned from it. Called from the messageDelete listener.
  *
  * @param {string} channelId
@@ -1071,8 +1071,8 @@ const UNKNOWN_MESSAGE = 10008;
 
 /**
  * Drop open suggestions whose card was deleted while the bot was not
- * watching (e.g. offline). Cards are usually in the message cache, so this
- * rarely costs an API call. Errors other than "unknown message" keep the
+ * watching (e.g. offline). Cards are usually in the message cache. This
+ * therefore rarely costs an API call. Errors other than "unknown message" keep the
  * suggestion.
  *
  * @returns {Promise<Array<object>>} the suggestions whose card still exists
@@ -1098,7 +1098,7 @@ async function _dropDeletedCards(channel, open) {
 	return kept;
 }
 
-/** Test helper: clear all in-memory state. */
+/** Test helper. Clear all in-memory state. */
 function _reset() {
 	for (const state of channels.values()) {
 		clearTimeout(state.timer);

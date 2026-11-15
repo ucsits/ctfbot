@@ -1,6 +1,6 @@
--- Migration: 009_fix_challenge_solves_unique
--- Description: Ensure UNIQUE constraint on ctf_challenge_solves exists
--- Date: 2026-05-31
+-- Migration 009_fix_challenge_solves_unique
+-- Description. Ensure UNIQUE constraint on ctf_challenge_solves exists
+-- Date 2026-05-31
 
 -- Recreate ctf_challenge_solves with UNIQUE constraint if missing
 -- SQLite does not support adding UNIQUE constraints to existing tables

@@ -1,8 +1,9 @@
--- Migration: 002_add_archived_field
--- Description: Add archived field to ctfs table
--- Date: 2025-10-30
+-- Migration 002_add_archived_field
+-- Description. Add archived field to ctfs table
+-- Date 2025-10-30
 
--- Add archived column to ctfs table (safe: migration runner handles duplicate column errors)
+-- Add archived column to ctfs table. This is safe because the migration runner
+-- handles duplicate column errors.
 ALTER TABLE ctfs ADD COLUMN archived INTEGER DEFAULT 0;
 
 -- Create index for archived field

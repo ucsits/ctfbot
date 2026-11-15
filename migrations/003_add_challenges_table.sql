@@ -1,6 +1,6 @@
--- Migration: 003_add_challenges_table
--- Description: Add challenges table for tracking CTF challenges
--- Date: 2025-10-30
+-- Migration 003_add_challenges_table
+-- Description. Add challenges table for tracking CTF challenges
+-- Date 2025-10-30
 
 -- The ctf_challenges table is already created inline in database/index.js
 -- (without the solved/solved_by/solved_at columns).

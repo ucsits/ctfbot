@@ -1,7 +1,7 @@
--- Migration 027: Remember people the bot talks to
+-- Migration 027. Remember people the bot talks to
 --
 -- actor_profiles holds per-user preferences. language is free text such as
--- "English"; NULL means the bot default (Indonesian, set in the prompt).
+-- "English". NULL means the bot default (Indonesian, set in the prompt).
 -- actor_memories holds short notes the bot learned from conversations or
 -- that the user added with /memory, shown to the model on later passes so it
 -- can pick assignees and deadlines the way each person prefers.

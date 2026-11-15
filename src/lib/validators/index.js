@@ -21,7 +21,7 @@ function validateURL(url, options = {}) {
 	try {
 		const urlObj = new URL(url);
 		if (!allowedProtocols.includes(urlObj.protocol)) {
-			throw new ValidationError(`❌ Invalid URL protocol. Allowed: ${allowedProtocols.join(', ')}`);
+			throw new ValidationError(`Invalid URL protocol. Allowed values are ${allowedProtocols.join(', ')}`);
 		}
 		return true;
 	} catch (error) {
@@ -29,7 +29,7 @@ function validateURL(url, options = {}) {
 			throw error;
 		}
 		throw new ValidationError(
-			'❌ Invalid URL format. Please provide a valid URL starting with http:// or https://'
+			'Invalid URL format. Please provide a valid URL starting with http:// or https://'
 		);
 	}
 }
@@ -49,7 +49,7 @@ function validateDateFormat(dateStr) {
 	const dateMatch = dateStr.match(/^(\d{2})-(\d{2})-(\d{4})\s+(\d{2}):(\d{2})$/);
 
 	if (!dateMatch) {
-		throw new ValidationError('❌ Invalid date format. Please use: DD-MM-YYYY HH:MM (e.g., 31-12-2025 20:00)');
+		throw new ValidationError('Invalid date format. Please use DD-MM-YYYY HH:MM, for example 31-12-2025 20:00');
 	}
 
 	const [, day, month, year, hour, minute] = dateMatch;
@@ -62,19 +62,19 @@ function validateDateFormat(dateStr) {
 	const minuteNum = parseInt(minute, 10);
 
 	if (dayNum < 1 || dayNum > 31) {
-		throw new ValidationError('❌ Invalid day. Must be between 01 and 31.');
+		throw new ValidationError('Invalid day. Must be between 01 and 31.');
 	}
 	if (monthNum < 1 || monthNum > 12) {
-		throw new ValidationError('❌ Invalid month. Must be between 01 and 12.');
+		throw new ValidationError('Invalid month. Must be between 01 and 12.');
 	}
 	if (yearNum < 2000 || yearNum > 2100) {
-		throw new ValidationError('❌ Invalid year. Must be between 2000 and 2100.');
+		throw new ValidationError('Invalid year. Must be between 2000 and 2100.');
 	}
 	if (hourNum < 0 || hourNum > 23) {
-		throw new ValidationError('❌ Invalid hour. Must be between 00 and 23.');
+		throw new ValidationError('Invalid hour. Must be between 00 and 23.');
 	}
 	if (minuteNum < 0 || minuteNum > 59) {
-		throw new ValidationError('❌ Invalid minute. Must be between 00 and 59.');
+		throw new ValidationError('Invalid minute. Must be between 00 and 59.');
 	}
 
 	return { day, month, year, hour, minute };
@@ -113,8 +113,8 @@ const FLEXIBLE_DATE_FORMATS = [
  * Validate a date string using flexible format matching.
  * Returns parsed components in the same shape as {@link validateDateFormat}.
  *
- * Also accepts:
- *   `1735689600`            (Unix timestamp seconds — Discord @time compatible)
+ * Also accepts
+ *   `1735689600`            (Unix timestamp seconds, Discord @time compatible)
  *   `<t:1735689600:F>`      (Discord @time helper format)
  *
  * @param {string} dateStr - Date string to validate
@@ -129,7 +129,7 @@ const FLEXIBLE_DATE_FORMATS = [
 function validateFlexibleDateFormat(dateStr) {
 	const trimmed = dateStr.trim();
 
-	// 1. Discord @time helper format: <t:UNIX_SECONDS> or <t:UNIX_SECONDS:LETTER>
+	// 1. Discord @time helper format, <t:UNIX_SECONDS> or <t:UNIX_SECONDS:LETTER>
 	const discordTimeMatch = trimmed.match(/^<t:(\d+)(?::[tTdDfFR])?>$/);
 	if (discordTimeMatch) {
 		const date = new Date(parseInt(discordTimeMatch[1], 10) * 1000);
@@ -142,7 +142,7 @@ function validateFlexibleDateFormat(dateStr) {
 		};
 	}
 
-	// 2. Raw Unix timestamp (seconds) — 8-10 digit epoch
+	// 2. Raw Unix timestamp in seconds, an 8-10 digit epoch
 	const unixMatch = trimmed.match(/^(\d{8,10})(?:\.\d+)?$/);
 	if (unixMatch) {
 		const unixSeconds = parseInt(unixMatch[1], 10);
@@ -185,9 +185,9 @@ function validateFlexibleDateFormat(dateStr) {
 	}
 
 	throw new ValidationError(
-		'❌ Invalid date format. Try:\n' +
+		'Invalid date format. Try:\n' +
 			'  `31-12-2025 20:00`   (DD-MM-YYYY HH:MM)\n' +
-			'  `1735689600`         (Unix timestamp — Discord @time compatible)'
+			'  `1735689600`         (Unix timestamp, Discord @time compatible)'
 	);
 }
 
@@ -206,9 +206,9 @@ function validateTimezone(timezone) {
 		const suggestions = suggestTimezones(timezone);
 		const suggestionStr =
 			suggestions.length > 0
-				? ` Did you mean: ${suggestions.map(s => '`' + s + '`').join(', ')}?`
+				? ` Did you mean ${suggestions.map(s => '`' + s + '`').join(', ')}?`
 				: ' Use `/timezones` to see common timezones.';
-		throw new ValidationError(`❌ Invalid timezone \`${timezone}\`.${suggestionStr}`);
+		throw new ValidationError(`Invalid timezone \`${timezone}\`.${suggestionStr}`);
 	}
 }
 
@@ -220,7 +220,7 @@ function validateTimezone(timezone) {
  */
 function validateFutureDate(date) {
 	if (date < new Date()) {
-		throw new ValidationError('❌ Event date must be in the future.');
+		throw new ValidationError('Event date must be in the future.');
 	}
 	return true;
 }
@@ -247,10 +247,10 @@ function sanitizeChannelName(name) {
  */
 function validateUsername(username) {
 	if (!username || username.trim().length === 0) {
-		throw new ValidationError('❌ Username cannot be empty.');
+		throw new ValidationError('Username cannot be empty.');
 	}
 	if (username.length > 100) {
-		throw new ValidationError('❌ Username is too long (max 100 characters).');
+		throw new ValidationError('Username is too long (max 100 characters).');
 	}
 	return true;
 }

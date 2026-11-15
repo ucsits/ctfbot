@@ -7,13 +7,13 @@ import SyncChallengesCommand from '../../src/commands/syncchallenges.js';
 
 // -- Strategy ---------------------------------------------------------------
 // The real command runs against the real platform registry and the real noCTF /
-// CTFd clients; only the HTTP boundary is faked. vitest's vi.mock cannot
+// CTFd clients. Only the HTTP boundary is faked. vitest's vi.mock cannot
 // intercept the plain CommonJS `require()` inside src/commands/syncchallenges.js
 // (documented in tests/unit/middleware/ensurePermission.test.js).
 //
-// The database is a real, isolated SQLite file in a temp directory, so the
-// assertions read the rows the repositories actually wrote: the synthetic user
-// id prefix, the team_key, and the one-solve-per-team skip are all observable
+// The database is a real, isolated SQLite file in a temp directory. The
+// assertions read the rows the repositories actually wrote. The synthetic user
+// id prefix, the team_key and the one-solve-per-team skip are all observable
 // there and nowhere else.
 
 const require = createRequire(import.meta.url);
@@ -22,7 +22,7 @@ const tempDir = mkdtempSync(join(tmpdir(), 'ctfbot-sync-'));
 
 const API_BASE = 'https://api-k17ctf.secso.cc';
 
-/** routes: Array<[string|RegExp, body|fn]>; first match wins. */
+/** routes as Array<[string|RegExp, body|fn]>. The first match wins. */
 function stubFetch(routes) {
 	const calls = [];
 	globalThis.fetch = vi.fn(async (url, options = {}) => {
@@ -173,7 +173,7 @@ describe('/syncchallenges noCTF integration', () => {
 
 		const first = challengeOperations.getChallengeByName(ctf.id, 'DriveOne');
 		expect(first).toBeTruthy();
-		// tags.categories is 'beginner,web': the first entry is the category.
+		// tags.categories is 'beginner,web'. The first entry is the category.
 		expect(first.chal_category).toBe('beginner');
 		expect(first.points).toBe(500);
 
@@ -207,7 +207,7 @@ describe('/syncchallenges noCTF integration', () => {
 
 		const { interaction } = await runSync(ctf, 'direct');
 
-		// The team-level solve carries only a team id, so the command has to ask
+		// The team-level solve carries only a team id. The command has to ask
 		// the platform for the team name before it can match a registration.
 		const teamQuery = calls.find(c => c.url.includes('/teams/query'));
 		expect(teamQuery).toBeTruthy();
@@ -218,7 +218,7 @@ describe('/syncchallenges noCTF integration', () => {
 		expect(solves).toHaveLength(1);
 		expect(solves[0].user_id).toBe('discord-a');
 		expect(solves[0].team_key).toBe('w larp');
-		expect(String(lastReply(interaction))).toMatch(/New solves recorded: 1/);
+		expect(String(lastReply(interaction))).toMatch(/New solves recorded 1/);
 	});
 
 	it('skips a second solve for a team that is already recorded', async () => {
@@ -244,8 +244,8 @@ describe('/syncchallenges noCTF integration', () => {
 
 		const challenge = challengeOperations.getChallengeByName(ctf.id, 'DriveOne');
 		expect(challengeOperations.getChallengeSolvers(challenge.id)).toHaveLength(1);
-		expect(String(lastReply(first.interaction))).toMatch(/New solves recorded: 1/);
-		expect(String(lastReply(second.interaction))).toMatch(/New solves recorded: 0/);
+		expect(String(lastReply(first.interaction))).toMatch(/New solves recorded 1/);
+		expect(String(lastReply(second.interaction))).toMatch(/New solves recorded 0/);
 	});
 
 	it('reports nothing new on a second bulk run and keeps one row per solve', async () => {
@@ -280,8 +280,8 @@ describe('/syncchallenges noCTF integration', () => {
 
 		const challenge = challengeOperations.getChallengeByName(ctf.id, 'DriveOne');
 		expect(challengeOperations.getChallengeSolvers(challenge.id)).toHaveLength(1);
-		expect(String(lastReply(first.interaction))).toMatch(/New solves recorded: 1/);
-		expect(String(lastReply(second.interaction))).toMatch(/New solves recorded: 0/);
+		expect(String(lastReply(first.interaction))).toMatch(/New solves recorded 1/);
+		expect(String(lastReply(second.interaction))).toMatch(/New solves recorded 0/);
 		// A clean run must not re-announce the same solves.
 		expect(String(lastReply(second.interaction))).not.toContain('**New Solves:**');
 	});
@@ -290,7 +290,7 @@ describe('/syncchallenges noCTF integration', () => {
 		const ctf = seedCtf({ platform: 'noctf', api_base_url: API_BASE, platform_division_id: 2 });
 		// A registered teammate puts their team in scope, which is what makes the
 		// unregistered solver below worth parking. Their own username is one the
-		// platform will not confirm, so the first run leaves the member unlinked and
+		// platform will not confirm. The first run leaves the member unlinked and
 		// parks their solve under the synthetic id.
 		seedRegistration(ctf, { userId: 'discord-b', username: 'Teammate', teamName: 'w larp', platformUserId: '1875' });
 		seedRegistration(ctf, { userId: 'discord-a', username: 'Someone Else', platformUserId: null });
@@ -327,8 +327,8 @@ describe('/syncchallenges noCTF integration', () => {
 		expect(parked).toHaveLength(1);
 		expect(parked[0].user_id).toBe('noctf:1706');
 
-		// The link is repaired, as the sync does for a matching username, and the
-		// next run must move the parked row rather than insert a second one.
+		// The link is repaired, as the sync does for a matching username. The next
+		// run must move the parked row rather than insert a second one.
 		registrationOperations.updatePlatformLink(ctf.id, 'discord-a', { ctfd_user_id: 1706, ctfd_team_name: null });
 
 		stubFetch([scoreboard, challenges]);
@@ -337,7 +337,7 @@ describe('/syncchallenges noCTF integration', () => {
 		const solves = challengeOperations.getChallengeSolvers(challenge.id);
 		expect(solves).toHaveLength(1);
 		expect(solves[0].user_id).toBe('discord-a');
-		expect(String(lastReply(interaction))).toMatch(/New solves recorded: 0/);
+		expect(String(lastReply(interaction))).toMatch(/New solves recorded 0/);
 	});
 
 	it('uses the bulk listing for the users source when the platform supports it', async () => {
@@ -370,14 +370,14 @@ describe('/syncchallenges noCTF integration', () => {
 		expect(calls.some(c => c.url.includes('/scoreboard/divisions/2'))).toBe(true);
 		// The bulk path never needs the per-user endpoint.
 		expect(calls.some(c => c.url.includes('/api/v1/'))).toBe(false);
-		// Every solver is registered, so there is no name to look up.
+		// Every solver is registered. There is no name to look up.
 		expect(calls.some(c => c.url.includes('/users/query'))).toBe(false);
 
 		const challenge = challengeOperations.getChallengeByName(ctf.id, 'DriveOne');
 		const solves = challengeOperations.getChallengeSolvers(challenge.id);
 		expect(solves).toHaveLength(1);
 		expect(solves[0].user_id).toBe('discord-a');
-		expect(String(lastReply(interaction))).toMatch(/New solves recorded: 1/);
+		expect(String(lastReply(interaction))).toMatch(/New solves recorded 1/);
 	});
 
 	it('falls back to the per-user path when the platform has no bulk listing', async () => {
@@ -395,7 +395,7 @@ describe('/syncchallenges noCTF integration', () => {
 
 		const { interaction } = await runSync(ctf, 'users');
 
-		// CTFd's adapter rejects getAllSolves, so the per-user endpoint is used.
+		// CTFd's adapter rejects getAllSolves. The per-user endpoint is used.
 		expect(calls.some(c => c.url.includes('/api/v1/users/42/solves'))).toBe(true);
 		expect(calls.some(c => c.url.includes('/scoreboard/'))).toBe(false);
 
@@ -403,12 +403,12 @@ describe('/syncchallenges noCTF integration', () => {
 		const solves = challengeOperations.getChallengeSolvers(challenge.id);
 		expect(solves).toHaveLength(1);
 		expect(solves[0].user_id).toBe('discord-a');
-		expect(String(lastReply(interaction))).toMatch(/New solves recorded: 1/);
+		expect(String(lastReply(interaction))).toMatch(/New solves recorded 1/);
 	});
 
 	it('parks an unregistered noCTF solve under the noctf: prefix', async () => {
 		const ctf = seedCtf({ platform: 'noctf', api_base_url: API_BASE, platform_division_id: 2 });
-		// The registered team is the scope, so the solve below is in it and the
+		// The registered team is the scope. The solve below is in it and the
 		// unregistered solver is still worth parking.
 		seedRegistration(ctf, { userId: 'discord-a', username: 'Teammate', teamName: 'w larp', platformUserId: '1654' });
 
@@ -429,7 +429,7 @@ describe('/syncchallenges noCTF integration', () => {
 				}
 			}],
 			['/teams/query', { data: { entries: [{ id: 869, name: 'w larp' }] } }],
-			// No name is available for this solver, so the label falls back to the id.
+			// No name is available for this solver. The label falls back to the id.
 			['/users/query', { data: { entries: [], total: 0 } }],
 			['/challenges', {
 				data: { challenges: [{ id: 12, slug: 'driveone', title: 'DriveOne', tags: { categories: 'web' }, value: 500 }] }
@@ -508,8 +508,8 @@ describe('/syncchallenges noCTF integration', () => {
 							solves: [{ user_id: 1706, challenge_id: 12, hidden: false, value: 500, created_at: '2026-09-11T10:41:28.840Z' }]
 						},
 						{
-							// Another team in the same division. Its solver is a stranger:
-							// not registered, and not on a team this channel knows.
+							// Another team in the same division. Its solver is a stranger.
+							// not registered and not on a team this channel knows.
 							team_id: 999,
 							rank: 2,
 							score: 400,
@@ -532,7 +532,7 @@ describe('/syncchallenges noCTF integration', () => {
 
 		const challenge = challengeOperations.getChallengeByName(ctf.id, 'DriveOne');
 		const solves = challengeOperations.getChallengeSolvers(challenge.id);
-		// Only the registered team's solve is kept; the other team's is dropped.
+		// Only the registered team's solve is kept. The other team's is dropped.
 		expect(solves).toHaveLength(1);
 		expect(solves[0].user_id).toBe('noctf:1706');
 		expect(challengeOperations.hasCtfdUserSolved(challenge.id, 31337, 'noctf')).toBeFalsy();
@@ -541,7 +541,7 @@ describe('/syncchallenges noCTF integration', () => {
 		expect(reply).toContain('Justher0 (unregistered) solved **DriveOne**');
 		expect(reply).not.toContain('31337');
 
-		// The stranger's name is never looked up, so the division is not walked.
+		// The stranger's name is never looked up. The division is not walked.
 		const nameCalls = calls.filter(c => c.url.includes('/users/query'));
 		expect(nameCalls).toHaveLength(1);
 		expect(JSON.parse(nameCalls[0].body)).toEqual({ ids: [1706], page_size: 1 });
@@ -575,9 +575,9 @@ describe('/syncchallenges noCTF integration', () => {
 
 		const challenge = challengeOperations.getChallengeByName(ctf.id, 'DriveOne');
 		expect(challengeOperations.getChallengeSolvers(challenge.id)).toHaveLength(0);
-		expect(String(lastReply(interaction))).toMatch(/New solves recorded: 0/);
+		expect(String(lastReply(interaction))).toMatch(/New solves recorded 0/);
 
-		// With no registered team there is nothing to compare against, so the
+		// With no registered team there is nothing to compare against. The
 		// division-wide listing is not even asked for names.
 		expect(calls.some(c => c.url.includes('/teams/query'))).toBe(false);
 		expect(calls.some(c => c.url.includes('/users/query'))).toBe(false);
@@ -609,7 +609,7 @@ describe('/syncchallenges noCTF integration', () => {
 		]);
 
 		// Without the resolver the client cannot tell a registered team from a
-		// stranger, so nothing may be parked: parking on an unknown scope is what
+		// stranger. Nothing may be parked. Parking on an unknown scope is what
 		// imported the whole division in the first place.
 		const { NoCTFClient } = require('../../src/lib/noctf/index.js');
 		const original = NoCTFClient.prototype.resolveTeamNames;
@@ -658,7 +658,7 @@ describe('/syncchallenges noCTF integration', () => {
 
 	it('links a registration that predates the platform credential and claims its solves', async () => {
 		const ctf = seedCtf({ platform: 'noctf', api_base_url: API_BASE, platform_division_id: 2 });
-		// Registered before /setctfplatform, so no platform user id was stored.
+		// Registered before /setctfplatform. No platform user id was stored.
 		seedRegistration(ctf, { userId: 'discord-a', username: 'Justher0', platformUserId: null });
 
 		stubFetch([
@@ -686,7 +686,7 @@ describe('/syncchallenges noCTF integration', () => {
 
 		const { interaction } = await runSync(ctf, 'users');
 
-		// The link is persisted, so the next sync starts from a known mapping.
+		// The link is persisted. The next sync starts from a known mapping.
 		const registration = registrationOperations.getUserRegistration(ctf.id, 'discord-a');
 		expect(String(registration.ctfd_user_id)).toBe('1706');
 		expect(registration.ctfd_team_name).toBe('w larp');
@@ -695,13 +695,13 @@ describe('/syncchallenges noCTF integration', () => {
 		const solves = challengeOperations.getChallengeSolvers(challenge.id);
 		expect(solves).toHaveLength(1);
 		expect(solves[0].user_id).toBe('discord-a');
-		expect(String(lastReply(interaction))).toMatch(/New solves recorded: 1/);
+		expect(String(lastReply(interaction))).toMatch(/New solves recorded 1/);
 		expect(String(lastReply(interaction))).toContain('<@discord-a> solved **DriveOne**');
 	});
 
 	it('refuses to link a registration when the platform match is only fuzzy', async () => {
 		const ctf = seedCtf({ platform: 'noctf', api_base_url: API_BASE, platform_division_id: 2 });
-		// The platform has no user by this exact name, so findUser's first-result
+		// The platform has no user by this exact name. FindUser's first-result
 		// fallback must not be trusted with someone else's solves.
 		seedRegistration(ctf, { userId: 'discord-b', username: 'Teammate', teamName: 'w larp', platformUserId: '1654' });
 		seedRegistration(ctf, { userId: 'discord-a', username: 'JustherO', platformUserId: null });

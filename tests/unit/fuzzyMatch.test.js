@@ -47,7 +47,7 @@ describe('scoreTask', () => {
 	});
 
 	it('tolerates a single typo via substring tokens', () => {
-		// "fix login bu" — trailing typo/abbreviation still matches t-3
+		// "fix login bu" has a trailing typo and abbreviation, yet still matches t-3
 		expect(scoreTask('fix login bu', tasks[2])).toBeGreaterThan(MIN_FUZZY_SCORE);
 	});
 
@@ -76,7 +76,8 @@ describe('resolveTaskCandidates', () => {
 	});
 
 	it('returns multiple candidates (sorted desc) when the top two are close', () => {
-		// "docs" hits t-2's title prefix AND t-2/t-1 descriptions — engineered
+		// "docs" hits t-2's title prefix AND the t-2 and t-1 descriptions. That was
+// engineered
 		// here with two titles sharing a prefix to force a tight band.
 		const twinTasks = [
 			{ task_id: 'a-1', title: 'Prepare release notes', description: '' },

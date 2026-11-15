@@ -12,10 +12,10 @@ const require = createRequire(import.meta.url);
 
 // ── Strategy ───────────────────────────────────────────────────────────
 // transferPendingSolves used to run a SELECT and then a loop of UPDATE/DELETE
-// statements, each its own implicit transaction, so a non-UNIQUE failure
+// statements, each its own implicit transaction. A non-UNIQUE failure
 // partway through left a partially migrated solve set. /registerctf then ran
-// the registration and the transfer as two separate operations, so a failure in
-// the transfer left the user registered with orphaned ctfd: solves.
+// the registration and the transfer as two separate operations. A failure in
+// the transfer left the user registered with orphaned ctfd solves.
 //
 // Both are now wrapped in transactions. This suite proves the transfer moves
 // every solve in one call and that a mid-transfer failure leaves the solve set
@@ -99,7 +99,7 @@ describe('transferPendingSolves', () => {
 	it('drops a solve the discord user already has, without aborting the transfer', () => {
 		const { ctfId, challengeIds } = seedPendingSolves({ ctfdUserId: '9002', challengeCount: 2 });
 
-		// The discord user already solved the first challenge, so moving the
+		// The discord user already solved the first challenge. Moving the
 		// pending row onto them collides on UNIQUE(challenge_id, user_id).
 		db.prepare('INSERT INTO ctf_challenge_solves (challenge_id, user_id) VALUES (?,?)')
 			.run(challengeIds[0], 'discord-2');
@@ -147,7 +147,7 @@ describe('transferPendingSolves', () => {
 
 		expect(threw).toBe(true);
 
-		// Nothing moved: all three solves still belong to the ctfd: user.
+		// Nothing moved. All three solves still belong to the ctfd user.
 		for (const challengeId of challengeIds) {
 			expect(ownerOf(challengeId, 'ctfd:9003')).toBeTruthy();
 			expect(ownerOf(challengeId, 'discord-3')).toBeUndefined();

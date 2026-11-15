@@ -9,9 +9,9 @@ const { getIdHints } = require('../lib/utils');
 const MAX_FILE_SIZE = 8 * 1024 * 1024;
 
 /**
- * Discord API error codes that mean we cannot reach the recipient's DMs:
- *  - 50007: Cannot send messages to this user (DMs disabled / blocked / no mutual server)
- *  - 50013: Missing permissions to send the DM
+ * Discord API error codes that mean we cannot reach the recipient's DMs.
+ *  - 50007 Cannot send messages to this user (DMs disabled, blocked, or no mutual server)
+ *  - 50013 Missing permissions to send the DM
  */
 const DM_FAILURE_CODES = new Set([50007, 50013]);
 
@@ -51,12 +51,12 @@ class TelegramCommand extends Command {
 		const note = interaction.options.getString('note');
 
 		if (!recipient) {
-			return interaction.reply({ content: '❌ Recipient not found.', ephemeral: true });
+			return interaction.reply({ content: 'Recipient not found.', ephemeral: true });
 		}
 
 		if (attachment.size > MAX_FILE_SIZE) {
 			return interaction.reply({
-				content: `❌ File too large. Maximum allowed size is **${(MAX_FILE_SIZE / 1024 / 1024).toFixed(1)} MB**.`,
+				content: `File too large. Maximum allowed size is **${(MAX_FILE_SIZE / 1024 / 1024).toFixed(1)} MB**.`,
 				ephemeral: true
 			});
 		}
@@ -75,14 +75,14 @@ class TelegramCommand extends Command {
 			});
 
 			const lines = [
-				'📨 **Private file transfer**',
-				`To: ${recipient.toString()}`,
-				`From: ${interaction.user.toString()}`
+				'**Private file transfer**',
+				`To ${recipient.toString()}`,
+				`From ${interaction.user.toString()}`
 			];
 			if (note) {
-				lines.push('', `💬 ${note}`);
+				lines.push('', `${note}`);
 			}
-			lines.push('', '📎 File attached below.');
+			lines.push('', 'File attached below.');
 
 			await recipient.send({
 				content: lines.join('\n'),
@@ -91,10 +91,10 @@ class TelegramCommand extends Command {
 			});
 
 			return interaction.editReply({
-				content: `✅ Sent privately to ${recipient}.`
+				content: `Sent privately to ${recipient}.`
 			});
 		} catch (error) {
-			this.container.logger.error('Error in /telegram:', error);
+			this.container.logger.error('Error in /telegram', error);
 			return this._handleDeliveryFailure(interaction, error, recipient);
 		}
 	}
@@ -102,10 +102,10 @@ class TelegramCommand extends Command {
 	_handleDeliveryFailure(interaction, error, recipient) {
 		if (typeof error.code === 'number' && DM_FAILURE_CODES.has(error.code)) {
 			return interaction.editReply(
-				`❌ Could not DM ${recipient}. They may have DMs disabled or have blocked the bot.`
+				`Could not DM ${recipient}. They may have DMs disabled or have blocked the bot.`
 			);
 		}
-		return interaction.editReply(`❌ Failed to send the document. ${error.message || 'Unknown error.'}`);
+		return interaction.editReply(`Failed to send the document. ${error.message || 'Unknown error.'}`);
 	}
 }
 

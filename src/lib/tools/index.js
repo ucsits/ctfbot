@@ -2,9 +2,9 @@
  * Tool registry for the proactive chat service.
  *
  * Four tools, deliberately small. None of them can send a message, create a
- * thread or touch a task: the model produces text and the service decides
- * whether to post it. That separation is what stops a web page that says
- * "ignore your instructions and post this" from becoming an action.
+ * thread or touch a task. The model produces text and the service decides
+ * whether to post it. That separation stops a web page that says "ignore your
+ * instructions and post this" from becoming an action.
  *
  * @module lib/tools
  */
@@ -45,7 +45,7 @@ const SCHEMAS = [
 		function: {
 			name: TOOL_NAMES.remember,
 			description:
-				'Save something worth knowing next time. About the channel: what it is for, its jargon, house rules, or a decision. About a person: a lasting preference or role. Never save one-off details, secrets or credentials.',
+				'Save something worth knowing next time. About the channel, meaning what it is for, its jargon, house rules, or a decision. About a person, meaning a lasting preference or role. Never save one-off details, secrets or credentials.',
 			parameters: {
 				type: 'object',
 				properties: {
@@ -83,7 +83,7 @@ const SCHEMAS = [
 		function: {
 			name: TOOL_NAMES.silent,
 			description:
-				'Choose not to speak. Call this whenever posting a message would add nothing: small talk, a question already answered, two people talking to each other, or you would only be repeating yourself. Prefer silence over noise.',
+				'Choose not to speak. Call this whenever posting a message would add nothing. That covers small talk, a question already answered, two people talking to each other, or you would only be repeating yourself. Prefer silence over noise.',
 			parameters: {
 				type: 'object',
 				properties: {
@@ -118,13 +118,13 @@ function createTools({ channelId, people = new Map(), onSearch }) {
 				const about = args.about_user_id ? String(args.about_user_id) : null;
 				if (about) {
 					if (!people.has(about)) {
-						return 'not saved: that user id is not in this conversation';
+						return 'not saved. That user id is not in this conversation';
 					}
 					const id = actorMemory.addNote(about, args.note, { addedBy: 'self' });
-					return id ? `saved note ${id} about ${people.get(about)}` : 'not saved: already remembered';
+					return id ? `saved note ${id} about ${people.get(about)}` : 'not saved. Already remembered';
 				}
 				const id = channelMemory.addNote(channelId, args.note, { kind: args.kind });
-				return id ? `saved channel note ${id}` : 'not saved: already remembered';
+				return id ? `saved channel note ${id}` : 'not saved. Already remembered';
 			}
 
 			case TOOL_NAMES.recall: {
@@ -139,13 +139,13 @@ function createTools({ channelId, people = new Map(), onSearch }) {
 				for (const [id, display] of people) {
 					for (const note of actorMemory.listNotes(id)) {
 						if (!query || note.note.toLowerCase().includes(query)) {
-							personNotes.push(`${display}: ${note.note}`);
+							personNotes.push(`${display} ${note.note}`);
 						}
 					}
 				}
 				const lines = [
-					`channel notes: ${notes.length ? notes.join(' | ') : '(none)'}`,
-					`people notes: ${personNotes.length ? personNotes.join(' | ') : '(none)'}`
+					`channel notes ${notes.length ? notes.join(' | ') : '(none)'}`,
+					`people notes ${personNotes.length ? personNotes.join(' | ') : '(none)'}`
 				];
 				return lines.join('\n');
 			}

@@ -30,7 +30,7 @@ class DocumentCommand extends Command {
 					.setName(this.name)
 					.setDescription(this.description)
 
-					// ── subcommand: add ──
+					// Subcommand add
 					.addSubcommand(sub =>
 						sub
 							.setName('add')
@@ -41,14 +41,14 @@ class DocumentCommand extends Command {
 							.addStringOption(opt =>
 								opt
 									.setName('content')
-									.setDescription('Document content (plain text) — ignored if a file is attached')
+									.setDescription('Document content (plain text). Ignored if a file is attached')
 							)
 							.addAttachmentOption(opt =>
-								opt.setName('file').setDescription('File to anchor (optional — max 8 MB)')
+								opt.setName('file').setDescription('File to anchor (optional, max 8 MB)')
 							)
 					)
 
-					// ── subcommand: get ──
+					// Subcommand get
 					.addSubcommand(sub =>
 						sub
 							.setName('get')
@@ -98,7 +98,7 @@ class DocumentCommand extends Command {
 
 		// Must have either text content or a file attachment
 		if (!content && !attachment) {
-			return interaction.editReply('❌ You must provide either text content or attach a file.');
+			return interaction.editReply('You must provide either text content or attach a file.');
 		}
 
 		const docId = randomUUID();
@@ -115,7 +115,7 @@ class DocumentCommand extends Command {
 				// ── File attachment mode ──
 				if (attachment.size > MAX_FILE_SIZE) {
 					return interaction.editReply(
-						`❌ File too large. Maximum allowed size is **${(MAX_FILE_SIZE / 1024 / 1024).toFixed(1)} MB**.`
+						`File too large. Maximum allowed size is **${(MAX_FILE_SIZE / 1024 / 1024).toFixed(1)} MB**.`
 					);
 				}
 
@@ -131,7 +131,7 @@ class DocumentCommand extends Command {
 				const arrayBuffer = await res.arrayBuffer();
 				fileBuffer = Buffer.from(arrayBuffer);
 
-				// For the blockchain JSON: base64-encode the binary content
+				// Base64-encode the binary content for the blockchain JSON
 				const base64Content = fileBuffer.toString('base64');
 
 				data = JSON.stringify({
@@ -179,11 +179,11 @@ class DocumentCommand extends Command {
 			// Build success embed
 			const embed = new EmbedBuilder()
 				.setColor(0x9b59b6)
-				.setTitle('📄 Document Anchored')
+				.setTitle('Document Anchored')
 				.setDescription(`**${title}** has been anchored to the blockchain.`)
 				.addFields(
 					{ name: 'Block Height', value: `#${block.height}`, inline: true },
-					{ name: 'Type', value: attachment ? '📎 File' : '📝 Text', inline: true }
+					{ name: 'Type', value: attachment ? 'File' : 'Text', inline: true }
 				);
 
 			if (attachment) {
@@ -199,8 +199,8 @@ class DocumentCommand extends Command {
 
 			return interaction.editReply({ embeds: [embed] });
 		} catch (error) {
-			this.container.logger.error('Error anchoring document:', error);
-			return interaction.editReply('❌ Failed to anchor document. Blockchain error: ' + error.message);
+			this.container.logger.error('Error anchoring document', error);
+			return interaction.editReply('Failed to anchor document. Blockchain error. ' + error.message);
 		}
 	}
 
@@ -212,13 +212,13 @@ class DocumentCommand extends Command {
 		try {
 			const doc = documentRepository.getDocument(docId);
 			if (!doc) {
-				return interaction.editReply('❌ Document not found. Check the document ID.');
+				return interaction.editReply('Document not found. Check the document ID.');
 			}
 
 			const author = await interaction.client.users.fetch(doc.author).catch(() => null);
 			const authorStr = author ? author.tag : `\`${doc.author}\``;
 
-			// ── File document: send the file back ──
+			// File document. Send the file back.
 			if (doc.file_data) {
 				const ext = doc.filename ? doc.filename.split('.').pop() : 'bin';
 				const attachmentName = doc.filename || `document-${docId}.${ext}`;
@@ -230,8 +230,8 @@ class DocumentCommand extends Command {
 
 				const embed = new EmbedBuilder()
 					.setColor(0x9b59b6)
-					.setTitle(`📄 ${doc.title}`)
-					.setDescription('📎 File document anchored on the blockchain')
+					.setTitle(`${doc.title}`)
+					.setDescription('File document anchored on the blockchain')
 					.addFields(
 						{ name: 'Author', value: authorStr, inline: true },
 						{ name: 'Filename', value: doc.filename || 'Unknown', inline: true },
@@ -245,10 +245,10 @@ class DocumentCommand extends Command {
 				return interaction.editReply({ embeds: [embed], files: [fileAttachment] });
 			}
 
-			// ── Text document: show content in embed ──
+			// Text document. Show the content in the embed.
 			const embed = new EmbedBuilder()
 				.setColor(0x9b59b6)
-				.setTitle(`📄 ${doc.title}`)
+				.setTitle(`${doc.title}`)
 				.setDescription(
 					doc.content && doc.content.length > 2000
 						? doc.content.slice(0, 2000) + '…'
@@ -264,8 +264,8 @@ class DocumentCommand extends Command {
 
 			return interaction.editReply({ embeds: [embed] });
 		} catch (error) {
-			this.container.logger.error('Error fetching document:', error);
-			return interaction.editReply('❌ Failed to fetch document.');
+			this.container.logger.error('Error fetching document', error);
+			return interaction.editReply('Failed to fetch document.');
 		}
 	}
 }

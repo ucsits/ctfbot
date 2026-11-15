@@ -1,9 +1,9 @@
 /**
- * Chat state repository — per-channel gate for proactive messages.
+ * Chat state repository for the per-channel gate on proactive messages.
  *
- * Keeps mute, backoff, engagement tracking and the send budget in SQLite so a
- * restart does not reset a channel that was muted or that the bot learned to
- * leave alone.
+ * It keeps mute, backoff, engagement tracking and the send budget in SQLite. A
+ * restart then does not reset a channel that was muted or that the bot learned
+ * to leave alone.
  *
  * @module database/repositories/chatState
  */
@@ -32,7 +32,7 @@ function getState(channelId) {
 }
 
 /**
- * Point a channel row at its guild, so guild-wide budgets can be enforced.
+ * Point a channel row at its guild. Guild-wide budgets can then be enforced.
  */
 function setGuild(channelId, guildId) {
 	if (!guildId) {
@@ -60,8 +60,8 @@ function noteHuman(channelId, at = nowSeconds()) {
 }
 
 /**
- * Record that the bot spoke: when, which message, and that it is now waiting
- * to see whether anyone reacts or replies.
+ * Record that the bot spoke, with the time, the message, and the fact that it
+ * is now waiting to see whether anyone reacts or replies.
  */
 function noteSpoke(channelId, messageId, at = nowSeconds()) {
 	getState(channelId);
@@ -77,8 +77,8 @@ function noteSpoke(channelId, messageId, at = nowSeconds()) {
 }
 
 /**
- * Someone replied to or reacted to the bot's last message, so the channel is
- * paying attention. Resets the ignored streak.
+ * Someone replied to or reacted to the bot's last message, which means the
+ * channel is paying attention. Resets the ignored streak.
  */
 function noteEngaged(channelId) {
 	getState(channelId);
@@ -89,7 +89,7 @@ function noteEngaged(channelId) {
 
 /**
  * Bump the ignored streak and start the adaptive backoff. Called when the bot
- * spoke, nobody engaged, and it is about to consider speaking again.
+ * spoke, nobody engaged, and another look at the channel is due.
  *
  * @returns {number} the new streak
  */
@@ -103,7 +103,7 @@ function noteIgnored(channelId) {
 }
 
 /**
- * Set a soft backoff window: the bot stays quiet until `until`, without the
+ * Set a soft backoff window. The bot stays quiet until `until`, without the
  * channel being explicitly muted.
  */
 function setBackoffUntil(channelId, until) {
@@ -178,7 +178,7 @@ function consumeBudget({ channelId, guildId = null }) {
 }
 
 /**
- * Local calendar day, so "20 messages per day" resets at local midnight
+ * Local calendar day. "20 messages per day" then resets at local midnight
  * instead of at an arbitrary UTC hour.
  */
 function dayBucketNow() {
@@ -187,7 +187,7 @@ function dayBucketNow() {
 	return DateTime.now().setZone(DEFAULT_TIMEZONE).toFormat('yyyy-MM-dd');
 }
 
-/** Test helper: forget every channel's gate state. */
+/** Test helper. Forget every channel's gate state. */
 function _reset() {
 	db().prepare('DELETE FROM channel_chat_state').run();
 	db().prepare('DELETE FROM guild_chat_state').run();

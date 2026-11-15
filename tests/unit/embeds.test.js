@@ -16,7 +16,7 @@ describe('Embed Helpers', () => {
 		it('should create success embed with title and description', () => {
 			const embed = createSuccessEmbed('Test Title', 'Test Description');
 
-			expect(embed.data.title).toBe('✅ Test Title');
+			expect(embed.data.title).toBe('Test Title');
 			expect(embed.data.description).toBe('Test Description');
 			expect(embed.data.color).toBe(COLORS.SUCCESS);
 			expect(embed.data.timestamp).toBeDefined();
@@ -25,7 +25,7 @@ describe('Embed Helpers', () => {
 		it('should create success embed without description', () => {
 			const embed = createSuccessEmbed('Test Title');
 
-			expect(embed.data.title).toBe('✅ Test Title');
+			expect(embed.data.title).toBe('Test Title');
 			expect(embed.data.description).toBeUndefined();
 		});
 
@@ -44,7 +44,7 @@ describe('Embed Helpers', () => {
 		it('should create error embed with title and description', () => {
 			const embed = createErrorEmbed('Error Title', 'Error Description');
 
-			expect(embed.data.title).toBe('❌ Error Title');
+			expect(embed.data.title).toBe('Error Title');
 			expect(embed.data.description).toBe('Error Description');
 			expect(embed.data.color).toBe(COLORS.ERROR);
 		});
@@ -52,7 +52,7 @@ describe('Embed Helpers', () => {
 		it('should create error embed without description', () => {
 			const embed = createErrorEmbed('Error Title');
 
-			expect(embed.data.title).toBe('❌ Error Title');
+			expect(embed.data.title).toBe('Error Title');
 			expect(embed.data.description).toBeUndefined();
 		});
 	});
@@ -61,7 +61,7 @@ describe('Embed Helpers', () => {
 		it('should create info embed', () => {
 			const embed = createInfoEmbed('Info Title', 'Info Description');
 
-			expect(embed.data.title).toBe('ℹ️ Info Title');
+			expect(embed.data.title).toBe('Info Title');
 			expect(embed.data.color).toBe(COLORS.INFO);
 		});
 	});
@@ -70,7 +70,7 @@ describe('Embed Helpers', () => {
 		it('should create warning embed', () => {
 			const embed = createWarningEmbed('Warning Title', 'Warning Description');
 
-			expect(embed.data.title).toBe('⚠️ Warning Title');
+			expect(embed.data.title).toBe('Warning Title');
 			expect(embed.data.color).toBe(COLORS.WARNING);
 		});
 	});

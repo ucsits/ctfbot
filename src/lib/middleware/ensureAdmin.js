@@ -14,7 +14,7 @@ async function ensureAdminReply(interaction) {
 
 	if (!isAdminUser) {
 		await interaction.reply({
-			content: '❌ You do not have admin permissions.',
+			content: 'You do not have admin permissions.',
 			ephemeral: true
 		});
 		return true;
@@ -28,7 +28,7 @@ async function ensureAdminReplyWithReason(interaction, reason = 'admin access') 
 
 	if (!isAdminUser) {
 		await interaction.reply({
-			content: `❌ You need ${reason} to use this command.`,
+			content: `You need ${reason} to use this command.`,
 			ephemeral: true
 		});
 		return true;

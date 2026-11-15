@@ -1,4 +1,4 @@
--- Migration 019: Google Calendar bidirectional sync for tasks (Option A).
+-- Migration 019. Google Calendar bidirectional sync for tasks (Option A).
 -- Adds the columns and tables needed to mirror bot tasks to a shared Google
 -- Calendar and reconcile bot-owned calendar events back into the task DB.
 
@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS google_credentials (
 );
 
 -- Single-row incremental-sync cursor for the Calendar API. The sync_token
--- drives incremental updates via the events.list nextSyncToken field; clearing
+-- drives incremental updates via the events.list nextSyncToken field. Clearing
 -- it forces a full re-scan.
 CREATE TABLE IF NOT EXISTS calendar_sync_state (
     id           INTEGER PRIMARY KEY CHECK(id = 1),

@@ -4,23 +4,23 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 
 // ── Strategy ───────────────────────────────────────────────────────────
-// /createctf runs its side effects in order: create the channel, create the
-// scheduled event, post the welcome message, then persist the ctfs row via
-// saveToDatabase. The success reply comes after the persist step, so a failure
+// /createctf runs its side effects in order. It creates the channel, creates
+// the scheduled event, posts the welcome message, then persists the ctfs row
+// via saveToDatabase. The success reply comes after the persist step. A failure
 // in sendConfirmation (which is exactly what the scheduledStartTime bug caused)
 // landed in the catch and ran _compensateCreate.
 //
 // _compensateCreate deleted the scheduled event and the channel but never the
-// database row, so every failure left a permanent ctfs row pointing at a
+// database row. Every failure left a permanent ctfs row pointing at a
 // channel and an event that had just been rolled back.
 //
 // These tests run against a real database to prove the row is now removed, that
-// it is removed BEFORE the Discord objects, and that the helper stays tolerant
-// of a missing id or a failing Discord delete.
+// it is removed BEFORE the Discord objects. It also proves the helper stays
+// tolerant of a missing id or a failing Discord delete.
 //
-// Note: the repository is deliberately NOT monkeypatched. Vitest's ESM interop
+// The repository is deliberately NOT monkeypatched. Vitest's ESM interop
 // hands out a wrapper object as `default`, which is a different object from the
-// one `require('../database')` gives createctf.js, so property patches would be
+// one `require('../database')` gives createctf.js. Property patches would be
 // invisible to the command. Ordering is therefore observed through the real
 // database state at the moment each Discord delete runs.
 
@@ -64,7 +64,7 @@ afterAll(() => {
 /** Instantiate the command without running the Sapphire constructor. */
 function makeCommand(logger = { info() {}, warn() {}, error() {} }) {
 	const command = Object.create(CreateCTFCommand.prototype);
-	// `container` is a getter on the Sapphire Piece prototype, so it has to be
+	// `container` is a getter on the Sapphire Piece prototype. It has to be
 	// shadowed with an own property rather than assigned.
 	Object.defineProperty(command, 'container', { value: { logger }, writable: true, configurable: true });
 	return command;
@@ -93,7 +93,7 @@ function seedCtf(overrides = {}) {
 
 /**
  * Minimal stand-ins for the Discord objects _compensateCreate touches.
- * `observe` is called right before each delete resolves, so the caller can
+ * `observe` is called right before each delete resolves. The caller can
  * inspect database state at that exact moment.
  */
 function makeFakes({ observe } = {}) {

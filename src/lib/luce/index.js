@@ -3,8 +3,8 @@
  * @module luce
  *
  * Communicates with the Luce blockchain server running on the local machine.
- * All POST /blocks calls go through localhostOnly middleware, so the bot must
- * run on the same host as the Luce server.
+ * All POST /blocks calls go through localhostOnly middleware. The bot must
+ * therefore run on the same host as the Luce server.
  */
 
 const LUCE_PORT = process.env.LUCE_PORT || '5500';
@@ -49,8 +49,8 @@ async function appendBlock({ author, data }) {
 
 	if (!res.ok) {
 		const body = await res.json().catch(() => ({}));
-		luceLog.error(`Append failed (${res.status}): ${body.error || res.statusText}`);
-		throw new Error(`Blockchain append failed (${res.status}): ${body.error || res.statusText}`);
+		luceLog.error(`Append failed (${res.status}) ${body.error || res.statusText}`);
+		throw new Error(`Blockchain append failed (${res.status}) ${body.error || res.statusText}`);
 	}
 
 	const result = await res.json();
@@ -58,7 +58,7 @@ async function appendBlock({ author, data }) {
 
 	// Fire-and-forget notification to the configured channel
 	_notifyBlock(result).catch(err => {
-		luceLog.error(`Block notification failed: ${err.message}`);
+		luceLog.error(`Block notification failed ${err.message}`);
 	});
 
 	return result;
@@ -105,7 +105,7 @@ async function getHeight() {
 		throw new Error(`Blockchain height failed (${res.status})`);
 	}
 	const body = await res.json();
-	luceLog.debug(`Chain height: ${body.height}`);
+	luceLog.debug(`Chain height ${body.height}`);
 	return body.height;
 }
 
@@ -120,7 +120,7 @@ async function validateChain() {
 		throw new Error(`Blockchain validate failed (${res.status})`);
 	}
 	const body = await res.json();
-	luceLog.info(`Chain valid: ${body.valid}`);
+	luceLog.info(`Chain valid ${body.valid}`);
 	return body.valid;
 }
 
@@ -156,13 +156,13 @@ function _buildBlockEmbed(block) {
 
 	const { type } = parsed;
 
-	// Luce API returns timestamp in seconds; convert to ms for Date()
+	// Luce API returns the timestamp in seconds. Convert it to ms for Date()
 	const blockDate = new Date((block.timestamp || Math.floor(Date.now() / 1000)) * 1000);
 
 	switch (type) {
 		case 'rep': {
 			const amount = parsed.amount || 0;
-			const sign = amount > 0 ? '⬆️ +1' : '⬇️ -1';
+			const sign = amount > 0 ? '+1' : '-1';
 			return new EmbedBuilder()
 				.setColor(amount > 0 ? 0x00ff00 : 0xff0000)
 				.setTitle(`${sign} Rep ${amount > 0 ? 'Upvote' : 'Downvote'}`)
@@ -173,7 +173,7 @@ function _buildBlockEmbed(block) {
 		case 'task':
 			return new EmbedBuilder()
 				.setColor(0x0099ff)
-				.setTitle('📋 Task Created')
+				.setTitle('Task Created')
 				.setDescription(parsed.title || 'Untitled task')
 				.addFields(
 					{ name: 'Created by', value: `<@${parsed.createdBy}>`, inline: true },
@@ -186,7 +186,7 @@ function _buildBlockEmbed(block) {
 			const title = parsed.title || task?.title || `Task \`${parsed.taskId || 'unknown'}\` marked as done`;
 			return new EmbedBuilder()
 				.setColor(0x00ff00)
-				.setTitle('✅ Task Completed')
+				.setTitle('Task Completed')
 				.setDescription(title)
 				.addFields(
 					{
@@ -212,7 +212,7 @@ function _buildBlockEmbed(block) {
 			const title = parsed.title || task?.title || `Task \`${parsed.taskId || 'unknown'}\` was cancelled`;
 			return new EmbedBuilder()
 				.setColor(0xe74c3c)
-				.setTitle('🗑️ Task Cancelled')
+				.setTitle('Task Cancelled')
 				.setDescription(title)
 				.addFields(
 					{
@@ -237,7 +237,7 @@ function _buildBlockEmbed(block) {
 			const isFile = parsed.filename && parsed.fileSize;
 			const embed = new EmbedBuilder()
 				.setColor(0xffaa00)
-				.setTitle(isFile ? '📎 File Anchored' : '📄 Document Anchored')
+				.setTitle(isFile ? 'File Anchored' : 'Document Anchored')
 				.setDescription(parsed.title || 'Untitled document')
 				.addFields(
 					{ name: 'Author', value: `<@${parsed.author}>`, inline: true },
@@ -258,7 +258,7 @@ function _buildBlockEmbed(block) {
 			const amount = parsed.amount || 0;
 			return new EmbedBuilder()
 				.setColor(0x9b59b6)
-				.setTitle('🎯 Activity Points Granted')
+				.setTitle('Activity Points Granted')
 				.setDescription(`<@${parsed.grantedTo}> was granted **${amount} AP**`)
 				.addFields(
 					{ name: 'Granted by', value: `<@${parsed.grantedBy}>`, inline: true },
@@ -270,7 +270,7 @@ function _buildBlockEmbed(block) {
 			const itemName = parsed.itemName || 'an item';
 			return new EmbedBuilder()
 				.setColor(0x00e5ff)
-				.setTitle('🛒 Store Purchase')
+				.setTitle('Store Purchase')
 				.setDescription(
 					`<@${parsed.user}> purchased **${itemName}** (${parsed.paymentMethod === 'ap' ? `${parsed.costAp} AP` : `Rp ${parsed.costRp}`})`
 				)
@@ -283,7 +283,7 @@ function _buildBlockEmbed(block) {
 		case 'ap_confirm': {
 			return new EmbedBuilder()
 				.setColor(0x2ecc71)
-				.setTitle('✅ Purchase Confirmed')
+				.setTitle('Purchase Confirmed')
 				.setDescription(
 					`<@${parsed.confirmedBy}> confirmed **${parsed.itemName || 'a purchase'}** for <@${parsed.user}>`
 				)
@@ -300,7 +300,7 @@ function _buildBlockEmbed(block) {
 		default:
 			return new EmbedBuilder()
 				.setColor(0x808080)
-				.setTitle('⛓️ New Block')
+				.setTitle('New Block')
 				.setDescription(`Block **#${block.height}** appended to the chain`)
 				.addFields(
 					{ name: 'Author', value: `<@${block.author}>`, inline: true },
@@ -328,10 +328,10 @@ async function _notifyBlock(block) {
 	try {
 		embed = _buildBlockEmbed(block);
 	} catch (error) {
-		luceLog.warn(`Could not enrich audit event: ${error.message}`);
+		luceLog.warn(`Could not enrich audit event ${error.message}`);
 		embed = new EmbedBuilder()
 			.setColor(0x808080)
-			.setTitle('⛓️ New Block')
+			.setTitle('New Block')
 			.setDescription(`Block **#${block.height}** appended to the chain`)
 			.setTimestamp();
 	}
@@ -385,7 +385,7 @@ async function _notifyBlock(block) {
 			}
 		}
 	} catch {
-		// fall through — send embed-only if data can't be parsed
+		// fall through. Send an embed-only message if the data cannot be parsed
 	}
 
 	const userIds = [];

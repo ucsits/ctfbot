@@ -6,8 +6,8 @@ import { join } from 'path';
 // ── Strategy ───────────────────────────────────────────────────────────
 // pushTaskUpdate('create') used to call createEvent and only afterwards record
 // the linkage. If that DB write failed, the Google event existed but the task
-// still had calendar_event_id = NULL, and _reconcileOutstanding re-selects
-// exactly those tasks, so the next cycle created a DUPLICATE event.
+// still had calendar_event_id = NULL. _reconcileOutstanding re-selects
+// exactly those tasks. The next cycle created a DUPLICATE event.
 //
 // The push now looks for an event already carrying the task's marker and adopts
 // it. This suite drives the real pushTaskUpdate against a mocked fetch and
@@ -117,7 +117,7 @@ afterEach(() => {
 
 async function loadService() {
 	vi.resetModules();
-	// Re-set the flag: resetModules re-evaluates constants from process.env.
+	// Re-set the flag. resetModules re-evaluates constants from process.env.
 	process.env.GOOGLE_CALENDAR_ENABLED = 'true';
 	return import('../../src/services/calendarSync.js');
 }
@@ -197,15 +197,15 @@ describe('pushTaskUpdate create idempotency', () => {
 		expect(first.success).toBe(true);
 		expect(createPosts).toBe(1);
 
-		// Simulate the DB linkage being lost (the bug): the task still appears
-		// unsynced, so reconciliation would push it again.
+		// Simulate the DB linkage being lost, which was the bug. The task still appears
+		// unsynced. Reconciliation would push it again.
 		db.prepare('UPDATE tasks SET calendar_event_id = NULL, calendar_synced_at = NULL WHERE task_id = ?')
 			.run('push-task-1');
 
 		const second = await pushTaskUpdate(task, 'create');
 		expect(second.success).toBe(true);
 
-		// The decisive assertion: no second create was issued.
+		// The decisive assertion is that no second create was issued.
 		expect(createPosts).toBe(1);
 		expect(second.eventId).toBe(first.eventId);
 

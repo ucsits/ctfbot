@@ -14,7 +14,7 @@ const ALTER_ADD_COLUMN = /^ALTER\s+TABLE\s+["`[]?(\w+)["`\]]?\s+ADD\s+COLUMN\s+[
 
 /**
  * Split a migration file into individual SQL statements. Strips `--` line
- * comments and `/* *\/` block comments, and keeps semicolons inside
+ * comments and `/* *\/` block comments. It also keeps semicolons inside
  * single-quoted string literals from being treated as separators (including
  * the SQLite escaped-quote form `''`).
  *
@@ -124,8 +124,8 @@ function recoverDuplicatedColumns(db, sql) {
 	const cleaned = statements.join(';\n');
 	const alterColumns = [...cleaned.matchAll(/ALTER TABLE\s+(\w+)\s+ADD COLUMN\s+(\w+)/gi)];
 
-	// Only column-add migrations are safe to replay: a partially applied
-	// INSERT/SELECT migration could duplicate rows, so refuse to guess there.
+	// Only column-add migrations are safe to replay. A partially applied
+	// INSERT/SELECT migration could duplicate rows. Refuse to guess there.
 	if (alterColumns.length === 0) {
 		return { ok: false, reason: 'no ALTER TABLE ADD COLUMN statements to recover' };
 	}
@@ -150,7 +150,7 @@ function recoverDuplicatedColumns(db, sql) {
 			];
 
 			if (missing.length > 0) {
-				throw new Error(`recovery left schema incomplete: ${missing.join(', ')}`);
+				throw new Error(`recovery left schema incomplete ${missing.join(', ')}`);
 			}
 		})();
 
@@ -214,7 +214,7 @@ function runMigrations(db = getConnection(), migrationsDir = path.join(process.c
 			})();
 
 			applied.push(name);
-			migrationLogger.info(`Applied migration: ${name}`);
+			migrationLogger.info(`Applied migration ${name}`);
 		} catch (error) {
 			// Recover from inline-schema duplicates. On a drifted database a
 			// migration can fail on a column that already exists while other
@@ -226,7 +226,7 @@ function runMigrations(db = getConnection(), migrationsDir = path.join(process.c
 				const migrationSql = fs.readFileSync(path.join(migrationsDir, file), 'utf8');
 				const recovery = recoverDuplicatedColumns(db, migrationSql);
 				if (recovery.ok) {
-					migrationLogger.warn(`Migration ${name}: ${recovery.reason}`);
+					migrationLogger.warn(`Migration ${name} ${recovery.reason}`);
 					db.prepare('INSERT OR IGNORE INTO migrations (name) VALUES (?)').run(name);
 					applied.push(name);
 					continue;
@@ -266,17 +266,17 @@ function createMigration(name, migrationsDir = path.join(process.cwd(), 'migrati
 	const filepath = path.join(migrationsDir, filename);
 
 	// Create template
-	// Note: the migration runner automatically inserts the migration name into
-	// the migrations table after execution. Do NOT add another INSERT here.
-	const template = `-- Migration: ${paddedNumber}_${name}
--- Description: [Add description here]
--- Date: ${new Date().toISOString().split('T')[0]}
+	// The migration runner automatically inserts the migration name into the
+	// migrations table after execution. Do NOT add another INSERT here.
+	const template = `-- Migration ${paddedNumber}_${name}
+-- Description [Add description here]
+-- Date ${new Date().toISOString().split('T')[0]}
 
 -- Add your SQL statements here
 `;
 
 	fs.writeFileSync(filepath, template);
-	migrationLogger.info(`Created migration: ${filename}`);
+	migrationLogger.info(`Created migration ${filename}`);
 	return filepath;
 }
 

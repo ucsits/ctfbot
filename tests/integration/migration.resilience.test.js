@@ -7,17 +7,18 @@ import Database from 'better-sqlite3';
 
 // ── Strategy ───────────────────────────────────────────────────────────
 // This suite exercises the real migration runner against isolated SQLite
-// databases so the createCTF regression can never silently return:
+// databases so the createCTF regression can never silently return. Each
+// scenario below is covered.
 //
 //   * a "pre-CTFd" database (ctfs without api_token/team_mode/archived)
-//     must come out of the migration chain with api_token present, and
-//     createCTF must succeed with a non-CTFd payload.
+//     must come out of the migration chain with api_token present. createCTF
+//     must also succeed with a non-CTFd payload.
 //   * a partially drifted database (team_name already present but
-//     team_mode missing) must not abort the chain; the duplicate-column
+//     team_mode missing) must not abort the chain. The duplicate-column
 //     recovery has to add the column that is still missing.
 //   * a fresh database must end up with the full inline-schema column set.
 //
-// getConnection() resolves cwd/ctfbot.db, so each scenario chdirs into a temp
+// getConnection() resolves cwd/ctfbot.db. Each scenario chdirs into a temp
 // dir and calls closeConnection() to drop the cached handle before rebooting.
 // This mirrors tests/integration/activity.repository.test.js.
 
@@ -63,9 +64,9 @@ function appliedMigrations(db) {
 }
 
 /**
- * A plausible pre-CTFd database: ctfs and ctf_registrations in their original
- * shape (no api_token, team_mode, team_name, or ctfd_* columns) plus the
- * inline-created ctf_challenges table that migration 003 indexes.
+ * A plausible pre-CTFd database. It has ctfs and ctf_registrations in their
+ * original shape (no api_token, team_mode, team_name, or ctfd_* columns), plus
+ * the inline-created ctf_challenges table that migration 003 indexes.
  */
 function seedLegacySchema(dir) {
 	const db = new Database(join(dir, 'ctfbot.db'));
@@ -196,14 +197,14 @@ describe('migration runner resilience', () => {
 		// A row that predates multi-platform support must come out bound to the
 		// default platform, otherwise every legacy channel would need a manual
 		// /setctfplatform before it could sync again. The default lives on the
-		// column itself, so ALTER TABLE backfills existing rows with it.
+		// column itself. ALTER TABLE backfills existing rows with it.
 		const platformColumn = conn
 			.prepare('SELECT dflt_value FROM pragma_table_info(\'ctfs\') WHERE name = \'platform\'')
 			.get();
 		expect(platformColumn.dflt_value).toBe('\'ctfd\'');
 
-		// The regression: createCTF binds @api_token even for a non-CTFd
-		// organizer (api_token: null, no banner).
+		// The regression was that createCTF binds @api_token even for a non-CTFd
+		// organizer (api_token null, no banner).
 		const { ctfOperations } = require('../../src/database/index.js');
 		const id = ctfOperations.createCTF({
 			guild_id: 'guild-1',
@@ -225,7 +226,7 @@ describe('migration runner resilience', () => {
 		expect(row).toBeTruthy();
 		expect(row.ctf_name).toBe('Non-CTFd Open');
 		expect(row.api_token).toBeNull();
-		// createCTF never binds platform, so the column default is what keeps a
+		// createCTF never binds platform. The column default is what keeps a
 		// CTFd-era deployment working without any operator action.
 		expect(row.platform).toBe('ctfd');
 	});
@@ -245,7 +246,7 @@ describe('migration runner resilience', () => {
 			expect(applied).toContain(name);
 		}
 
-		// team_name already existed; team_mode did not. Both must be present,
+		// team_name already existed and team_mode did not. Both must be present,
 		// which only happens if the duplicate-column recovery replayed the
 		// migration with the already-present ALTER filtered out.
 		expect(columnsOf(conn, 'ctfs')).toContain('team_mode');

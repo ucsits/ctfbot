@@ -34,7 +34,7 @@ describe('CTF Lookup Helper', () => {
 			ctfOperations.getCTFByChannelId = vi.fn().mockReturnValue(undefined);
 
 			expect(() => getCTFForChannel('test-channel-id')).toThrow(
-				'❌ This channel is not registered as a CTF channel in the database.'
+				'This channel is not registered as a CTF channel in the database.'
 			);
 		});
 	});

@@ -1,5 +1,5 @@
 /**
- * Document repository — database operations for anchored documents
+ * Document repository for anchored documents
  * Supports both plain-text and binary file documents.
  * @module database/repositories/document
  */
@@ -11,8 +11,8 @@ const db = () => getConnection();
 /**
  * Insert a new anchored document.
  *
- * For text documents use: title, content, mimeType='text/plain'
- * For file documents use: title, fileData (Buffer), filename, fileSize, mimeType
+ * For text documents use title, content and mimeType='text/plain'.
+ * For file documents use title, fileData (Buffer), filename, fileSize and mimeType.
  *
  * @param {object} params
  * @param {string} params.docId - Unique document UUID

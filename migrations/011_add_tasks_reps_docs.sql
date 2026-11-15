@@ -1,4 +1,4 @@
--- Migration 011: Add tasks, reputation, and document tables
+-- Migration 011. Add tasks, reputation, and document tables
 -- for blockchain-integrated features.
 
 CREATE TABLE IF NOT EXISTS tasks (

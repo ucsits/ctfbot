@@ -1,19 +1,20 @@
--- Migration 028: Proactive chat, channel memory and search cache
+-- Migration 028. Proactive chat, channel memory and search cache
 --
--- channel_chat_state holds the per-channel gate for proactive messages:
+-- channel_chat_state holds the per-channel gate for proactive messages.
 -- mute (until the next local midnight), adaptive backoff after being ignored,
--- the last time the bot spoke and whether anyone engaged with it, and the
+-- the last time the bot spoke and whether anyone engaged with it. It also
 -- hourly/daily send budget.
 --
 -- guild_chat_state caps the whole guild per day so a server with many busy
 -- channels cannot run up an unbounded model bill.
 --
--- channel_memory is what the bot knows about a channel: its topic, recurring
--- jargon, house rules and things it already said, so it stops repeating
--- itself. actor_memories (migration 027) keeps covering individual people.
+-- channel_memory is what the bot knows about a channel. That covers its topic,
+-- its recurring jargon, the house rules and the things it already said. It
+-- therefore stops repeating itself. actor_memories (migration 027) keeps
+-- covering individual people.
 --
--- search_cache and search_spend make web search cheap: identical queries are
--- served from cache for a day, and a daily credit cap stops a loop from
+-- search_cache and search_spend make web search cheap. Identical queries are
+-- served from cache for a day. A daily credit cap stops a loop from
 -- draining the SerpBase account.
 
 CREATE TABLE IF NOT EXISTS channel_chat_state (

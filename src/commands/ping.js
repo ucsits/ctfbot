@@ -14,7 +14,7 @@ class PingCommand extends Command {
 
 		const ping = Math.round(this.container.client.ws.ping);
 
-		return message.edit(`Pong! 🏓\nAPI Latency: ${ping}ms`);
+		return message.edit(`Pong!\nAPI latency is ${ping}ms`);
 	}
 
 	async chatInputRun(interaction) {
@@ -22,7 +22,7 @@ class PingCommand extends Command {
 
 		const ping = Math.round(this.container.client.ws.ping);
 
-		return interaction.editReply(`Pong! 🏓\nAPI Latency: ${ping}ms`);
+		return interaction.editReply(`Pong!\nAPI latency is ${ping}ms`);
 	}
 }
 

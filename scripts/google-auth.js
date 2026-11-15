@@ -5,8 +5,9 @@
  * Starts a listener on 127.0.0.1, prints the consent URL, waits for Google to
  * redirect back with a code, exchanges it, and prints GOOGLE_REFRESH_TOKEN.
  *
- * Usage: pnpm google:auth   (reads GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET
- * from .env; the OAuth client must be of the "Desktop app" type)
+ * Usage is `pnpm google:auth`. It reads GOOGLE_CLIENT_ID and
+ * GOOGLE_CLIENT_SECRET from .env. The OAuth client must be of the "Desktop
+ * app" type.
  */
 
 require('dotenv/config');

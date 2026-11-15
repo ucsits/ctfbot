@@ -1,5 +1,5 @@
 /**
- * Reputation repository: database operations for rep ledger
+ * Reputation repository for the rep ledger
  * @module database/repositories/reputation
  */
 
@@ -55,10 +55,11 @@ function addReputation({ userId, fromUser, amount, reason, blockHeight }) {
  * The daily limit used to be a read-then-write check (`hasGivenRepToday`
  * followed by an async blockchain append and then `addReputation`), which two
  * concurrent reactions or replies could both pass. This turns the check into a
- * single conditional insert so exactly one caller can win the day.
+ * single conditional insert. Exactly one caller can then win the day.
  *
  * `block_height` starts at 0 and is stamped by `finalizeReputationBlock` once
- * the chain write succeeds, so an unconfirmed claim is visible as height 0.
+ * the chain write succeeds. An unconfirmed claim is therefore visible as height
+ * 0.
  *
  * @param {object} params
  * @param {string} params.userId - recipient
@@ -98,7 +99,7 @@ function finalizeReputationBlock({ fromUser, date, blockHeight }) {
 }
 
 /**
- * Release a claim whose blockchain append failed, so the giver can retry.
+ * Release a claim whose blockchain append failed. The giver can then retry.
  *
  * @param {object} params
  * @param {string} params.fromUser - giver

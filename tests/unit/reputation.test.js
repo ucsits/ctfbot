@@ -6,7 +6,7 @@ import { join } from 'path';
 // ── Strategy ───────────────────────────────────────────────────────────
 // The reputation daily limit used to be a read-check-then-write race across an
 // awaited blockchain append. These tests hold the new atomic claim primitives
-// to the behaviour that makes the race impossible:
+// to the behaviour that makes the race impossible.
 //
 //   * claimDailyReputation wins exactly once per (from_user, UTC date)
 //   * awardReputation appends exactly one block and stamps its height
@@ -14,7 +14,7 @@ import { join } from 'path';
 //
 // A real SQLite database is used (temp cwd copy of ctfbot.db) so the UNIQUE
 // (from_user, date) index is genuinely exercised. The blockchain writer is
-// injected, so no network call is made.
+// injected. No network call is made.
 
 let tmpDir;
 let originalCwd;
@@ -73,7 +73,7 @@ describe('claimDailyReputation', () => {
 
 		const rows = db.prepare('SELECT * FROM reputations WHERE from_user = ?').all('giver-claim');
 		expect(rows.length).toBe(1);
-		// The first writer owns the row; the loser does not overwrite it.
+		// The first writer owns the row. The loser does not overwrite it.
 		expect(rows[0].user_id).toBe('recipient-claim');
 	});
 
@@ -153,7 +153,7 @@ describe('awardReputation', () => {
 
 		expect(status).toBe('already-given');
 		expect(calls.length).toBe(0);
-		// The original recipient keeps the point; the second target gets nothing.
+		// The original recipient keeps the point. The second target gets nothing.
 		expect(repo.getUserTotal('recipient-b')).toBe(0);
 		expect(repo.getUserTotal('recipient-a')).toBe(1);
 	});

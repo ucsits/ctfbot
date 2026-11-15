@@ -3,9 +3,9 @@
  *
  * A solve synced from a platform can belong to someone who has not run
  * /registerctf. Those rows are parked under `<prefix>:<platform user id>` so the
- * solve is preserved, and /registerctf claims them later by rewriting user_id to
- * the Discord id. The prefix is per platform because the same numeric id means
- * different people on different platforms, and a shared namespace would let one
+ * solve is preserved. /registerctf claims them later by rewriting user_id to the
+ * Discord id. The prefix is per platform because the same numeric id means
+ * different people on different platforms. A shared namespace would let one
  * platform's pending solve be claimed by the other's registration.
  *
  * @module platform/syntheticUser
@@ -13,7 +13,7 @@
 
 const { DEFAULT_PLATFORM } = require('../constants/platforms');
 
-/** Prefixes are stable once shipped: existing rows already use them. */
+/** Prefixes are stable once shipped. Existing rows already use them. */
 const PREFIX_BY_PLATFORM = {
 	ctfd: 'ctfd',
 	noctf: 'noctf'

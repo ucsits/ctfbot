@@ -4,12 +4,12 @@ import { join } from 'path';
 import { createRequire } from 'module';
 
 // -- Strategy ---------------------------------------------------------------
-// The registry is exercised for real. Only globalThis.fetch is faked, so the
+// The registry is exercised for real. Only globalThis.fetch is faked. The
 // CTFd adapter tests observe the requests the real CTFdClient puts on the wire
 // and the shapes the adapter returns to commands.
 //
 // The migration file is asserted on its text because that is the artifact the
-// migration runner consumes; a mocked SQLite database would not catch a typo in
+// migration runner consumes. A mocked SQLite database would not catch a typo in
 // the file the bot actually ships.
 
 const require = createRequire(import.meta.url);
@@ -137,7 +137,7 @@ describe('platform registry', () => {
 		const noctf = createPlatformClient('noctf', 'https://api.example.com', 'token');
 
 		expect(typeof ctfd.raw.getUserSolves).toBe('function');
-		// noCTF has no wrapped client, so callers guard before reaching for raw.
+		// noCTF has no wrapped client. Callers guard before reaching for raw.
 		expect(noctf.raw).toBeUndefined();
 	});
 });
@@ -205,7 +205,7 @@ describe('CTFd adapter', () => {
 		await expect(makeCTFdAdapter().getAllSolves()).rejects.toThrow(/does not support bulk solve listing/);
 	});
 
-	it('offers no user name resolver, so unregistered labels stay id based', async () => {
+	it('offers no user name resolver, which keeps unregistered labels id based', async () => {
 		const calls = stubFetch([]);
 
 		const names = await makeCTFdAdapter().resolveUserNames([1, 2, 3]);

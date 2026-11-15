@@ -1,30 +1,31 @@
 /**
  * Fuzzy title/description matching for tasks.
  *
- * Personnel complete or cancel tasks by name, not just UUID. Because a title
- * query can be a typo, a partial phrase, or a paraphrase of the description,
- * we score candidates with a lightweight, dependency-free algorithm:
+ * Tasks are completed or cancelled by name, not only by UUID. A title query
+ * can be a typo, a partial phrase, or a paraphrase of the description. The
+ * scorer is lightweight and dependency-free. It combines three signals.
  *
- *   1. Token overlap — how many query tokens appear (as words or substrings)
- *      in the searchable text, weighted by coverage of the query.
- *   2. Subsequence bonus — query characters appearing in order (e.g. "upd
- *      doc" matching "Update documentation") reward partial-but-ordered input.
- *   3. Exact-title / prefix-title bonuses — an exact or prefix match on the
- *      title alone outranks a description-only match, so "Fix bug" beats a
- *      task that merely mentions "fix bug" in its description.
+ *   1. Token overlap, meaning how many query tokens appear (as words or
+ *      substrings) in the searchable text, weighted by coverage of the query.
+ *   2. Subsequence bonus, for query characters appearing in order (e.g. "upd
+ *      doc" matching "Update documentation"), which rewards partial but
+ *      ordered input.
+ *   3. Exact-title and prefix-title bonuses, where an exact or prefix match on
+ *      the title alone outranks a description-only match. "Fix bug" therefore
+ *      beats a task that merely mentions "fix bug" in its description.
  *
  * The score is normalized to [0, 1]. A hard threshold (MIN_FUZZY_SCORE)
- * separates plausible matches from noise; below it we report "no task found"
- * rather than risk marking the wrong task done.
+ * separates plausible matches from noise. Below it the result is "no task
+ * found" rather than a risky guess at the wrong task.
  *
  * @module utils/fuzzyMatch
  */
 
 /**
  * Minimum score a candidate must reach to be considered a match.
- * Calibrated so that: a full exact title match ≈ 1.0, a prefix title match
- * ("deploy" → "deploy staging") > 0.65, a single-typo title match > 0.55,
- * and a weak description-only overlap ("the" vs an unrelated task) stays
+ * The calibration is a full exact title match ≈ 1.0, a prefix title match
+ * ("deploy" → "deploy staging") above 0.65, a single-typo title match above
+ * 0.55, and a weak description-only overlap ("the" against an unrelated task)
  * well below 0.35.
  */
 const MIN_FUZZY_SCORE = 0.4;
@@ -37,7 +38,7 @@ const MIN_FUZZY_SCORE = 0.4;
 const AMBIGUITY_BAND = 0.08;
 
 /**
- * Normalize text for comparison: lowercase, collapse whitespace.
+ * Normalize text for comparison. Lowercase it and collapse whitespace.
  * @param {string} text
  * @returns {string}
  */
@@ -63,7 +64,7 @@ function scoreTask(query, task) {
 	const title = canonicalize(task.title);
 	const description = canonicalize(task.description);
 
-	// Exact title match — the clearest possible hit.
+	// Exact title match, the clearest possible hit.
 	if (title === q) {
 		return 1;
 	}
@@ -97,7 +98,7 @@ function scoreTask(query, task) {
 	// Average per-token match quality (exact word beats substring).
 	const perToken = totalWeight ? tokenScore / totalWeight : 0;
 
-	// Subsequence bonus: query characters in order anywhere in title/desc.
+	// Subsequence bonus. Query characters in order anywhere in title or desc.
 	// Rewards "upd doc" → "update documentation" even without word overlap.
 	let subseq = 0;
 	if (q.length >= 3 && !coverage) {
@@ -114,8 +115,9 @@ function scoreTask(query, task) {
 		}
 	}
 
-	// Title-prefix handled above; also give a smaller bonus when a significant
-	// fraction of the query tokens hit the title (title is a stronger signal).
+	// Title-prefix is handled above. Also give a smaller bonus when a significant
+	// fraction of the query tokens hit the title, since the title is a stronger
+	// signal.
 	const titleBoost = coverage >= 0.5 && matchedWeight > 0 ? 0.1 : 0;
 
 	const score = coverage * 0.7 + perToken * 0.2 + titleBoost + subseq;
@@ -146,7 +148,7 @@ function resolveTaskCandidates({ query, tasks, minScore = MIN_FUZZY_SCORE }) {
 		return [];
 	}
 
-	// Ambiguity handling: if the top two candidates are within the band, keep
+	// Ambiguity handling. If the top two candidates are within the band, keep
 	// them all so the caller can offer a picker. Otherwise only the clear
 	// winner is returned (it will still be confirmed before execution).
 	if (scored.length >= 2 && scored[0].score - scored[1].score <= AMBIGUITY_BAND) {

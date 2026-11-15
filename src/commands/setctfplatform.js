@@ -73,7 +73,7 @@ class SetCTFPlatformCommand extends Command {
 	}
 
 	async chatInputRun(interaction) {
-		// Both guards reply directly, so they must run before the deferral.
+		// Both guards reply directly. They must run before the deferral.
 		const cancelled = await checkPermissionReply(
 			interaction,
 			PermissionFlagsBits.ManageChannels,
@@ -101,7 +101,7 @@ class SetCTFPlatformCommand extends Command {
 			}
 			return await this.updatePlatform(interaction, ctf);
 		} catch (error) {
-			this.container.logger.error('Error in setctfplatform command:', error);
+			this.container.logger.error('Error in setctfplatform command', error);
 			return interaction.editReply('Failed to update the CTF platform configuration. Please try again later.');
 		}
 	}
@@ -229,11 +229,11 @@ class SetCTFPlatformCommand extends Command {
 	 */
 	_describeConnection(connection) {
 		if (!connection.ok) {
-			return '❌ Could not reach the platform API. Check the API base URL and try again.';
+			return 'Could not reach the platform API. Check the API base URL and try again.';
 		}
 
 		const details = connection.details || {};
-		const parts = ['✅ Connected'];
+		const parts = ['Connected'];
 
 		if (details.active !== null && details.active !== undefined) {
 			parts.push(details.active ? 'CTF is active' : 'CTF is not active yet');
@@ -253,14 +253,14 @@ class SetCTFPlatformCommand extends Command {
 
 	/**
 	 * noCTF refuses challenge and scoreboard reads outside the event window unless
-	 * the token carries admin policies, so an operator who skips the token should
+	 * the token carries admin policies. An operator who skips the token should
 	 * know exactly what will not work.
 	 *
 	 * @private
 	 * @returns {string}
 	 */
 	_noTokenWarning() {
-		return 'No token is configured, so syncing before the CTF start time is not possible and hidden challenges will not be visible.';
+		return 'No token is configured. Syncing before the CTF start time is not possible, and hidden challenges will not be visible.';
 	}
 }
 

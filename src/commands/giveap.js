@@ -55,10 +55,10 @@ class GiveApCommand extends Command {
 		const points = interaction.options.getInteger('points');
 
 		if (!user && !role) {
-			return interaction.editReply('❌ You must provide either a `user` or a `role` to grant points to.');
+			return interaction.editReply('You must provide either a `user` or a `role` to grant points to.');
 		}
 		if (user && role) {
-			return interaction.editReply('❌ Provide either a `user` **or** a `role`, not both.');
+			return interaction.editReply('Provide either a `user` **or** a `role`, not both.');
 		}
 
 		// ── Single user grant ──
@@ -66,7 +66,7 @@ class GiveApCommand extends Command {
 			return this._grantToUser(interaction, user, points);
 		}
 
-		// ── Role grant: fetch members and grant to each (one batch block) ──
+		// Role grant. Fetch members and grant to each in one batch block.
 		return this._grantToRole(interaction, role, points);
 	}
 
@@ -82,8 +82,8 @@ class GiveApCommand extends Command {
 
 			const block = await luce.appendBlock({ author: interaction.user.id, data });
 
-			// One all-or-nothing batch, idempotent on the interaction id, so a retry
-			// of this same invocation cannot credit the user twice.
+			// One all-or-nothing batch, idempotent on the interaction id. A retry of
+			// this same invocation cannot credit the user twice.
 			const { applied, balances } = activityRepository.grantPointsMany({
 				batchKey: interaction.id,
 				entries: [{ discord_id: user.id, points }],
@@ -93,7 +93,7 @@ class GiveApCommand extends Command {
 
 			if (!applied) {
 				return interaction.editReply(
-					'⚠️ These points were already granted for this action; nothing was changed.'
+					'These points were already granted for this action. Nothing was changed.'
 				);
 			}
 
@@ -101,7 +101,7 @@ class GiveApCommand extends Command {
 
 			const embed = new EmbedBuilder()
 				.setColor(0x9b59b6)
-				.setTitle('🎯 Activity Points Granted')
+				.setTitle('Activity Points Granted')
 				.setDescription(`${user} was granted **${points} AP**`)
 				.addFields(
 					{ name: 'User', value: user.toString(), inline: true },
@@ -113,8 +113,8 @@ class GiveApCommand extends Command {
 
 			return interaction.editReply({ embeds: [embed] });
 		} catch (error) {
-			this.container.logger.error('Error granting activity points:', error);
-			return interaction.editReply('❌ Failed to grant activity points. Blockchain error: ' + error.message);
+			this.container.logger.error('Error granting activity points', error);
+			return interaction.editReply('Failed to grant activity points. Blockchain error. ' + error.message);
 		}
 	}
 
@@ -123,17 +123,17 @@ class GiveApCommand extends Command {
 		try {
 			const guild = interaction.guild;
 			if (!guild) {
-				return interaction.editReply('❌ This command must be run inside a server.');
+				return interaction.editReply('This command must be run inside a server.');
 			}
 			const fetched = await guild.members.fetch();
 			members = [...fetched.values()].filter(m => !m.user.bot && m.roles.cache.has(role.id));
 		} catch (error) {
-			this.container.logger.error('Error fetching role members:', error);
-			return interaction.editReply('❌ Failed to fetch members of that role.');
+			this.container.logger.error('Error fetching role members', error);
+			return interaction.editReply('Failed to fetch members of that role.');
 		}
 
 		if (members.length === 0) {
-			return interaction.editReply(`❌ No human members found in role **${role.name}**.`);
+			return interaction.editReply(`No human members found in role **${role.name}**.`);
 		}
 
 		try {
@@ -159,19 +159,19 @@ class GiveApCommand extends Command {
 				batchKey: interaction.id,
 				entries,
 				grantedBy: interaction.user.id,
-				note: `role grant: ${role.name}`,
+				note: `role grant ${role.name}`,
 				blockHeight: block.height
 			});
 
 			if (!applied) {
 				return interaction.editReply(
-					'⚠️ These points were already granted for this action; nothing was changed.'
+					'These points were already granted for this action. Nothing was changed.'
 				);
 			}
 
 			const embed = new EmbedBuilder()
 				.setColor(0x9b59b6)
-				.setTitle('🎯 Activity Points Granted to Role')
+				.setTitle('Activity Points Granted to Role')
 				.setDescription(`**${members.length}** member(s) of **${role.name}** each received **+${points} AP**`)
 				.addFields(
 					{ name: 'Role', value: role.toString(), inline: true },
@@ -196,8 +196,8 @@ class GiveApCommand extends Command {
 
 			return interaction.editReply({ embeds: [embed] });
 		} catch (error) {
-			this.container.logger.error('Error granting points to role:', error);
-			return interaction.editReply('❌ Failed to grant points to role. Blockchain error: ' + error.message);
+			this.container.logger.error('Error granting points to role', error);
+			return interaction.editReply('Failed to grant points to role. Blockchain error. ' + error.message);
 		}
 	}
 }

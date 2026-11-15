@@ -30,7 +30,7 @@ const registrationOperations = {
 	/**
 	 * Attach a platform account to an existing registration.
 	 *
-	 * Only the two platform-derived columns are touched: username and team_name
+	 * Only the two platform-derived columns are touched. username and team_name
 	 * are what the member typed and must not be overwritten by a sync. This is
 	 * the repair path for registrations made before a platform credential was
 	 * configured, which stored ctfd_user_id as NULL and could never be matched to
@@ -50,10 +50,10 @@ const registrationOperations = {
 			SET ctfd_user_id = ?, ctfd_team_name = ?
 			WHERE ctf_id = ? AND user_id = ?
 		`);
-		// Stored as a plain string: better-sqlite3 binds a JS number as a double, so
-		// an uncoerced 1706 lands in this TEXT column as '1706.0'. The synthetic
-		// solve ids are built from the integer form, and matching those is the whole
-		// point of the column, so the canonical form is the integer string.
+		// Stored as a plain string. better-sqlite3 binds a JS number as a double.
+		// An uncoerced 1706 therefore lands in this TEXT column as '1706.0'. The
+		// synthetic solve ids are built from the integer form. Matching those is the
+		// whole point of the column. The canonical form is the integer string.
 		return stmt.run(String(ctfd_user_id), ctfd_team_name ?? null, ctfId, userId).changes;
 	},
 

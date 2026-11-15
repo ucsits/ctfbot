@@ -1,17 +1,18 @@
 /**
  * [OI]-compatible Chat Completions client.
  *
- * Fetch-based (no SDK dependency) so it works against any provider exposing
- * POST {OPENAI_BASE_URL}/chat/completions — [OI], OpenRouter, Groq, Ollama,
- * vLLM, LiteLLM and similar.
+ * It is fetch based and has no SDK dependency. That makes it work against any
+ * provider that exposes POST {OPENAI_BASE_URL}/chat/completions, such as [OI],
+ * OpenRouter, Groq, Ollama, vLLM and LiteLLM.
  *
- * Two entry points:
- * - `chatCompletion` — one round trip, returns the assistant text. Used by the
- *   task-suggestion pass, which asks for a JSON object.
- * - `runWithTools` — multi-round tool calling, for the proactive chat service.
+ * It has two entry points.
+ * - `chatCompletion` makes one round trip and returns the assistant text. Used
+ *   by the task-suggestion pass, which asks for a JSON object.
+ * - `runWithTools` handles multi-round tool calling for the proactive chat
+ *   service.
  *
- * `json: true` and `tools` are mutually exclusive on many compatible
- * providers, so the two entry points never mix them.
+ * `json: true` and `tools` are mutually exclusive on many compatible providers.
+ * The two entry points therefore never mix them.
  *
  * @module lib/llm/openai
  */
@@ -52,7 +53,7 @@ async function _request({ messages, json = false, tools, toolChoice, temperature
 	const timeoutMs = config.llm.timeoutMs;
 	const promptChars = messages.reduce((n, m) => n + (m.content?.length ?? 0), 0);
 	llmLog.debug(
-		`Chat completion request: model=${config.llm.model} messages=${messages.length} chars=${promptChars} json=${json} tools=${tools?.length ?? 0} effort=${reasoningEffort ?? 'default'}`
+		`Chat completion request with model=${config.llm.model} messages=${messages.length} chars=${promptChars} json=${json} tools=${tools?.length ?? 0} effort=${reasoningEffort ?? 'default'}`
 	);
 	const startedAt = Date.now();
 	let res;
@@ -69,19 +70,19 @@ async function _request({ messages, json = false, tools, toolChoice, temperature
 	} catch (error) {
 		// Name the endpoint and model so a slow or unreachable provider is
 		// obvious from the log line alone.
-		llmLog.warn(`Chat completion request failed after ${Date.now() - startedAt}ms: ${error.name}`);
+		llmLog.warn(`Chat completion request failed after ${Date.now() - startedAt}ms ${error.name}`);
 		if (error.name === 'TimeoutError') {
 			throw new Error(
-				`No reply from ${url} (model ${config.llm.model}) within ${timeoutMs / 1000}s; raise OPENAI_TIMEOUT_MS or use a faster model`
+				`No reply from ${url} (model ${config.llm.model}) within ${timeoutMs / 1000}s. Raise OPENAI_TIMEOUT_MS or use a faster model`
 			);
 		}
-		throw new Error(`Request to ${url} failed: ${error.cause?.message ?? error.message}`);
+		throw new Error(`Request to ${url} failed ${error.cause?.message ?? error.message}`);
 	}
 	const elapsedMs = Date.now() - startedAt;
 
 	if (!res.ok) {
 		const errBody = await res.text().catch(() => '');
-		llmLog.error(`Chat completion failed (${res.status}) after ${elapsedMs}ms: ${errBody.slice(0, 500)}`);
+		llmLog.error(`Chat completion failed (${res.status}) after ${elapsedMs}ms ${errBody.slice(0, 500)}`);
 		throw new Error(`Chat completion failed (${res.status})`);
 	}
 
@@ -96,7 +97,7 @@ async function _request({ messages, json = false, tools, toolChoice, temperature
 	);
 	if (choice?.finish_reason === 'length') {
 		llmLog.warn(
-			`Chat completion from ${config.llm.model} was cut off at the token limit; the reply may be incomplete`
+			`Chat completion from ${config.llm.model} was cut off at the token limit. The reply may be incomplete`
 		);
 	}
 	if (!message) {
@@ -114,7 +115,7 @@ async function _request({ messages, json = false, tools, toolChoice, temperature
  * @param {number} [params.temperature=0]
  * @param {'low'|'medium'|'high'} [params.reasoningEffort] - Sent as the
  *   top-level `reasoning_effort` field, which both [OI] and DeepSeek read
- *   (DeepSeek maps it to low/high/max); omitted when not given
+ *   (DeepSeek maps it to low/high/max). Omitted when not given.
  */
 async function chatCompletion({ messages, json = false, temperature = 0, reasoningEffort }) {
 	const { message } = await _request({ messages, json, temperature, reasoningEffort });
@@ -150,8 +151,8 @@ function parseJsonReply(reply) {
  * immediately with `stopped: true` and no text, which is how the chat service
  * models a deliberate decision to stay silent.
  *
- * The loop is bounded twice: by `maxIterations`, and by the provider timeout
- * on each request. When iterations run out, one final request is made without
+ * The loop is bounded twice, by `maxIterations` and by the provider timeout on
+ * each request. When iterations run out, one final request is made without
  * tools so the caller still gets an answer instead of nothing.
  *
  * @param {object} params
@@ -204,8 +205,8 @@ async function runWithTools({
 			try {
 				result = await dispatch(name, args);
 			} catch (error) {
-				llmLog.warn(`Tool ${name} failed: ${error.message}`);
-				result = `tool failed: ${error.message}`;
+				llmLog.warn(`Tool ${name} failed ${error.message}`);
+				result = `tool failed ${error.message}`;
 			}
 			const content = typeof result === 'string' ? result : (result?.content ?? '');
 			if (typeof result === 'object' && result?.stop) {
@@ -218,7 +219,7 @@ async function runWithTools({
 		}
 	}
 
-	// Out of iterations: ask once more with no tools so there is still a reply.
+	// Out of iterations. Ask once more with no tools. That still produces a reply.
 	const { message } = await _request({ messages: convo, temperature, reasoningEffort });
 	convo.push(message);
 	return { text: message.content ?? '', messages: convo, toolCalls, stopped: false, exhausted: true };

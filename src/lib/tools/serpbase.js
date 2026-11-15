@@ -3,14 +3,14 @@
  *
  * One endpoint, `POST https://api.serpbase.dev/google/search`, authenticated
  * with the `X-API-Key` header. The raw response can be tens of kilobytes of
- * page furniture, so it is compacted to five organic results plus a few
+ * page furniture. It is compacted to five organic results plus a few
  * "people also ask" questions before it goes anywhere near the prompt.
  *
  * Results are cached per normalised query for a day and charged against a
- * daily credit cap, so a model that likes a phrase cannot drain the account.
+ * daily credit cap. A model that likes a phrase cannot drain the account.
  *
- * The API key is read from `SERPBASE_API_KEY` only. It must never be logged:
- * this module never prints headers, and error messages name the status code.
+ * The API key is read from `SERPBASE_API_KEY` only. It must never be logged.
+ * This module never prints headers. Error messages name the status code.
  *
  * @module lib/tools/serpbase
  */
@@ -26,7 +26,7 @@ const MAX_RESULTS = 5;
 const MAX_QUESTIONS = 3;
 const TITLE_CHARS = 120;
 const SNIPPET_CHARS = 200;
-// A Google search costs one credit. Failed searches are free, so only a
+// A Google search costs one credit. Failed searches are free. Only a
 // successful response is charged.
 const CREDITS_PER_SEARCH = 1;
 
@@ -74,8 +74,8 @@ function _compact(data, limit = MAX_RESULTS) {
 /**
  * Search Google through SerpBase.
  *
- * Never throws: a search is a best-effort enrichment, and the caller must
- * still be able to talk without it. Every failure comes back as
+ * Never throws. A search is a best-effort enrichment. The caller must still be
+ * able to talk without it. Every failure comes back as
  * `{ ok: false, error }` with a message the model can read.
  *
  * @param {string} query
@@ -101,8 +101,8 @@ async function search(query, { limit = MAX_RESULTS } = {}) {
 
 	const cap = config.chat.search.dailyCredits;
 	if (cap > 0 && searchCache.spentToday() >= cap) {
-		searchLog.warn(`Daily search credit cap reached (${cap}); refusing "${_clip(q, 80)}"`);
-		return { ok: false, error: `daily search credit cap reached (${cap}); answer without search` };
+		searchLog.warn(`Daily search credit cap reached (${cap}). Refusing "${_clip(q, 80)}"`);
+		return { ok: false, error: `daily search credit cap reached (${cap}). Answer without search` };
 	}
 
 	let res;
@@ -122,15 +122,15 @@ async function search(query, { limit = MAX_RESULTS } = {}) {
 			signal: AbortSignal.timeout(config.chat.search.timeoutMs)
 		});
 	} catch (error) {
-		// Name the failure, never the headers: the API key lives in one.
-		searchLog.warn(`Search request failed for "${_clip(q, 80)}": ${error.name}`);
+		// Name the failure, never the headers. The API key lives in one.
+		searchLog.warn(`Search request failed for "${_clip(q, 80)}" ${error.name}`);
 		return { ok: false, error: 'search request failed' };
 	}
 
 	if (!res.ok) {
 		searchLog.warn(`Search failed (${res.status}) for "${_clip(q, 80)}"`);
-		// 4xx means the key, the quota or the request is wrong: retrying will
-		// not help, so report it and let the model answer without search.
+		// 4xx means the key, the quota or the request is wrong. Retrying will not
+		// help. Report it and let the model answer without search.
 		return { ok: false, error: `search failed (${res.status})` };
 	}
 
@@ -152,7 +152,7 @@ async function search(query, { limit = MAX_RESULTS } = {}) {
 	searchCache.put(key, compact);
 	const total = searchCache.addSpend(credits);
 	searchLog.debug(
-		`Search for "${_clip(q, 80)}": ${compact.organic.length} result(s), ${credits} credit(s), ${total}/${cap || '∞'} today`
+		`Search for "${_clip(q, 80)}" ${compact.organic.length} result(s), ${credits} credit(s), ${total}/${cap || '∞'} today`
 	);
 	if (cap > 0 && total >= cap) {
 		searchLog.warn(`Daily search credit cap reached (${total}/${cap})`);
@@ -164,7 +164,7 @@ async function search(query, { limit = MAX_RESULTS } = {}) {
 /**
  * Format results for the model. The payload is wrapped in an explicit
  * delimiter and labelled untrusted, because a snippet is text someone else
- * wrote: it must never be read as an instruction to the model.
+ * wrote. It must never be read as an instruction to the model.
  *
  * @returns {string}
  */
@@ -177,13 +177,13 @@ function formatForModel(query, result) {
 		lines.push('(no results)');
 	}
 	result.organic.forEach((r, i) => {
-		lines.push(`${i + 1}. ${r.title} — ${r.url}`);
+		lines.push(`${i + 1}. ${r.title} (${r.url})`);
 		if (r.snippet) {
 			lines.push(`   ${r.snippet}`);
 		}
 	});
 	if (result.questions.length > 0) {
-		lines.push(`people also ask: ${result.questions.join(' | ')}`);
+		lines.push(`people also ask ${result.questions.join(' | ')}`);
 	}
 	lines.push('</search_results>');
 	lines.push(

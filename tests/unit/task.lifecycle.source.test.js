@@ -1,16 +1,16 @@
 import { describe, it, expect } from 'vitest';
 
 // ── Strategy ───────────────────────────────────────────────────────────
-// This project's modules are CommonJS, and vitest (v4, node environment)
+// This project's modules are CommonJS. vitest (v4, node environment)
 // does not intercept `require()` calls made from inside CJS modules here
 // (verified empirically). `vi.mock` factories only affect ESM `import`.
-// Therefore, behavior tests for the task command use two reliable layers:
+// Behavior tests for the task command therefore use two reliable layers.
 //
-//   1. Source-inspection assertions (this file): guarantee the user-facing
+//   1. Source-inspection assertions in this file. They guarantee the user-facing
 //      strings, validation rules, pagination, and lifecycle ordering exist
-//      in the code, so they cannot silently regress.
+//      in the code. They cannot silently regress.
 //
-//   2. Real-repository integration tests (task.repository.test.js): prove
+//   2. Real-repository integration tests in task.repository.test.js. They prove
 //      claims, completion, cancellation, and digest-part idempotency work
 //      against a real SQLite database.
 
@@ -57,9 +57,9 @@ describe('/task add input hardening', () => {
 		const addMethod = taskCommand.slice(taskCommand.indexOf('async _add'), taskCommand.indexOf('async _list'));
 
 		// The task row and every reminder commit together via
-		// createTaskWithReminders, so a partial schedule cannot be left behind.
+		// createTaskWithReminders. A partial schedule cannot be left behind.
 		// This replaces an earlier assertion that only checked block-before-DB
-		// ordering and wrongly described that ordering as orphan prevention: a
+		// ordering and wrongly described that ordering as orphan prevention. A
 		// block-first order turns a would-be orphan task row into an orphan
 		// blockchain block, which is not prevention.
 		expect(addMethod).toContain('taskRepository.createTaskWithReminders');
@@ -167,23 +167,23 @@ describe('task lifecycle transitions', () => {
 	});
 
 	it('reports concurrent loss without claiming success', () => {
-		expect(taskCommand).toContain('already updated by another action; no completion was recorded');
-		expect(taskCommand).toContain('already updated by another action; no cancellation was recorded');
+		expect(taskCommand).toContain('already updated by another action. No completion was recorded');
+		expect(taskCommand).toContain('already updated by another action. No cancellation was recorded');
 	});
 
 	it('separates persistence from reply so reply failures do not lie', () => {
-		// Persistence happens inside _execute*; the final success/failure content
+		// Persistence happens inside _execute*. The final success/failure content
 		// is returned to the caller (button listener) after the DB write.
 		const doneMethod = taskCommand.slice(
 			taskCommand.indexOf('async _executeDone'),
 			taskCommand.indexOf('async _executeCancel')
 		);
 		expect(doneMethod.indexOf('completeTask')).toBeLessThan(doneMethod.indexOf('marked as done!'));
-		expect(doneMethod).toContain('No completion was recorded; please try again');
+		expect(doneMethod).toContain('No completion was recorded. Please try again');
 
 		const cancelMethod = taskCommand.slice(taskCommand.indexOf('async _executeCancel'));
 		expect(cancelMethod.indexOf('cancelTask')).toBeLessThan(cancelMethod.indexOf('has been cancelled'));
-		expect(cancelMethod).toContain('No cancellation was recorded; please try again');
+		expect(cancelMethod).toContain('No cancellation was recorded. Please try again');
 	});
 
 	it('exposes button namespaces and deny/picker no-op behavior', () => {
@@ -216,7 +216,7 @@ describe('task confirm button listener', () => {
 	});
 
 	it('deny buttons close the prompt without recording anything', () => {
-		expect(interactionCreate).toContain('nothing was recorded');
+		expect(interactionCreate).toContain('Nothing was recorded');
 		expect(interactionCreate).toContain('components: []');
 	});
 
@@ -276,12 +276,12 @@ describe('Luce audit notification rendering', () => {
 	});
 });
 
-// ── Regression: known production fixes stay in place ───────────────────
+// ── Regression guards for known production fixes ───────────────────────
 describe('regression guards for prior fixes', () => {
 	it('does not mention users with raw <@id> syntax in embed fields', () => {
-		// Clean mention syntax: display names instead of raw snowflakes in
+		// Clean mention syntax, with display names instead of raw snowflakes in
 		// audit embeds (the fix from the audit notifications pass)
-		expect(luce).not.toContain("content: `✅ Task **${'${taskId}'}** marked as done!`");
+		expect(luce).not.toMatch(/[\u{1F300}-\u{1FAFF}]/u);
 	});
 
 	it('keeps Asia/Jakarta as the canonical reporting timezone everywhere', () => {
@@ -307,8 +307,8 @@ describe('task transition anchoring', () => {
 			expect(beginAt).toBeGreaterThan(-1);
 			expect(appendAt).toBeGreaterThan(-1);
 			expect(setAt).toBeGreaterThan(-1);
-			// The idempotency record is written before the append, and only an
-			// unrecorded height is allowed to reach the blockchain.
+			// The idempotency record is written before the append. Only an unrecorded
+			// height is allowed to reach the blockchain.
 			expect(beginAt).toBeLessThan(appendAt);
 			expect(appendAt).toBeLessThan(setAt);
 			expect(method).toContain('transition.block_height === null');

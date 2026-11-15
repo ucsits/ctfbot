@@ -1,4 +1,4 @@
--- Migration 014: Activity points economy
+-- Migration 014. Activity points economy
 -- Adds the activity board ledger, running balances, store catalog, and purchases.
 -- Every AP transaction corresponds to a Luce blockchain block.
 
@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS store_items (
     rp_price    INTEGER NOT NULL DEFAULT 0
 );
 
--- Purchase records. AP purchases complete immediately; Rp purchases start
+-- Purchase records. AP purchases complete immediately. Rp purchases start
 -- 'pending' and an admin confirms them once payment arrives offline.
 CREATE TABLE IF NOT EXISTS purchases (
     id             TEXT PRIMARY KEY,                  -- uuid

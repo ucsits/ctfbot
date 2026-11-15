@@ -4,11 +4,11 @@
  * Awards the once-per-day reputation point (or deduction) from one user to
  * another and anchors it on the Luce blockchain.
  *
- * The daily slot is claimed in the database BEFORE the block is appended, so
- * two concurrent reactions or replies can never both spend the same day. That
- * ordering is the whole point: previously each listener ran a
- * `hasGivenRepToday` read, then awaited the chain write, then inserted, and two
- * near-simultaneous events both passed the read, producing two blocks while the
+ * The daily slot is claimed in the database BEFORE the block is appended.
+ * Two concurrent reactions or replies can then never both spend the same day.
+ * The ordering matters. Previously each listener ran a `hasGivenRepToday` read,
+ * then awaited the chain write, then inserted. Two near-simultaneous events
+ * both passed the read and produced two blocks, while the
  * `UNIQUE(from_user, date)` index silently dropped the second row.
  *
  * @module services/reputation
@@ -78,9 +78,9 @@ async function awardReputation({
 
 		return 'awarded';
 	} catch (error) {
-		// Nothing reached the chain, so hand the day back for a retry.
+		// Nothing reached the chain. Hand the day back for a retry.
 		repository.releaseReputationClaim({ fromUser, date });
-		repLog.error(`Failed to anchor rep from ${fromTag || fromUser}: ${error.message}`);
+		repLog.error(`Failed to anchor rep from ${fromTag || fromUser} ${error.message}`);
 		return 'failed';
 	}
 }

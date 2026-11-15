@@ -71,9 +71,9 @@ class RegisterCTFCommand extends Command {
 			}
 
 			// When an API token is configured the username is verified against the
-			// platform. Without a token there is nothing to verify against: CTFd
-			// needs one for user lookups, and noCTF refuses anonymous reads before
-			// the event starts. The registration is accepted unverified rather than
+			// platform. Without a token there is nothing to verify against. CTFd
+			// needs one for user lookups. noCTF refuses anonymous reads before the
+			// event starts. The registration is accepted unverified rather than
 			// blocked, matching the behaviour before multi-platform support.
 			let platformData = null;
 			const effectivePlatformUrl = platformUrl || ctf.api_base_url || ctf.ctf_base_url;
@@ -83,7 +83,7 @@ class RegisterCTFCommand extends Command {
 				try {
 					platformData = await this.fetchPlatformUserData(ctf, username, platformUrl);
 				} catch (error) {
-					this.container.logger.warn(`Failed to fetch platform data: ${error.message}`);
+					this.container.logger.warn(`Failed to fetch platform data ${error.message}`);
 					// Return error to user if platform verification fails
 					return interaction.editReply({
 						content: `Failed to verify user on the CTF platform.\n**Error:** ${error.message}\n\nPlease check your username and try again.`
@@ -95,9 +95,9 @@ class RegisterCTFCommand extends Command {
 
 			// Store the registration and claim any pending platform solves in ONE
 			// transaction. Registering without claiming the solves would leave them
-			// orphaned under the synthetic platform user id, so the two must commit or
-			// roll back together. transferPendingSolves opens its own (nested)
-			// transaction, which better-sqlite3 promotes to a savepoint.
+			// orphaned under the synthetic platform user id. The two must commit or roll
+			// back together. transferPendingSolves opens its own (nested) transaction,
+			// which better-sqlite3 promotes to a savepoint.
 			let pendingSolvesResult = null;
 			try {
 				runInTransaction(() => {
@@ -120,7 +120,7 @@ class RegisterCTFCommand extends Command {
 					}
 				});
 				this.container.logger.info(
-					`Registered ${userTag} for CTF "${ctf.ctf_name}" (team: ${teamName || platformData?.teamName || 'individual'})`
+					`Registered ${userTag} for CTF "${ctf.ctf_name}" (team ${teamName || platformData?.teamName || 'individual'})`
 				);
 				if (pendingSolvesResult && pendingSolvesResult.transferred > 0) {
 					this.container.logger.info(
@@ -128,7 +128,7 @@ class RegisterCTFCommand extends Command {
 					);
 				}
 			} catch (dbError) {
-				this.container.logger.error('Failed to store registration:', dbError);
+				this.container.logger.error('Failed to store registration', dbError);
 				return interaction.editReply('Failed to register. Please try again later.');
 			}
 
@@ -141,7 +141,7 @@ class RegisterCTFCommand extends Command {
 					{ name: 'CTF Username', value: username, inline: true }
 				)
 				.setTimestamp()
-				.setFooter({ text: `User ID: ${userId}` });
+				.setFooter({ text: `User ID ${userId}` });
 
 			if (platformData) {
 				embed.addFields(
@@ -174,10 +174,10 @@ class RegisterCTFCommand extends Command {
 
 			// Log registration
 			this.container.logger.info(
-				`CTF Registration: ${userTag} (${userId}) registered as ${username} for ${ctf.ctf_name}`
+				`CTF Registration ${userTag} (${userId}) registered as ${username} for ${ctf.ctf_name}`
 			);
 		} catch (error) {
-			this.container.logger.error('Error registering for CTF:', error);
+			this.container.logger.error('Error registering for CTF', error);
 			return interaction.editReply('Failed to register. Please try again later.');
 		}
 	}
@@ -185,8 +185,8 @@ class RegisterCTFCommand extends Command {
 	/**
 	 * Verify a username against the CTF's configured platform.
 	 *
-	 * The client comes from the platform registry, so this works for CTFd and
-	 * noCTF alike. Both adapters throw when the user cannot be found.
+	 * The client comes from the platform registry, which makes this work for
+	 * CTFd and noCTF alike. Both adapters throw when the user cannot be found.
 	 *
 	 * @param {Object} ctf - The CTF object from the database
 	 * @param {string} username - The username to look up
@@ -210,7 +210,7 @@ class RegisterCTFCommand extends Command {
 				divisionId: ctf.platform_division_id
 			});
 
-			this.container.logger.info(`Searching for user "${username}" on the CTF platform: ${client.apiBaseUrl}`);
+			this.container.logger.info(`Searching for user "${username}" on the CTF platform ${client.apiBaseUrl}`);
 			const user = await client.findUser(username);
 
 			if (!user) {
@@ -219,10 +219,10 @@ class RegisterCTFCommand extends Command {
 				);
 			}
 
-			this.container.logger.info(`Found platform user: ${user.username} (ID: ${user.userId})`);
+			this.container.logger.info(`Found platform user ${user.username} (ID ${user.userId})`);
 
 			if (user.teamName) {
-				this.container.logger.info(`User is in team: ${user.teamName}`);
+				this.container.logger.info(`User is in team ${user.teamName}`);
 			}
 
 			return {
@@ -236,9 +236,9 @@ class RegisterCTFCommand extends Command {
 				throw error; // Already has a good message
 			}
 			if (error.status) {
-				throw new Error(`CTF platform API error (${error.status}): ${error.message}`);
+				throw new Error(`CTF platform API error (${error.status}) ${error.message}`);
 			}
-			throw new Error(`Failed to verify on the CTF platform: ${error.message}`);
+			throw new Error(`Failed to verify on the CTF platform ${error.message}`);
 		}
 	}
 }

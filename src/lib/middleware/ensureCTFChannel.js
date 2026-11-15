@@ -11,12 +11,12 @@ function ensureCTFChannel(interaction) {
 	const channel = interaction.channel;
 
 	if (!channel) {
-		throw new CTFChannelError('❌ This command can only be used in a guild channel.');
+		throw new CTFChannelError('This command can only be used in a guild channel.');
 	}
 
 	if (channel.parentId !== config.ctf.categoryId) {
 		throw new CTFChannelError(
-			'❌ This command can only be used in CTF channels (channels within the CTF category).'
+			'This command can only be used in CTF channels (channels within the CTF category).'
 		);
 	}
 

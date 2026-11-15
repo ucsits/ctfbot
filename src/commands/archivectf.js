@@ -59,7 +59,7 @@ class ArchiveCTFCommand extends Command {
 					.filter(c => c.type === ChannelType.GuildCategory && c.name.startsWith('/lost+found/'))
 					.sort((a, b) => a.position - b.position);
 
-				// Position: below the most recent /lost+found/ category, or at the bottom
+				// Place it below the most recent /lost+found/ category, or at the bottom
 				let position = undefined;
 				if (lostFoundCategories.size > 0) {
 					const lastLostFound = lostFoundCategories.last();
@@ -81,7 +81,7 @@ class ArchiveCTFCommand extends Command {
 				});
 
 				this.container.logger.info(
-					`Created archive category: ${archiveCategoryName} (ID: ${archiveCategory.id})`
+					`Created archive category ${archiveCategoryName} (ID ${archiveCategory.id})`
 				);
 			}
 
@@ -99,13 +99,13 @@ class ArchiveCTFCommand extends Command {
 			try {
 				ctfOperations.archiveCTF(channel.id);
 			} catch (dbError) {
-				this.container.logger.error('Failed to mark CTF archived; restoring channel:', dbError);
+				this.container.logger.error('Failed to mark CTF archived. Restoring the channel.', dbError);
 				try {
 					await channel.setParent(originalParentId, {
-						reason: 'Archive failed; restoring original category'
+						reason: 'Archive failed. Restoring the original category'
 					});
 				} catch (restoreError) {
-					this.container.logger.error('Failed to restore channel parent:', restoreError);
+					this.container.logger.error('Failed to restore channel parent', restoreError);
 				}
 				return interaction.editReply(
 					'Failed to archive CTF. The channel was returned to its original category.'
@@ -124,9 +124,9 @@ class ArchiveCTFCommand extends Command {
 
 			await interaction.editReply({ embeds: [embed] });
 
-			this.container.logger.info(`Archived CTF "${ctf.ctf_name}" (ID: ${ctf.id}) by ${interaction.user.tag}`);
+			this.container.logger.info(`Archived CTF "${ctf.ctf_name}" (ID ${ctf.id}) by ${interaction.user.tag}`);
 		} catch (error) {
-			this.container.logger.error('Error archiving CTF:', error);
+			this.container.logger.error('Error archiving CTF', error);
 			return interaction.editReply('Failed to archive CTF. Please check permissions and try again.');
 		}
 	}

@@ -6,18 +6,18 @@ const { createPlatformClient } = require('../lib/platform');
 /**
  * Sync challenges and solves from whichever CTF platform the channel is bound to.
  *
- * The two platforms differ in one way that shapes this command: CTFd reports
+ * The two platforms differ in one way that shapes this command. CTFd reports
  * solves per user, while noCTF reports them per team (its per-challenge solve
  * endpoint omits user_id entirely). The scoreboard endpoint is the only noCTF
- * source that attributes a solve to a user, so the 'users' source prefers it and
+ * source that attributes a solve to a user. The 'users' source prefers it and
  * falls back to the per-user walk when the platform offers no bulk listing.
  *
- * That noCTF scoreboard is division-wide, and the credential cannot narrow it:
- * the platform grants scoreboard and user reads publicly and never filters by
+ * That noCTF scoreboard is division-wide. The credential cannot narrow it.
+ * The platform grants scoreboard and user reads publicly and never filters by
  * the caller's membership. Scope therefore comes from the registrations in this
- * channel. Solves belonging to a registered Discord user are always recorded,
- * and an unregistered solver is only parked when their platform team is one of
- * the registered teams, so a sync never imports the rest of the division.
+ * channel. Solves belonging to a registered Discord user are always recorded.
+ * An unregistered solver is only parked when their platform team is one of the
+ * registered teams. A sync therefore never imports the rest of the division.
  */
 class SyncChallengesCommand extends Command {
 	constructor(context, options) {
@@ -77,7 +77,7 @@ class SyncChallengesCommand extends Command {
 			const nameToLocalIdMap = await this.loadExistingChallenges(ctf);
 
 			// The 'users' source is the fallback for when the challenge listing
-			// is unusable, so it deliberately does not require it.
+			// is unusable. It deliberately does not require one.
 			let challenges = [];
 			if (source !== 'users') {
 				challenges = await this.syncChallenges(interaction, ctf, client, nameToLocalIdMap, newChallenges);
@@ -98,7 +98,7 @@ class SyncChallengesCommand extends Command {
 			return this.formatSyncResponse(interaction, source, solvesSynced, newChallenges, newSolves);
 		} catch (error) {
 			this.container.logger.error(error);
-			return interaction.editReply(`Error syncing challenges: ${error.message}`);
+			return interaction.editReply(`Error syncing challenges ${error.message}`);
 		}
 	}
 
@@ -147,8 +147,8 @@ class SyncChallengesCommand extends Command {
 		const registrations = registrationOperations.getRegistrationsByCTF(ctf.id);
 
 		// Registrations made before a platform credential existed have no platform
-		// user id, so their solves can never be matched. Repair those links before
-		// the lookup map is built, otherwise the whole run treats those members as
+		// user id. Their solves can never be matched. Repair those links before the
+		// lookup map is built, otherwise the whole run treats those members as
 		// strangers.
 		const linked = await this.linkUnlinkedRegistrations(ctf, client, registrations);
 		if (linked > 0) {
@@ -202,7 +202,7 @@ class SyncChallengesCommand extends Command {
 	 * Map platform user ids onto Discord ids.
 	 *
 	 * ctfd_user_id stores whatever the platform reported, which may have been
-	 * written as a float by SQLite's TEXT affinity, so it is normalised through
+	 * written as a float by SQLite's TEXT affinity. It is normalised through
 	 * parseInt on both sides of the lookup.
 	 */
 	buildUserMap(registrations) {
@@ -220,10 +220,10 @@ class SyncChallengesCommand extends Command {
 	 * Resolve the platform account for registrations that do not have one yet.
 	 *
 	 * A registration is only linked when the platform returns the exact username
-	 * that was registered: both adapters fall back to the first fuzzy match when
-	 * nothing matches exactly, and linking the wrong person would attribute their
+	 * that was registered. Both adapters fall back to the first fuzzy match when
+	 * nothing matches exactly. Linking the wrong person would attribute their
 	 * solves to a Discord user who never solved them. A failed or inexact lookup
-	 * is skipped, never fatal, so one bad registration cannot block the sync.
+	 * is skipped, never fatal. One bad registration cannot block the sync.
 	 *
 	 * The registrations array is mutated in place so buildUserMap, which runs
 	 * next, sees the link without a second database read.
@@ -242,7 +242,7 @@ class SyncChallengesCommand extends Command {
 			try {
 				user = await client.findUser(reg.username);
 			} catch (error) {
-				this.container.logger.warn(`Could not link ${reg.username} to the platform: ${error.message}`);
+				this.container.logger.warn(`Could not link ${reg.username} to the platform ${error.message}`);
 				continue;
 			}
 
@@ -258,7 +258,7 @@ class SyncChallengesCommand extends Command {
 				.toLowerCase();
 			if (!wanted || found !== wanted) {
 				this.container.logger.warn(
-					`Platform user "${user.username}" does not match registration "${reg.username}"; leaving it unlinked`
+					`Platform user "${user.username}" does not match registration "${reg.username}". Leaving it unlinked`
 				);
 				continue;
 			}
@@ -270,7 +270,7 @@ class SyncChallengesCommand extends Command {
 			});
 
 			// Solves already parked under the synthetic platform id now belong to a
-			// known Discord user, so claim them instead of leaving duplicates behind.
+			// known Discord user. Claim them instead of leaving duplicates behind.
 			challengeOperations.transferPendingSolves(ctf.id, user.userId, reg.user_id, ctf.platform);
 
 			reg.ctfd_user_id = String(user.userId);
@@ -287,17 +287,17 @@ class SyncChallengesCommand extends Command {
 	 * Only noCTF offers this. It is the accurate path there because the
 	 * per-challenge endpoint drops user_id.
 	 *
-	 * The listing is division-wide, so the solves it returns are filtered against
-	 * the teams this channel has registrations for. A solver linked to a Discord
+	 * The listing is division-wide. The solves it returns are filtered against the
+	 * teams this channel has registrations for. A solver linked to a Discord
 	 * account is recorded regardless of team, because their registration is the
 	 * scope. An unlinked solver is only parked (and only named) when their team is
-	 * one of the registered ones; everyone else in the division is ignored. When
+	 * one of the registered ones. Everyone else in the division is ignored. When
 	 * the platform cannot resolve team names the scope is empty and nothing
 	 * unregistered is parked, which fails closed rather than importing the
 	 * division.
 	 *
 	 * @returns {Promise<{count: number, solves: string[]}|null>} null when the
-	 *   platform does not support it, so the caller falls back
+	 *   platform does not support it. The caller then falls back
 	 */
 	async syncSolvesFromBulkListing(ctf, client, platformUserMap, nameToLocalIdMap, userRegMap, newChallenges) {
 		let solves;
@@ -305,14 +305,14 @@ class SyncChallengesCommand extends Command {
 			solves = await client.getAllSolves();
 		} catch (error) {
 			this.container.logger.info(
-				`Bulk solve listing unavailable (${error.message}); falling back to per-user sync`
+				`Bulk solve listing unavailable (${error.message}). Falling back to per-user sync`
 			);
 			return null;
 		}
 
-		// The bulk listing carries platform challenge ids only, so the challenge
-		// list is needed to translate them. A challenge missing from it was not
-		// visible to this credential, and its solves cannot be attributed.
+		// The bulk listing carries platform challenge ids only. The challenge list
+		// is needed to translate them. A challenge missing from it was not visible
+		// to this credential. Its solves cannot be attributed.
 		const challenges = await client.getChallenges();
 		const platformChallengeMap = new Map();
 		for (const chal of challenges) {
@@ -342,10 +342,10 @@ class SyncChallengesCommand extends Command {
 		let count = 0;
 		const newSolves = [];
 
-		// The listing covers the whole division, so the teams that matter have to
-		// be worked out before anything is written. A team id is a candidate only
-		// when it carries a solve from someone who is not linked to a Discord
-		// account, since a linked solver is recorded on their registration alone.
+		// The listing covers the whole division. The teams that matter have to be
+		// worked out before anything is written. A team id is a candidate only when
+		// it carries a solve from someone who is not linked to a Discord account,
+		// since a linked solver is recorded on their registration alone.
 		const unlinkedTeamIds = new Set();
 		for (const solve of solves) {
 			if (solve.userId === null || solve.userId === undefined) {
@@ -367,7 +367,7 @@ class SyncChallengesCommand extends Command {
 
 		// The bulk listing identifies a solver by a numeric user id only. Resolve
 		// the names for the solvers who are not linked to a Discord account and are
-		// in scope, once, so the announcement and the stored row can name a person
+		// in scope, once. The announcement and the stored row can then name a person
 		// instead of a number. Solvers whose challenge is not visible, or whose team
 		// is outside the channel, are excluded because their solve is skipped below
 		// and the lookup would be wasted.
@@ -393,7 +393,7 @@ class SyncChallengesCommand extends Command {
 			try {
 				userNames = await client.resolveUserNames([...unresolvedIds]);
 			} catch (error) {
-				this.container.logger.warn(`Could not resolve unregistered solver names: ${error.message}`);
+				this.container.logger.warn(`Could not resolve unregistered solver names ${error.message}`);
 			}
 		}
 
@@ -423,7 +423,7 @@ class SyncChallengesCommand extends Command {
 				}
 			} else if (platformUserId) {
 				// Someone in the division who is not registered here. Only the teams
-				// this channel actually has registrations for are in scope; the rest of
+				// this channel actually has registrations for are in scope. The rest of
 				// the scoreboard is not this CTF's business.
 				if (!scopedTeamIds.has(String(solve.teamId))) {
 					continue;
@@ -451,14 +451,14 @@ class SyncChallengesCommand extends Command {
 	/**
 	 * The platform team ids that belong to this channel's registrations.
 	 *
-	 * The division-wide bulk listing reports a solve's team by id only, so the
-	 * ids have to be translated to names before they can be compared with what
+	 * The division-wide bulk listing reports a solve's team by id only. The ids
+	 * have to be translated to names before they can be compared with what
 	 * members registered. Only the ids whose name matches a registered team come
-	 * back, so the caller can treat membership in the result as "in scope".
+	 * back. The caller can then treat membership in the result as "in scope".
 	 *
 	 * An empty result means nothing is in scope, which is also what an unavailable
-	 * resolver produces: without a name to compare, an unregistered solver must
-	 * not be parked, so this fails closed.
+	 * resolver produces. Without a name to compare, an unregistered solver must
+	 * not be parked. This therefore fails closed.
 	 *
 	 * @param {Object} client - Platform client
 	 * @param {Map<string, Object>} userRegMap - Registrations by Discord user id
@@ -475,7 +475,7 @@ class SyncChallengesCommand extends Command {
 
 		if (typeof client.resolveTeamNames !== 'function') {
 			this.container.logger.warn(
-				`Platform "${client.platform}" cannot resolve team names; not parking any unregistered solve`
+				`Platform "${client.platform}" cannot resolve team names. Not parking any unregistered solve`
 			);
 			return scoped;
 		}
@@ -490,8 +490,9 @@ class SyncChallengesCommand extends Command {
 		} catch (error) {
 			// Unlike the adapter, which reports a name failure by omission, a client
 			// that throws leaves scope undetermined. Parking on an unknown scope is
-			// what imported the whole division, so an error means nothing is parked.
-			this.container.logger.warn(`Could not scope solves to the registered teams: ${error.message}`);
+			// what imported the whole division. An error therefore means nothing is
+			// parked.
+			this.container.logger.warn(`Could not scope solves to the registered teams ${error.message}`);
 		}
 
 		return scoped;
@@ -501,8 +502,8 @@ class SyncChallengesCommand extends Command {
 	 * Every team name this channel's registrations claim.
 	 *
 	 * Both columns are collected and compared exactly, which is the same rule
-	 * _findRegisteredMember applies: team_name is what the member typed and
-	 * ctfd_team_name is what the platform reported, and either can be the one that
+	 * _findRegisteredMember applies. team_name is what the member typed and
+	 * ctfd_team_name is what the platform reported. Either can be the one that
 	 * matches.
 	 *
 	 * @param {Map<string, Object>} userRegMap - Registrations by Discord user id
@@ -521,7 +522,7 @@ class SyncChallengesCommand extends Command {
 	}
 
 	/**
-	 * Solve attribution per challenge. CTFd reports the solver; noCTF reports the
+	 * Solve attribution per challenge. CTFd reports the solver. noCTF reports the
 	 * team, which is matched back to a registered member.
 	 */
 	async syncSolvesForChallenge(ctf, client, chal, platformUserMap, nameToLocalIdMap, userRegMap) {
@@ -572,7 +573,7 @@ class SyncChallengesCommand extends Command {
 					continue;
 				}
 
-				// Team-level solve: resolve the team, then attribute it to a
+				// Team-level solve. Resolve the team, then attribute it to a
 				// registered member of that team.
 				const teamName = await client.resolveTeamName(solve.teamId);
 				const member = this._findRegisteredMember(teamName, userRegMap);
@@ -594,7 +595,7 @@ class SyncChallengesCommand extends Command {
 				}
 			}
 		} catch (err) {
-			this.container.logger.error(`Failed to fetch solves for challenge ${chal.name}:`, err);
+			this.container.logger.error(`Failed to fetch solves for challenge ${chal.name}`, err);
 		}
 
 		return { count, solves };
@@ -611,7 +612,7 @@ class SyncChallengesCommand extends Command {
 
 		if (!client.raw || typeof client.raw.getUserSolves !== 'function') {
 			this.container.logger.warn(
-				`Platform "${ctf.platform}" has no per-user solve listing; skipping ${reg.username}`
+				`Platform "${ctf.platform}" has no per-user solve listing. Skipping ${reg.username}`
 			);
 			return { count: 0, solves: [] };
 		}
@@ -666,7 +667,7 @@ class SyncChallengesCommand extends Command {
 				}
 			}
 		} catch (err) {
-			this.container.logger.error(`Failed to fetch solves for user ${reg.ctfd_user_id}:`, err);
+			this.container.logger.error(`Failed to fetch solves for user ${reg.ctfd_user_id}`, err);
 		}
 
 		return { count, solves };
@@ -675,7 +676,7 @@ class SyncChallengesCommand extends Command {
 	/**
 	 * Find the registration belonging to a platform team name.
 	 *
-	 * team_name is what the member typed; ctfd_team_name is what the platform
+	 * team_name is what the member typed. ctfd_team_name is what the platform
 	 * reported. Either can be the one that matches.
 	 */
 	_findRegisteredMember(teamName, userRegMap) {
@@ -744,8 +745,8 @@ class SyncChallengesCommand extends Command {
 	/**
 	 * Record a synced solve, returning false when it is already covered.
 	 *
-	 * Team mode stores the team name as the solve's team key, so the partial
-	 * unique index on (challenge_id, team_key) is the real guarantee behind the
+	 * Team mode stores the team name as the solve's team key. The partial unique
+	 * index on (challenge_id, team_key) is the real guarantee behind the
 	 * one-solve-per-team rule. A collision means another member of the same team
 	 * was already recorded, which is a skip rather than an error.
 	 *
@@ -764,7 +765,7 @@ class SyncChallengesCommand extends Command {
 	}
 
 	formatSyncResponse(interaction, source, solvesSynced, newChallenges, newSolves) {
-		let response = `Sync complete (Source: ${source})!\n- Challenges processed: ${newChallenges.length}\n- New solves recorded: ${solvesSynced}`;
+		let response = `Sync complete (Source ${source})!\n- Challenges processed ${newChallenges.length}\n- New solves recorded ${solvesSynced}`;
 
 		if (newChallenges.length > 0) {
 			response += `\n\n**New Challenges:**\n${newChallenges.join('\n')}`;

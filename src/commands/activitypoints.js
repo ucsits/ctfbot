@@ -40,7 +40,7 @@ class ActivityPointsCommand extends Command {
 
 			const embed = new EmbedBuilder()
 				.setColor(0x9b59b6)
-				.setTitle('🎯 Activity Points')
+				.setTitle('Activity Points')
 				.setDescription(`${target} has **${balance} AP**`)
 				.addFields(
 					{ name: 'User', value: target.toString(), inline: true },
@@ -50,8 +50,8 @@ class ActivityPointsCommand extends Command {
 
 			return interaction.editReply({ embeds: [embed] });
 		} catch (error) {
-			this.container.logger.error('Error fetching activity points:', error);
-			return interaction.editReply('❌ Failed to fetch activity points.');
+			this.container.logger.error('Error fetching activity points', error);
+			return interaction.editReply('Failed to fetch activity points.');
 		}
 	}
 }

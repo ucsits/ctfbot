@@ -96,14 +96,14 @@ function initDatabase() {
 	if (result.error) {
 		dbLogger.error('Migration error', result.error);
 	} else if (result.applied.length > 0) {
-		dbLogger.info(`Applied ${result.applied.length} migration(s): ${result.applied.join(', ')}`);
+		dbLogger.info(`Applied ${result.applied.length} migration(s) ${result.applied.join(', ')}`);
 	} else {
 		dbLogger.info('All migrations up to date');
 	}
 
 	// Crash recovery, run after migrations so the purchases table exists. An AP
-	// purchase reservation is written before its block is anchored, so if the
-	// process died in between the points are still debited and the purchase is
+	// purchase reservation is written before its block is anchored. If the
+	// process died in between, the points are still debited and the purchase is
 	// still pending. Release any reservation old enough that no in-flight
 	// request could still own it.
 	const releasedReservations = activityRepository.releaseStaleApReservations();

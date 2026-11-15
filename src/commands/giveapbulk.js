@@ -70,14 +70,14 @@ function parseCsv(content) {
 		return [];
 	}
 
-	// Detect and skip header row: first cell is a non-numeric column name
+	// Detect and skip a header row whose first cell is a non-numeric column name
 	const firstCell = rows[0][0].toLowerCase();
 	const looksLikeHeader =
 		isNaN(Number(rows[0][0])) &&
 		(firstCell.includes('id') || firstCell.includes('point') || firstCell.includes('discord'));
 	const dataRows = looksLikeHeader ? rows.slice(1) : rows;
 
-	// Map to objects; the first column is discord_id, second is points.
+	// Map to objects. The first column is discord_id and the second is points.
 	return dataRows.map(row => ({
 		discord_id: (row[0] || '').trim(),
 		points: Number((row[1] || '').trim())
@@ -122,7 +122,7 @@ class GiveApBulkCommand extends Command {
 		const attachment = interaction.options.getAttachment('csv');
 
 		if (attachment.size > MAX_FILE_SIZE) {
-			return interaction.editReply('❌ CSV file is too large. Maximum size is 1 MB.');
+			return interaction.editReply('CSV file is too large. Maximum size is 1 MB.');
 		}
 
 		let content;
@@ -133,7 +133,7 @@ class GiveApBulkCommand extends Command {
 			}
 			content = await res.text();
 		} catch (error) {
-			return interaction.editReply(`❌ Could not read the CSV file: ${error.message}`);
+			return interaction.editReply(`Could not read the CSV file ${error.message}`);
 		}
 
 		const entries = parseCsv(content);
@@ -141,13 +141,13 @@ class GiveApBulkCommand extends Command {
 
 		if (valid.length === 0) {
 			return interaction.editReply(
-				'❌ No valid rows found. The CSV should have two columns: `discord_id` and `points` (with a header row or without).'
+				'No valid rows found. The CSV should have two columns: `discord_id` and `points` (with a header row or without).'
 			);
 		}
 
 		if (valid.length !== entries.length) {
 			return interaction.editReply(
-				`❌ ${entries.length - valid.length} row(s) were invalid (missing discord_id or non-positive points). No points were granted, so fix the CSV and retry.`
+				`${entries.length - valid.length} row(s) were invalid (missing discord_id or non-positive points). No points were granted. Fix the CSV and retry.`
 			);
 		}
 
@@ -183,7 +183,7 @@ class GiveApBulkCommand extends Command {
 			});
 
 			if (!applied) {
-				return interaction.editReply('These points were already granted for this action; nothing was changed.');
+				return interaction.editReply('These points were already granted for this action. Nothing was changed.');
 			}
 
 			const granted = balances.length;
@@ -194,7 +194,7 @@ class GiveApBulkCommand extends Command {
 
 			const embed = new EmbedBuilder()
 				.setColor(0x9b59b6)
-				.setTitle('🎯 Bulk Activity Points Granted')
+				.setTitle('Bulk Activity Points Granted')
 				.setDescription(
 					`**${granted}** user(s) received a total of **${payload.reduce((s, e) => s + e.points, 0)} AP** from the CSV.`
 				)
@@ -214,8 +214,8 @@ class GiveApBulkCommand extends Command {
 
 			return interaction.editReply({ embeds: [embed] });
 		} catch (error) {
-			this.container.logger.error('Error in bulk grant:', error);
-			return interaction.editReply('❌ Failed to process bulk grant. Blockchain error: ' + error.message);
+			this.container.logger.error('Error in bulk grant', error);
+			return interaction.editReply('Failed to process bulk grant. Blockchain error. ' + error.message);
 		}
 	}
 }

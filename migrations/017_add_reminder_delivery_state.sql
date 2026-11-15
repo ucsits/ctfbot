@@ -1,4 +1,4 @@
--- Migration 017: Add retry and delivery state for reminders and digests
+-- Migration 017. Add retry and delivery state for reminders and digests
 ALTER TABLE task_reminders ADD COLUMN processing_until INTEGER;
 ALTER TABLE task_reminders ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE task_reminders ADD COLUMN last_error TEXT;

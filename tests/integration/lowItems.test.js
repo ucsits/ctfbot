@@ -4,11 +4,11 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { createRequire } from 'module';
 
-// Small hardening items from the audit:
+// Small hardening items from the audit.
 //   * SQLite runs with WAL + a busy_timeout so a concurrent writer waits instead
 //     of failing immediately.
 //   * adminRepository.add is a single INSERT OR IGNORE that reports whether it
-//     actually inserted, so /admin add needs no racy exists() pre-check.
+//     actually inserted. /admin add therefore needs no racy exists() pre-check.
 //
 // Require (not import) so this test shares the module instances src files use.
 const require = createRequire(import.meta.url);
@@ -65,7 +65,7 @@ describe('adminRepository.add atomicity', () => {
 		expect(adminRepository.add('admin-new', 'adder')).toBe(0);
 		expect(adminRepository.add('admin-new', 'someone-else')).toBe(0);
 
-		// Exactly one row, and the original added_by is preserved.
+		// Exactly one row. The original added_by is preserved.
 		const rows = db.prepare('SELECT * FROM admins WHERE user_id = ?').all('admin-new');
 		expect(rows.length).toBe(1);
 		expect(rows[0].added_by).toBe('adder');

@@ -60,7 +60,7 @@ afterEach(() => {
 	chat._reset();
 });
 
-/** Minimal Discord channel double: no cached permissions, so sends are allowed. */
+/** Minimal Discord channel double with no cached permissions. Sends are allowed. */
 function makeChannel({ id = 'c1', name = 'general', guildId = 'g1' } = {}) {
 	return {
 		id,
@@ -143,7 +143,7 @@ describe('chat._signal', () => {
 describe('chat._consider', () => {
 	it('spends a model call on a question', () => {
 		const decision = chat._consider(stateWith());
-		expect(decision).toEqual({ consider: true, reason: 'signal: question' });
+		expect(decision).toEqual({ consider: true, reason: 'signal question' });
 	});
 
 	it('stays out of plain chatter', () => {
@@ -250,7 +250,7 @@ describe('chat prompt', () => {
 		expect(system.content).toContain('stay_silent');
 		expect(system.content).toContain('gimana kalau');
 		expect(system.content).toContain('menurutku');
-		expect(system.content).toContain('Humor setting: 10%');
+		expect(system.content).toContain('Humor setting 10%');
 		expect(system.content).toContain('jangan jawab sendiri');
 		expect(system.content).toContain('Jangan pernah bilang seseorang kurang kreatif');
 		expect(system.content).toContain('<search_results>');

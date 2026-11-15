@@ -2,14 +2,14 @@
  * noCTF API client.
  *
  * noCTF (https://github.com/noctf-project/noCTF) is a Fastify backend with a
- * SvelteKit frontend. Two properties of it shape this client:
+ * SvelteKit frontend. Two properties of it shape this client.
  *
  *   1. The API usually lives on a different origin than the web UI (for example
  *      scoreboard.example.com serves the UI while api-example.com serves the
- *      API), so the API base URL is always supplied explicitly.
+ *      API). The API base URL is therefore always supplied explicitly.
  *   2. Almost every challenge and scoreboard route is gated on the competition
- *      being active and started. Anonymous requests work only during the event;
- *      a bearer token with admin policies bypasses the gate and additionally
+ *      being active and started. Anonymous requests work only during the event.
+ *      A bearer token with admin policies bypasses the gate and additionally
  *      reveals hidden challenges and hidden solves.
  *
  * Responses are wrapped in `{ data: ... }` and errors are `{ error, message }`.
@@ -19,7 +19,7 @@
 
 const { ExternalAPIError } = require('../errors');
 
-/** Retry budget for transient 5xx responses (2 retries: 250ms, then 500ms). */
+/** Retry budget for transient 5xx responses (2 retries, at 250ms then 500ms). */
 const MAX_SERVER_ERROR_RETRIES = 2;
 const RETRY_BACKOFF_MS = 250;
 
@@ -32,8 +32,8 @@ const TEAM_ID_CHUNK_SIZE = 50;
 /**
  * Messages the API returns when the competition gate rejects a request. They are
  * surfaced verbatim so an operator can tell "not started yet" apart from a real
- * failure, and flagged so callers can present them as a configuration problem
- * rather than an outage.
+ * failure. They are flagged so callers can present them as a configuration
+ * problem rather than an outage.
  */
 const GATING_MESSAGES = ['The CTF is not currently active', 'The CTF has not started yet'];
 
@@ -97,7 +97,7 @@ class NoCTFClient {
 		const detail = apiMessage || (text || '').trim();
 
 		return {
-			message: `noCTF API error: ${headline}${detail ? ` - ${detail}` : ''}`,
+			message: `noCTF API error ${headline}${detail ? ` - ${detail}` : ''}`,
 			isGating: response.status === 403 && GATING_MESSAGES.includes(apiMessage),
 			apiMessage,
 			status: response.status
@@ -107,11 +107,11 @@ class NoCTFClient {
 	/**
 	 * Make an API request, unwrapping the `{ data }` envelope.
 	 *
-	 * Transient 5xx responses are retried; 4xx responses are not, because they
+	 * Transient 5xx responses are retried. 4xx responses are not, because they
 	 * are deterministic (bad token, gate closed, validation).
 	 *
 	 * @param {string} endpoint - Path beginning with '/'
-	 * @param {Object} [options] - Fetch options; a non-string `body` is JSON encoded
+	 * @param {Object} [options] - Fetch options. A non-string `body` is JSON encoded
 	 * @returns {Promise<any>} Unwrapped `data`, or the whole body when there is none
 	 */
 	async request(endpoint, options = {}) {
@@ -143,8 +143,8 @@ class NoCTFClient {
 			try {
 				response = await fetch(url, { method, headers, body });
 			} catch (error) {
-				this.log.error(`Request failed: ${method} ${url}`, error);
-				throw new ExternalAPIError(`noCTF request failed: ${error.message}`);
+				this.log.error(`Request failed ${method} ${url}`, error);
+				throw new ExternalAPIError(`noCTF request failed ${error.message}`);
 			}
 
 			if (response.ok) {
@@ -169,7 +169,7 @@ class NoCTFClient {
 				continue;
 			}
 
-			this.log.error(`Error Response Body: ${text}`);
+			this.log.error(`Error Response Body ${text}`);
 			const error = new ExternalAPIError(described.message);
 			error.status = described.status;
 			error.isGating = described.isGating;
@@ -181,10 +181,10 @@ class NoCTFClient {
 	/**
 	 * Resolve which division to read the scoreboard from.
 	 *
-	 * Order: an explicit option, then the deployment's configured default, then
-	 * the first visible division. A resolution is cached; the final fallback of 1
-	 * is deliberately not cached so a transient outage at startup cannot pin the
-	 * process to the wrong division for its whole lifetime.
+	 * The order is an explicit option, then the deployment's configured default,
+	 * then the first visible division. A resolution is cached. The final fallback
+	 * of 1 is deliberately not cached. A transient outage at startup then cannot
+	 * pin the process to the wrong division for its whole lifetime.
 	 *
 	 * @returns {Promise<number>} A division id, never undefined
 	 */
@@ -205,7 +205,7 @@ class NoCTFClient {
 				return this._resolvedDivisionId;
 			}
 		} catch (error) {
-			this.log.warn(`Could not read /site/config: ${error.message}`);
+			this.log.warn(`Could not read /site/config ${error.message}`);
 		}
 
 		try {
@@ -216,15 +216,15 @@ class NoCTFClient {
 				return this._resolvedDivisionId;
 			}
 		} catch (error) {
-			this.log.warn(`Could not read /divisions: ${error.message}`);
+			this.log.warn(`Could not read /divisions ${error.message}`);
 		}
 
-		this.log.warn('Falling back to division 1; set a division with /setctfplatform if this is wrong');
+		this.log.warn('Falling back to division 1. Set a division with /setctfplatform if this is wrong');
 		return 1;
 	}
 
 	/**
-	 * noCTF has no dedicated category field: the UI splits tags.categories on
+	 * noCTF has no dedicated category field. The UI splits tags.categories on
 	 * commas and takes the first entry.
 	 *
 	 * @private
@@ -260,12 +260,12 @@ class NoCTFClient {
 	/**
 	 * Bulk solve listing for a division.
 	 *
-	 * The scoreboard is the only endpoint that attributes a solve to a user, so
-	 * it is the accurate source. Solves the platform marks hidden (recorded
-	 * outside the competition window) are skipped, as are hidden teams.
+	 * The scoreboard is the only endpoint that attributes a solve to a user. It
+	 * is therefore the accurate source. Solves the platform marks hidden
+	 * (recorded outside the competition window) are skipped, as are hidden teams.
 	 *
-	 * The listing is DIVISION-WIDE: it carries every visible team's solves, and
-	 * the credential does not narrow it, because noCTF grants `scoreboard.get`
+	 * The listing is DIVISION-WIDE. It carries every visible team's solves. The
+	 * credential does not narrow it, because noCTF grants `scoreboard.get`
 	 * publicly and the route never filters by the caller's membership. A caller
 	 * that only cares about its own teams must therefore scope the result itself
 	 * (the solve below carries the team id for exactly that).
@@ -315,8 +315,8 @@ class NoCTFClient {
 	/**
 	 * Solves for one challenge.
 	 *
-	 * This endpoint deliberately omits user_id, so callers get team-level rows
-	 * only and must resolve the team themselves.
+	 * This endpoint deliberately omits user_id. Callers get team-level rows only
+	 * and must resolve the team themselves.
 	 *
 	 * @param {number|string} challengeId
 	 * @returns {Promise<Array>} Normalized solves
@@ -336,13 +336,13 @@ class NoCTFClient {
 	/**
 	 * Resolve team names for a list of team ids, in batches the API accepts.
 	 *
-	 * The bulk scoreboard listing identifies a solve's team by numeric id only, so
-	 * this is how a caller decides whether a team is one of its own. Keys are the
+	 * The bulk scoreboard listing identifies a solve's team by numeric id only.
+	 * This is how a caller decides whether a team is one of its own. Keys are the
 	 * String form of the id, matching resolveUserNames, because the scoreboard
 	 * entry's team_id and the query's response id are not guaranteed to share a
 	 * JavaScript type.
 	 *
-	 * A chunk that fails is logged and skipped rather than throwing, so one bad
+	 * A chunk that fails is logged and skipped rather than throwing. One bad
 	 * batch cannot fail a sync. A caller for which a missing name means "not my
 	 * team" therefore has to treat an empty result as un-scoped and fail closed.
 	 *
@@ -371,7 +371,7 @@ class NoCTFClient {
 					names.set(String(team.id), team.name);
 				}
 			} catch (error) {
-				this.log.warn(`Could not resolve ${chunk.length} team name(s): ${error.message}`);
+				this.log.warn(`Could not resolve ${chunk.length} team name(s) ${error.message}`);
 			}
 		}
 
@@ -381,12 +381,12 @@ class NoCTFClient {
 	/**
 	 * Resolve user names for a list of user ids.
 	 *
-	 * The bulk scoreboard listing identifies a solver by numeric user id only, so
-	 * this is the only way to label a solve belonging to someone who has not
+	 * The bulk scoreboard listing identifies a solver by numeric user id only.
+	 * This is the only way to label a solve belonging to someone who has not
 	 * linked a Discord account. It shares TEAM_ID_CHUNK_SIZE because the API
 	 * applies the same per-query id cap to both resources.
 	 *
-	 * A chunk that fails is logged and skipped rather than throwing: a missing
+	 * A chunk that fails is logged and skipped rather than throwing. A missing
 	 * name degrades the announcement label, which is never worth failing a sync
 	 * over.
 	 *
@@ -417,7 +417,7 @@ class NoCTFClient {
 					}
 				}
 			} catch (error) {
-				this.log.warn(`Could not resolve ${chunk.length} user name(s): ${error.message}`);
+				this.log.warn(`Could not resolve ${chunk.length} user name(s) ${error.message}`);
 			}
 		}
 
@@ -516,13 +516,13 @@ class NoCTFClient {
 			const team = ((data && data.entries) || [])[0];
 			return team ? team.name : null;
 		} catch (error) {
-			this.log.warn(`Could not resolve team ${teamId}: ${error.message}`);
+			this.log.warn(`Could not resolve team ${teamId} ${error.message}`);
 			return null;
 		}
 	}
 
 	/**
-	 * Probe the instance without throwing, so it is safe to call from a command.
+	 * Probe the instance without throwing. It is then safe to call from a command.
 	 *
 	 * @returns {Promise<{ok: boolean, platform: string, apiBaseUrl: string, details: Object}>}
 	 */
@@ -539,7 +539,7 @@ class NoCTFClient {
 			await this.request('/healthz');
 			ok = true;
 		} catch (error) {
-			this.log.warn(`noCTF health probe failed: ${error.message}`);
+			this.log.warn(`noCTF health probe failed ${error.message}`);
 		}
 
 		try {
@@ -550,13 +550,13 @@ class NoCTFClient {
 				details.endTime = config.end_time_s ?? null;
 			}
 		} catch (error) {
-			this.log.warn(`noCTF site config probe failed: ${error.message}`);
+			this.log.warn(`noCTF site config probe failed ${error.message}`);
 		}
 
 		try {
 			details.divisionId = await this.resolveDivisionId();
 		} catch (error) {
-			this.log.warn(`noCTF division probe failed: ${error.message}`);
+			this.log.warn(`noCTF division probe failed ${error.message}`);
 		}
 
 		return {

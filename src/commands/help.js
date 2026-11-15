@@ -16,7 +16,7 @@ class HelpCommand extends Command {
 		const commandList = commands.map(cmd => `**${cmd.name}** - ${cmd.description}`).join('\n');
 
 		return message.reply({
-			content: `📚 **Available Commands:**\n${commandList}`
+			content: `**Available Commands:**\n${commandList}`
 		});
 	}
 
@@ -32,7 +32,7 @@ class HelpCommand extends Command {
 		const commandList = commands.map(cmd => `**${cmd.name}** - ${cmd.description}`).join('\n');
 
 		return interaction.reply({
-			content: `📚 **Available Commands:**\n${commandList}`
+			content: `**Available Commands:**\n${commandList}`
 		});
 	}
 }

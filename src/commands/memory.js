@@ -6,7 +6,7 @@ const memoryRepository = require('../database/repositories/actorMemory.repositor
 /**
  * View and edit what the bot remembers about you. Notes are learned from
  * governance conversations by src/services/taskSuggest.js and shown to the
- * model on later passes; the language preference overrides the Indonesian
+ * model on later passes. The language preference overrides the Indonesian
  * default of the bot's model-written replies.
  */
 class MemoryCommand extends Command {
@@ -62,7 +62,7 @@ class MemoryCommand extends Command {
 							.addStringOption(opt =>
 								opt
 									.setName('language')
-									.setDescription('e.g. English; leave empty to go back to Indonesian')
+									.setDescription('e.g. English. Leave it empty to go back to Indonesian')
 									.setMaxLength(30)
 									.setRequired(false)
 							)
@@ -85,25 +85,25 @@ class MemoryCommand extends Command {
 		if (sub === 'remember') {
 			const note = interaction.options.getString('note', true).replace(/\s+/g, ' ').trim();
 			const id = memoryRepository.addNote(userId, note, { addedBy: userId });
-			return reply(id ? `✅ Saved as note #${id}.` : 'ℹ️ That is already remembered.');
+			return reply(id ? `Saved as note #${id}.` : 'ℹ️ That is already remembered.');
 		}
 		if (sub === 'forget') {
 			const id = interaction.options.getInteger('number', true);
 			const note = memoryRepository.removeNote(userId, id);
-			return reply(note ? `🗑️ Forgot: ${note}` : `❌ You have no note #${id}.`);
+			return reply(note ? `Forgot ${note}` : `You have no note #${id}.`);
 		}
 		if (sub === 'language') {
 			const language = interaction.options.getString('language')?.trim() || null;
 			memoryRepository.setLanguage(userId, language);
 			return reply(
 				language
-					? `✅ The bot will use ${language} with you.`
-					: '✅ The bot will use Indonesian with you (the default).'
+					? `The bot will use ${language} with you.`
+					: 'The bot will use Indonesian with you (the default).'
 			);
 		}
 		if (sub === 'clear') {
 			memoryRepository.clearUser(userId);
-			return reply('🗑️ Everything the bot remembered about you has been deleted.');
+			return reply('Everything the bot remembered about you has been deleted.');
 		}
 	}
 
@@ -114,7 +114,7 @@ class MemoryCommand extends Command {
 			!interaction.memberPermissions?.has(PermissionFlagsBits.ManageMessages)
 		) {
 			return interaction.reply({
-				content: "❌ You need the Manage Messages permission to view someone else's memory.",
+				content: "You need the Manage Messages permission to view someone else's memory.",
 				ephemeral: true
 			});
 		}
@@ -123,7 +123,7 @@ class MemoryCommand extends Command {
 		const notes = memoryRepository.listNotes(target.id);
 		const embed = new EmbedBuilder()
 			.setColor(0x9b59b6)
-			.setTitle(`🧠 What the bot remembers about ${target.displayName ?? target.username}`)
+			.setTitle(`What the bot remembers about ${target.displayName ?? target.username}`)
 			.addFields(
 				{ name: 'Language', value: language ?? 'Indonesian (default)', inline: false },
 				{

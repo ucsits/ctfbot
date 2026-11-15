@@ -45,7 +45,7 @@ describe('CTF Channel Middleware', () => {
 			};
 
 			expect(() => ensureCTFChannel(interaction)).toThrow(
-				'❌ This command can only be used in CTF channels (channels within the CTF category).'
+				'This command can only be used in CTF channels (channels within the CTF category).'
 			);
 		});
 	});

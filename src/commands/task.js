@@ -10,8 +10,9 @@ const { ensureGovernanceChannelReply } = require('../lib/middleware/ensureGovern
 const { resolveTaskCandidates, MIN_FUZZY_SCORE } = require('../lib/utils/fuzzyMatch');
 const constants = require('../lib/constants/config');
 
-// Lazy-loaded calendar sync service — only loaded when GOOGLE_CALENDAR_ENABLED
-// is true, so there is no calendar import / side effect when the feature is off.
+// Lazy-loaded calendar sync service. It is only loaded when
+// GOOGLE_CALENDAR_ENABLED is true. No calendar import or side effect happens
+// when the feature is off.
 let _calendarSync = null;
 function _syncService() {
 	if (_calendarSync === null && constants.GOOGLE_CALENDAR_ENABLED) {
@@ -25,11 +26,12 @@ function _syncService() {
  * is enabled, indicating the task was mirrored to the shared calendar.
  */
 function _calendarNote() {
-	return constants.GOOGLE_CALENDAR_ENABLED ? '\n\n📅 *Synced to Google Calendar*' : '';
+	return constants.GOOGLE_CALENDAR_ENABLED ? '\n\n*Synced to Google Calendar*' : '';
 }
 
 // Custom ID namespaces for the task confirmation buttons handled by
-// src/listeners/interactionCreate.js. Format: <namespace>:<taskId>[:<score>]
+// src/listeners/interactionCreate.js. The format is
+// <namespace>:<taskId>[:<score>]
 const TASK_DONE_IDS = {
 	confirm: 'task_done_confirm',
 	candidate: 'task_done_candidate',
@@ -57,7 +59,7 @@ class TaskCommand extends Command {
 					.setName(this.name)
 					.setDescription(this.description)
 
-					// ── subcommand: add ──
+					// Subcommand add
 					.addSubcommand(sub =>
 						sub
 							.setName('add')
@@ -71,7 +73,7 @@ class TaskCommand extends Command {
 							.addStringOption(opt =>
 								opt
 									.setName('deadline')
-									.setDescription('Deadline — DD-MM-YYYY HH:MM or Unix timestamp (@time compatible)')
+									.setDescription('Deadline as DD-MM-YYYY HH:MM or a Unix timestamp (@time compatible)')
 									.setMaxLength(64)
 									.setRequired(true)
 							)
@@ -91,7 +93,7 @@ class TaskCommand extends Command {
 							)
 					)
 
-					// ── subcommand: list ──
+					// Subcommand list
 					.addSubcommand(sub =>
 						sub
 							.setName('list')
@@ -122,7 +124,7 @@ class TaskCommand extends Command {
 							)
 					)
 
-					// ── subcommand: done ──
+					// Subcommand done
 					.addSubcommand(sub =>
 						sub
 							.setName('done')
@@ -137,13 +139,13 @@ class TaskCommand extends Command {
 							.addStringOption(opt =>
 								opt
 									.setName('task')
-									.setDescription('Task title (fuzzy search) — requires confirmation')
+									.setDescription('Task title (fuzzy search). Requires confirmation')
 									.setMaxLength(100)
 									.setRequired(false)
 							)
 					)
 
-					// ── subcommand: cancel ──
+					// Subcommand cancel
 					.addSubcommand(sub =>
 						sub
 							.setName('cancel')
@@ -158,7 +160,7 @@ class TaskCommand extends Command {
 							.addStringOption(opt =>
 								opt
 									.setName('task')
-									.setDescription('Task title (fuzzy search) — requires confirmation')
+									.setDescription('Task title (fuzzy search). Requires confirmation')
 									.setMaxLength(100)
 									.setRequired(false)
 							)
@@ -210,17 +212,17 @@ class TaskCommand extends Command {
 		const title = interaction.options.getString('title')?.trim();
 		const description = interaction.options.getString('description')?.trim() || null;
 		if (!title || title.length > 100) {
-			return interaction.editReply('❌ Task title must be between 1 and 100 characters.');
+			return interaction.editReply('Task title must be between 1 and 100 characters.');
 		}
 		if (description && description.length > 4000) {
-			return interaction.editReply('❌ Task description cannot exceed 4000 characters.');
+			return interaction.editReply('Task description cannot exceed 4000 characters.');
 		}
 		const assignTo = interaction.options.getUser('assign_to');
 		const deadlineStr = interaction.options.getString('deadline');
 
 		const timezone = interaction.options.getString('timezone')?.trim() || 'Asia/Jakarta';
 		if (timezone.length > 64) {
-			return interaction.editReply('❌ Timezone is too long. Use a valid IANA timezone.');
+			return interaction.editReply('Timezone is too long. Use a valid IANA timezone.');
 		}
 
 		// Parse deadline with timezone support
@@ -228,11 +230,11 @@ class TaskCommand extends Command {
 		try {
 			deadlineDate = parseLocalDateToUTC(deadlineStr, timezone);
 		} catch (error) {
-			return interaction.editReply(`❌ ${error.message}`);
+			return interaction.editReply(`${error.message}`);
 		}
 
 		if (deadlineDate <= new Date()) {
-			return interaction.editReply('❌ Deadline must be in the future.');
+			return interaction.editReply('Deadline must be in the future.');
 		}
 
 		const deadlineUnix = Math.floor(deadlineDate.getTime() / 1000);
@@ -251,7 +253,7 @@ class TaskCommand extends Command {
 
 			const embed = new EmbedBuilder()
 				.setColor(0x00ff00)
-				.setTitle('✅ Task Created')
+				.setTitle('Task Created')
 				.setDescription(`**${title}** has been created on the blockchain.`)
 				.addFields(
 					{ name: 'Assigned To', value: assignTo.toString(), inline: true },
@@ -266,18 +268,18 @@ class TaskCommand extends Command {
 			}
 
 			if (constants.GOOGLE_CALENDAR_ENABLED) {
-				embed.addFields({ name: 'Google Calendar', value: '📅 Synced to shared calendar', inline: false });
+				embed.addFields({ name: 'Google Calendar', value: 'Synced to shared calendar', inline: false });
 			}
 
 			const interpretation = formatDateInterpretation(deadlineStr, timezone, deadlineDate);
 			return interaction.editReply({ content: interpretation, embeds: [embed] });
 		} catch (error) {
-			this.container.logger.error('Error creating task:', error);
+			this.container.logger.error('Error creating task', error);
 			if (error.message?.includes('Blockchain')) {
-				return interaction.editReply('❌ Could not anchor the task on the blockchain. No task was created.');
+				return interaction.editReply('Could not anchor the task on the blockchain. No task was created.');
 			}
 			return interaction.editReply(
-				`⚠️ The task was anchored, but the confirmation could not be completed. Task ID: \`${taskId}\`. Please use /task list to verify it.`
+				`The task was anchored, but the confirmation could not be completed. Task ID \`${taskId}\`. Please use /task list to verify it.`
 			);
 		}
 	}
@@ -357,7 +359,7 @@ class TaskCommand extends Command {
 					calendar_event_id: null
 				},
 				'create'
-			).catch(err => this.container.logger.warn(`Calendar push failed for new task ${taskId}: ${err.message}`));
+			).catch(err => this.container.logger.warn(`Calendar push failed for new task ${taskId} ${err.message}`));
 		}
 
 		return { block };
@@ -373,7 +375,7 @@ class TaskCommand extends Command {
 		const userOpt = interaction.options.getUser('user');
 		const showEveryone = interaction.options.getBoolean('everyone');
 
-		// Determine assignedTo filter: null means show all
+		// Determine the assignedTo filter. null means show all
 		let assignedTo;
 		let listLabel;
 		if (showEveryone) {
@@ -403,7 +405,7 @@ class TaskCommand extends Command {
 
 			if (tasks.length === 0) {
 				return interaction.editReply({
-					content: `✅ No remaining tasks for ${periodLabel}!`
+					content: `No remaining tasks for ${periodLabel}!`
 				});
 			}
 
@@ -418,7 +420,7 @@ class TaskCommand extends Command {
 				const embed = new EmbedBuilder()
 					.setColor(0x3498db)
 					.setTitle(
-						`📋 Tasks — ${periodLabel}${pages.length > 1 ? ` (page ${index + 1}/${pages.length})` : ''}`
+						`Tasks for ${periodLabel}${pages.length > 1 ? ` (page ${index + 1}/${pages.length})` : ''}`
 					)
 					.setDescription(
 						`**${tasks.length}** task(s) remaining for ${listLabel}\nReporting timezone: **Asia/Jakarta**`
@@ -429,7 +431,7 @@ class TaskCommand extends Command {
 					const deadlineStr = `<t:${t.deadline}:R>`;
 					embed.addFields({
 						name: `${t.title}`,
-						value: `Assigned to: <@${t.assigned_to}>\nDeadline: ${deadlineStr}\nID: \`${t.task_id}\``,
+						value: `Assigned to: <@${t.assigned_to}>\nDeadline ${deadlineStr}\nID: \`${t.task_id}\``,
 						inline: false
 					});
 				}
@@ -442,44 +444,44 @@ class TaskCommand extends Command {
 			}
 			return;
 		} catch (error) {
-			this.container.logger.error('Error listing tasks:', error);
-			return interaction.editReply('❌ Failed to list tasks.');
+			this.container.logger.error('Error listing tasks', error);
+			return interaction.editReply('Failed to list tasks.');
 		}
 	}
 
 	// ──────────────────────────────────────────────
-	//  /task done & /task cancel — shared input resolution
+	//  /task done and /task cancel share input resolution
 	// ──────────────────────────────────────────────
 	/**
 	 * Resolve the task targeted by a done/cancel invocation.
 	 *
-	 * Inputs:
+	 * Inputs are
 	 *   - task_id (UUID)     → exact lookup (existing behavior)
 	 *   - task (title query) → fuzzy search over pending tasks (title +
 	 *     description). Multiple close candidates are returned so the caller
-	 *     can offer a picker; the transition is NEVER executed directly.
+	 *     can offer a picker. The transition is NEVER executed directly.
 	 *
 	 * @returns {Object} { task, candidates, query, viaFuzzy }
-	 *   task       — resolved task or null
-	 *   candidates — fuzzy candidates (length > 1 = ambiguous)
-	 *   query      — the raw title query used (null for UUID path)
+	 *   task is the resolved task or null
+	 *   candidates holds the fuzzy candidates (length > 1 means ambiguous)
+	 *   query is the raw title query used (null for the UUID path)
 	 */
 	async _resolveTaskInput(interaction) {
 		const taskId = interaction.options.getString('task_id')?.trim();
 		const query = interaction.options.getString('task')?.trim();
 
 		if (!taskId && !query) {
-			return { error: '❌ Provide either `task_id` (the task UUID) or `task` (task title to fuzzy search).' };
+			return { error: 'Provide either `task_id` (the task UUID) or `task` (task title to fuzzy search).' };
 		}
 
 		// ── UUID path (exact) ──
 		if (taskId) {
 			if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(taskId)) {
-				return { error: '❌ Task ID must be a valid UUID.' };
+				return { error: 'Task ID must be a valid UUID.' };
 			}
 			const task = taskRepository.getTask(taskId);
 			if (!task) {
-				return { error: '❌ Task not found. Check the task ID.' };
+				return { error: 'Task not found. Check the task ID.' };
 			}
 			return { task, candidates: [], query: null, viaFuzzy: false };
 		}
@@ -491,7 +493,7 @@ class TaskCommand extends Command {
 		});
 		if (candidates.length === 0) {
 			return {
-				error: `❌ No task found matching **${query}** (minimum confidence ${Math.round(MIN_FUZZY_SCORE * 100)}%). Try a task ID or a more specific title.`
+				error: `No task found matching **${query}** (minimum confidence ${Math.round(MIN_FUZZY_SCORE * 100)}%). Try a task ID or a more specific title.`
 			};
 		}
 		return {
@@ -523,10 +525,10 @@ class TaskCommand extends Command {
 	 * Build the ephemeral confirmation reply for a single resolved task.
 	 * Nothing is claimed or written until the user presses Confirm.
 	 */
-	_taskConfirmReply({ interaction, ids, verb, emoji, color, task, score, extraTitle }) {
+	_taskConfirmReply({ interaction, ids, verb, color, task, score, extraTitle }) {
 		const embed = new EmbedBuilder()
 			.setColor(color)
-			.setTitle(`${emoji} Confirm ${verb}?`)
+			.setTitle(`Confirm ${verb}?`)
 			.setDescription(
 				`**${task.title}**\nThis will ${verb.toLowerCase()} the task and record it on the blockchain.` +
 					(extraTitle ? `\n${extraTitle}` : '')
@@ -549,7 +551,7 @@ class TaskCommand extends Command {
 		);
 
 		return interaction.editReply({
-			content: '⚠️ **Action requires confirmation.** Nothing has been recorded yet.',
+			content: '**Action requires confirmation.** Nothing has been recorded yet.',
 			embeds: [embed],
 			components: [row],
 			ephemeral: true
@@ -559,10 +561,10 @@ class TaskCommand extends Command {
 	/**
 	 * Build the candidate-picker reply when several tasks match the query.
 	 */
-	_taskPickerReply({ interaction, ids, _verb, emoji, color, candidates, query }) {
+	_taskPickerReply({ interaction, ids, _verb, color, candidates, query }) {
 		const embed = new EmbedBuilder()
 			.setColor(color)
-			.setTitle(`${emoji} Multiple tasks match "${query}"`)
+			.setTitle(`Multiple tasks match "${query}"`)
 			.setDescription('Pick the task you meant. Nothing has been recorded yet.')
 			.setTimestamp();
 
@@ -584,7 +586,7 @@ class TaskCommand extends Command {
 		}
 
 		return interaction.editReply({
-			content: `⚠️ **${candidates.length} tasks match "${query}".** Pick one to continue. Nothing has been recorded yet.`,
+			content: `**${candidates.length} tasks match "${query}".** Pick one to continue. Nothing has been recorded yet.`,
 			embeds: [embed],
 			components: rows,
 			ephemeral: true
@@ -598,12 +600,12 @@ class TaskCommand extends Command {
 	 */
 	async _executeDone(task, interaction) {
 		if (!taskRepository.claimTaskTransition({ taskId: task.task_id, actorId: interaction.user.id })) {
-			return '⚠️ This task is already being updated by another action. Please try again.';
+			return 'This task is already being updated by another action. Please try again.';
 		}
 
 		try {
 			// 1. Anchor the completion block at most once. beginTaskTransition
-			// records the attempt, so a retry after a lost response can see that
+			// records the attempt. A retry after a lost response can then see that
 			// the chain write already happened and skip a duplicate append.
 			const transition = taskRepository.beginTaskTransition({
 				taskId: task.task_id,
@@ -640,24 +642,24 @@ class TaskCommand extends Command {
 					completedBy: interaction.user.id
 				})
 			) {
-				return '⚠️ This task was already updated by another action; no completion was recorded.';
+				return 'This task was already updated by another action. No completion was recorded.';
 			}
 
 			// Push to Google Calendar (best-effort)
 			const sync = _syncService();
 			if (sync) {
 				sync.pushTaskUpdate(task, 'delete').catch(err =>
-					this.container.logger.warn(`Calendar push failed for done task ${task.task_id}: ${err.message}`)
+					this.container.logger.warn(`Calendar push failed for done task ${task.task_id} ${err.message}`)
 				);
 			}
 
-			return { content: `✅ Task **${task.title}** marked as done!${_calendarNote()}` };
+			return { content: `Task **${task.title}** marked as done!${_calendarNote()}` };
 		} catch (error) {
-			this.container.logger.error('Error completing task:', error);
+			this.container.logger.error('Error completing task', error);
 			// Release the transition claim so the task is not blocked until the
-			// lease expires; the user can immediately retry.
+			// lease expires. The user can immediately retry.
 			taskRepository.releaseTaskTransition({ taskId: task.task_id, actorId: interaction.user.id });
-			return `⚠️ Could not complete task **${task.title}**. No completion was recorded; please try again.`;
+			return `Could not complete task **${task.title}**. No completion was recorded. Please try again.`;
 		}
 	}
 
@@ -667,7 +669,7 @@ class TaskCommand extends Command {
 	 */
 	async _executeCancel(task, interaction) {
 		if (!taskRepository.claimTaskTransition({ taskId: task.task_id, actorId: interaction.user.id })) {
-			return '⚠️ This task is already being updated by another action. Please try again.';
+			return 'This task is already being updated by another action. Please try again.';
 		}
 
 		try {
@@ -708,7 +710,7 @@ class TaskCommand extends Command {
 					cancelledBy: interaction.user.id
 				})
 			) {
-				return '⚠️ This task was already updated by another action; no cancellation was recorded.';
+				return 'This task was already updated by another action. No cancellation was recorded.';
 			}
 
 			// Push to Google Calendar (best-effort)
@@ -716,20 +718,20 @@ class TaskCommand extends Command {
 			if (sync) {
 				sync.pushTaskUpdate(task, 'cancel').catch(err =>
 					this.container.logger.warn(
-						`Calendar push failed for cancelled task ${task.task_id}: ${err.message}`
+						`Calendar push failed for cancelled task ${task.task_id} ${err.message}`
 					)
 				);
 			}
 
 			return {
-				content: `🗑️ Task **${task.title}** has been cancelled and removed from the pending list.${_calendarNote()}`
+				content: `Task **${task.title}** has been cancelled and removed from the pending list.${_calendarNote()}`
 			};
 		} catch (error) {
-			this.container.logger.error('Error cancelling task:', error);
+			this.container.logger.error('Error cancelling task', error);
 			// Release the transition claim so the task is not blocked until the
-			// lease expires; the user can immediately retry.
+			// lease expires. The user can immediately retry.
 			taskRepository.releaseTaskTransition({ taskId: task.task_id, actorId: interaction.user.id });
-			return `⚠️ Could not cancel task **${task.title}**. No cancellation was recorded; please try again.`;
+			return `Could not cancel task **${task.title}**. No cancellation was recorded. Please try again.`;
 		}
 	}
 
@@ -761,7 +763,6 @@ class TaskCommand extends Command {
 					interaction,
 					ids: TASK_DONE_IDS,
 					verb: 'Done',
-					emoji: '✅',
 					color: 0x00ff00,
 					candidates: resolved.candidates,
 					query: resolved.query
@@ -771,7 +772,6 @@ class TaskCommand extends Command {
 				interaction,
 				ids: TASK_DONE_IDS,
 				verb: 'Done',
-				emoji: '✅',
 				color: 0x00ff00,
 				task: resolved.task,
 				score: resolved.task.score,
@@ -779,20 +779,19 @@ class TaskCommand extends Command {
 			});
 		}
 
-		// UUID path — verify current state before asking for confirmation.
+		// UUID path. Verify the current state before asking for confirmation.
 		const existing = resolved.task;
 		if (existing.status === 'done') {
-			return interaction.editReply({ content: '❌ This task is already marked as done.', ephemeral: true });
+			return interaction.editReply({ content: 'This task is already marked as done.', ephemeral: true });
 		}
 		if (existing.cancelled) {
-			return interaction.editReply({ content: '❌ This task has already been cancelled.', ephemeral: true });
+			return interaction.editReply({ content: 'This task has already been cancelled.', ephemeral: true });
 		}
 
 		return this._taskConfirmReply({
 			interaction,
 			ids: TASK_DONE_IDS,
 			verb: 'Done',
-			emoji: '✅',
 			color: 0x00ff00,
 			task: existing
 		});
@@ -826,7 +825,6 @@ class TaskCommand extends Command {
 					interaction,
 					ids: TASK_CANCEL_IDS,
 					verb: 'Cancellation',
-					emoji: '🗑️',
 					color: 0xe74c3c,
 					candidates: resolved.candidates,
 					query: resolved.query
@@ -836,7 +834,6 @@ class TaskCommand extends Command {
 				interaction,
 				ids: TASK_CANCEL_IDS,
 				verb: 'Cancellation',
-				emoji: '🗑️',
 				color: 0xe74c3c,
 				task: resolved.task,
 				score: resolved.task.score,
@@ -844,20 +841,19 @@ class TaskCommand extends Command {
 			});
 		}
 
-		// UUID path — verify current state before asking for confirmation.
+		// UUID path. Verify the current state before asking for confirmation.
 		const existing = resolved.task;
 		if (existing.status === 'done') {
-			return interaction.editReply({ content: '❌ Cannot cancel a task that is already done.', ephemeral: true });
+			return interaction.editReply({ content: 'Cannot cancel a task that is already done.', ephemeral: true });
 		}
 		if (existing.cancelled) {
-			return interaction.editReply({ content: '❌ This task has already been cancelled.', ephemeral: true });
+			return interaction.editReply({ content: 'This task has already been cancelled.', ephemeral: true });
 		}
 
 		return this._taskConfirmReply({
 			interaction,
 			ids: TASK_CANCEL_IDS,
 			verb: 'Cancellation',
-			emoji: '🗑️',
 			color: 0xe74c3c,
 			task: existing
 		});

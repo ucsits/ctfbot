@@ -24,8 +24,8 @@ async function galleryPosterFor(item) {
 
 /**
  * Listen for store button interactions and drive the AP/Rp purchase flow.
- * Steps:
- *   Buy <item> → choose Pay with AP / Pay with Rp → execute and confirm.
+ * The steps are Buy <item>, then choose Pay with AP or Pay with Rp, then
+ * execute and confirm.
  */
 class StoreInteractionListener extends Listener {
 	constructor(context, options) {
@@ -41,7 +41,7 @@ class StoreInteractionListener extends Listener {
 			return;
 		}
 
-		// Task confirmation buttons (/task done & /task cancel):
+		// Task confirmation buttons for /task done and /task cancel.
 		//   task_done_confirm:<taskId>[:score]     task_done_deny:<taskId>
 		//   task_done_candidate:<taskId>:<score>  (picker re-render)
 		//   task_cancel_confirm:<taskId>[:score]   task_cancel_deny:<taskId>
@@ -56,11 +56,11 @@ class StoreInteractionListener extends Listener {
 			TASK_CANCEL_IDS.candidate,
 			TASK_CANCEL_IDS.deny
 		]);
-		if (taskIds.has(interaction.customId.split(':')[0])) {
+		if (taskIds.has(interaction.customId.split('')[0])) {
 			return this._handleTaskConfirm(interaction);
 		}
 
-		const [namespace, slug] = interaction.customId.split(':');
+		const [namespace, slug] = interaction.customId.split('');
 
 		if (!slug) {
 			return;
@@ -80,14 +80,14 @@ class StoreInteractionListener extends Listener {
 	/**
 	 * Route /task done & /task cancel confirm/deny/candidate buttons.
 	 *
-	 * The original prompt is an ephemeral message (only the invoker can see
-	 * it), but buttons on other components could in theory be re-used, so we
-	 * verify the clicker is the same user who ran the command before acting.
-	 * The button customId carries the initiating user id:
+	 * The original prompt is an ephemeral message that only the invoker can see,
+	 * but buttons on other components could in theory be re-used. We therefore
+	 * verify the clicker is the same user who ran the command before acting. The
+	 * button customId carries the initiating user id as
 	 *   <namespace>:<taskId>[:<score>]:<userId>
 	 */
 	async _handleTaskConfirm(interaction) {
-		const parts = interaction.customId.split(':');
+		const parts = interaction.customId.split('');
 		const namespace = parts[0];
 		const taskId = parts[1];
 		const score = parts[2] ? Number(parts[2]) : undefined;
@@ -97,7 +97,7 @@ class StoreInteractionListener extends Listener {
 		if (!initiatorId || initiatorId !== interaction.user.id) {
 			return interaction.reply({
 				content:
-					'❌ This confirmation belongs to someone else. Run `/task done` or `/task cancel` yourself to act on a task.',
+					'This confirmation belongs to someone else. Run `/task done` or `/task cancel` yourself to act on a task.',
 				ephemeral: true
 			});
 		}
@@ -108,7 +108,7 @@ class StoreInteractionListener extends Listener {
 		const taskCommand = this.container.stores.get('commands').get('task');
 		if (!taskCommand) {
 			return interaction.reply({
-				content: '❌ Task command is not loaded.',
+				content: 'Task command is not loaded.',
 				ephemeral: true
 			});
 		}
@@ -117,28 +117,27 @@ class StoreInteractionListener extends Listener {
 		try {
 			task = taskRepository.getTask(taskId);
 		} catch (error) {
-			this.container.logger.error('Task confirm: failed to load task:', error);
-			return interaction.reply({ content: '❌ Failed to load the task.', ephemeral: true });
+			this.container.logger.error('Task confirm failed to load task', error);
+			return interaction.reply({ content: 'Failed to load the task.', ephemeral: true });
 		}
 
 		if (!task) {
 			return interaction.reply({
-				content: '❌ Task not found. It may have been removed.',
+				content: 'Task not found. It may have been removed.',
 				ephemeral: true
 			});
 		}
 
-		// ── Candidate picker: re-render a single-task confirmation for the
-		// picked task. Nothing has been recorded yet. ──
+		// Candidate picker. Re-render a single-task confirmation for the picked task.
+		// Nothing has been recorded yet.
 		if (namespace === TASK_DONE_IDS.candidate || namespace === TASK_CANCEL_IDS.candidate) {
 			const ids = namespace === TASK_DONE_IDS.candidate ? TASK_DONE_IDS : TASK_CANCEL_IDS;
 			const verb = namespace === TASK_DONE_IDS.candidate ? 'Done' : 'Cancellation';
-			const emoji = namespace === TASK_DONE_IDS.candidate ? '✅' : '🗑️';
 			const color = namespace === TASK_DONE_IDS.candidate ? 0x00ff00 : 0xe74c3c;
 
 			const embed = new EmbedBuilder()
 				.setColor(color)
-				.setTitle(`${emoji} Confirm ${verb}?`)
+				.setTitle(`Confirm ${verb}?`)
 				.setDescription(
 					`**${task.title}**\nThis will ${verb === 'Done' ? 'mark the task done' : 'cancel the task'} and record it on the blockchain.`
 				)
@@ -166,35 +165,35 @@ class StoreInteractionListener extends Listener {
 			);
 
 			return interaction.update({
-				content: '⚠️ **Action requires confirmation.** Nothing has been recorded yet.',
+				content: '**Action requires confirmation.** Nothing has been recorded yet.',
 				embeds: [embed],
 				components: [row]
 			});
 		}
 
-		// ── Deny: just close the prompt. Nothing was recorded. ──
+		// Deny. Just close the prompt. Nothing was recorded.
 		if (namespace === TASK_DONE_IDS.deny || namespace === TASK_CANCEL_IDS.deny) {
 			return interaction.update({
-				content: '✅ Action cancelled — nothing was recorded.',
+				content: 'Action cancelled. Nothing was recorded.',
 				embeds: [],
 				components: []
 			});
 		}
 
-		// ── Confirm: execute the shared transition path. ──
+		// Confirm. Execute the shared transition path.
 		const isCancel = namespace === TASK_CANCEL_IDS.confirm;
 
-		// Guard: never act on a task whose state changed since the prompt.
+		// Guard against acting on a task whose state changed since the prompt.
 		if (task.status === 'done') {
 			return interaction.update({
-				content: '❌ This task is already marked as done.',
+				content: 'This task is already marked as done.',
 				embeds: [],
 				components: []
 			});
 		}
 		if (task.cancelled) {
 			return interaction.update({
-				content: '❌ This task has already been cancelled.',
+				content: 'This task has already been cancelled.',
 				embeds: [],
 				components: []
 			});
@@ -220,7 +219,7 @@ class StoreInteractionListener extends Listener {
 	async _choosePayment(interaction, slug) {
 		const item = activityRepository.getStoreItemBySlug(slug);
 		if (!item) {
-			return interaction.reply({ content: '❌ That item is no longer available.', ephemeral: true });
+			return interaction.reply({ content: 'That item is no longer available.', ephemeral: true });
 		}
 
 		const row = new ActionRowBuilder().addComponents(
@@ -236,7 +235,7 @@ class StoreInteractionListener extends Listener {
 
 		const embed = new EmbedBuilder()
 			.setColor(0x00e5ff)
-			.setTitle(`🛍️ Buy ${item.name}`)
+			.setTitle(`Buy ${item.name}`)
 			.setDescription(`How would you like to pay for **${item.name}**?`)
 			.addFields(
 				{ name: 'Activity Points', value: `**${item.ap_price} AP**`, inline: true },
@@ -257,26 +256,26 @@ class StoreInteractionListener extends Listener {
 	}
 
 	/**
-	 * Pay with AP: deduct balance, complete immediately, anchor a block.
+	 * Pay with AP. Deduct the balance, complete immediately, and anchor a block.
 	 */
 	async _buyWithAp(interaction, slug) {
 		await interaction.deferReply({ ephemeral: true });
 
-		// The payment buttons are one-shot: drop them as soon as this handler
-		// owns the interaction so the same message cannot be clicked again.
+		// The payment buttons are one-shot. Drop them as soon as this handler owns the
+		// interaction. The same message cannot then be clicked again.
 		await interaction.message.edit({ components: [] }).catch(() => {});
 
 		const item = activityRepository.getStoreItemBySlug(slug);
 		if (!item) {
-			return interaction.editReply('❌ That item is no longer available.');
+			return interaction.editReply('That item is no longer available.');
 		}
 
 		const purchaseId = randomUUID();
 
 		// 1. Reserve the points and the pending purchase row in one transaction.
-		// This ordering is the fix: no block is anchored until the spend has
-		// actually committed, so a rejected reservation can no longer leave an
-		// orphan "completed purchase" block on the chain.
+		// The ordering matters. No block is anchored until the spend has actually
+		// committed. A rejected reservation can no longer leave an orphan "completed
+		// purchase" block on the chain.
 		const newBalance = activityRepository.reserveApPurchase({
 			purchaseId,
 			userId: interaction.user.id,
@@ -287,7 +286,7 @@ class StoreInteractionListener extends Listener {
 		if (newBalance === null) {
 			const balance = activityRepository.getBalance(interaction.user.id);
 			return interaction.editReply(
-				`❌ You need **${item.ap_price} AP** but you only have **${balance} AP**. Earn more activity points first!`
+				`You need **${item.ap_price} AP** but you only have **${balance} AP**. Earn more activity points first!`
 			);
 		}
 
@@ -309,7 +308,7 @@ class StoreInteractionListener extends Listener {
 
 			const embed = new EmbedBuilder()
 				.setColor(0x00ff00)
-				.setTitle('✅ Purchase Complete!')
+				.setTitle('Purchase Complete!')
 				.setDescription(`You bought **${item.name}** with **${item.ap_price} AP**!`)
 				.addFields(
 					{ name: 'Item', value: item.name, inline: true },
@@ -326,17 +325,17 @@ class StoreInteractionListener extends Listener {
 
 			return interaction.editReply({ embeds: [embed], files: [{ name: 'gallery.png', attachment: poster }] });
 		} catch (error) {
-			this.container.logger.error('Error buying with AP:', error);
-			// Nothing usable was anchored, so hand the points back instead of
-			// leaving the user debited for a purchase that never happened.
+			this.container.logger.error('Error buying with AP', error);
+			// Nothing usable was anchored. Hand the points back instead of leaving the
+			// user debited for a purchase that never happened.
 			activityRepository.releaseApPurchase({ purchaseId });
-			return interaction.editReply('❌ Purchase failed. Blockchain error: ' + error.message);
+			return interaction.editReply('Purchase failed. Blockchain error. ' + error.message);
 		}
 	}
 
 	/**
-	 * Pay with Rp: create a pending purchase (payment is offline), anchor a block.
-	 * An admin later runs /store-confirm to finalize it.
+	 * Pay with Rp. Create a pending purchase (payment is offline) and anchor a
+	 * block. An admin later runs /store-confirm to finalize it.
 	 */
 	async _buyWithRp(interaction, slug) {
 		await interaction.deferReply({ ephemeral: true });
@@ -345,14 +344,14 @@ class StoreInteractionListener extends Listener {
 
 		const item = activityRepository.getStoreItemBySlug(slug);
 		if (!item) {
-			return interaction.editReply('❌ That item is no longer available.');
+			return interaction.editReply('That item is no longer available.');
 		}
 
 		const purchaseId = randomUUID();
 
-		// 1. Create the pending purchase row BEFORE anchoring, so a block can
-		// never exist for a purchase that was never recorded. The row is the
-		// source of truth; the block is anchored against it.
+		// 1. Create the pending purchase row BEFORE anchoring. A block then never
+		// exists for a purchase that was never recorded. The row is the source of
+		// truth. The block is anchored against it.
 		activityRepository.createPurchase({
 			id: purchaseId,
 			userId: interaction.user.id,
@@ -382,7 +381,7 @@ class StoreInteractionListener extends Listener {
 
 			const embed = new EmbedBuilder()
 				.setColor(0xffaa00)
-				.setTitle('⏳ Purchase Requested')
+				.setTitle('Purchase Requested')
 				.setDescription(`You requested **${item.name}** for **Rp ${item.rp_price.toLocaleString('id-ID')}**.`)
 				.addFields(
 					{ name: 'Item', value: item.name, inline: true },
@@ -402,17 +401,17 @@ class StoreInteractionListener extends Listener {
 				content:
 					'Pay an admin **Rp ' +
 					item.rp_price.toLocaleString('id-ID') +
-					'** offline, then give them this **Purchase ID** to confirm: `' +
+					'** offline, then give them this **Purchase ID** to confirm, `' +
 					purchaseId +
 					'`',
 				embeds: [embed],
 				files: [{ name: 'gallery.png', attachment: poster }]
 			});
 		} catch (error) {
-			this.container.logger.error('Error buying with Rp:', error);
-			// No usable pending purchase means no phantom order: remove it.
+			this.container.logger.error('Error buying with Rp', error);
+			// No usable pending purchase means no phantom order. Remove it.
 			activityRepository.deletePendingPurchase(purchaseId);
-			return interaction.editReply('❌ Purchase failed. Blockchain error: ' + error.message);
+			return interaction.editReply('Purchase failed. Blockchain error. ' + error.message);
 		}
 	}
 }

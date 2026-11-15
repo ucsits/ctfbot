@@ -1,5 +1,5 @@
 /**
- * Task repository — database operations for tasks & reminders
+ * Task repository for tasks and reminders
  * @module database/repositories/task
  */
 
@@ -39,9 +39,9 @@ function createReminder({ taskId, channelId, remindAt }) {
 /**
  * Insert a task and all of its reminders in one transaction.
  *
- * The task row and its reminder rows used to be written separately, so a
- * failure while scheduling the second reminder left a task with a partial
- * reminder set even though the anchoring block described the full schedule.
+ * The task row and its reminder rows used to be written separately. A failure
+ * while scheduling the second reminder then left a task with a partial reminder
+ * set even though the anchoring block described the full schedule.
  * Either the task and every reminder are written, or nothing is.
  *
  * @param {object} params
@@ -64,7 +64,8 @@ function createTaskWithReminders({ task, reminders }) {
 }
 
 /**
- * Cancel a task (soft delete — marks cancelled=1, keeps blockchain audit trail).
+ * Cancel a task as a soft delete. It marks cancelled=1 and keeps the blockchain
+ * audit trail.
  */
 function claimTaskTransition({ taskId, actorId, leaseSeconds = 120 }) {
 	const now = Math.floor(Date.now() / 1000);
@@ -81,7 +82,7 @@ function claimTaskTransition({ taskId, actorId, leaseSeconds = 120 }) {
 }
 
 /**
- * Record that a transition is being attempted, and return its current state.
+ * Record that a transition is being attempted. Returns its current state.
  *
  * The lease from claimTaskTransition serializes the transition itself but not
  * the blockchain append against the database write. If a block was persisted
@@ -116,7 +117,7 @@ function getTaskTransition(taskId, action) {
 }
 
 /**
- * Store the anchored block height for a transition, so a retry can skip the
+ * Store the anchored block height for a transition. A retry can then skip the
  * append. Only fills an unset height.
  *
  * @param {object} params
@@ -215,7 +216,7 @@ function listPendingTasks({ assignedTo, deadlineAfter, deadlineBefore } = {}) {
 }
 
 /**
- * All pending, non-cancelled tasks — used as the candidate pool for fuzzy
+ * All pending, non-cancelled tasks, used as the candidate pool for fuzzy
  * title/description search (see lib/utils/fuzzyMatch.js). Returns the fields
  * needed to render a confirmation embed and run the transition.
  */

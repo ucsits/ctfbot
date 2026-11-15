@@ -43,7 +43,7 @@ class SummarizeCTFCommand extends Command {
 
 		if (!ctf) {
 			return interaction.editReply({
-				content: '❌ This command can only be used in a CTF channel.',
+				content: 'This command can only be used in a CTF channel.',
 				ephemeral: true
 			});
 		}
@@ -67,21 +67,21 @@ class SummarizeCTFCommand extends Command {
 				return this.handleTSVOutput(interaction, stats, ctf);
 			}
 
-			// Only the embed shows the leaderboard rank, so the TSV export above
-			// deliberately returns before this call is made.
+			// Only the embed shows the leaderboard rank. The TSV export above
+			// therefore returns before this call is made.
 			const scoreboard = await this.fetchScoreboard(ctf);
 			return this.handlePrettyOutput(interaction, stats, ctf, isMultiTeam, scoreboard);
 		} catch (error) {
-			this.container.logger.error('Error generating summary:', error);
-			return interaction.editReply('❌ Failed to generate summary.');
+			this.container.logger.error('Error generating summary', error);
+			return interaction.editReply('Failed to generate summary.');
 		}
 	}
 
 	/**
 	 * Fetch the leaderboard from whichever platform the channel is bound to.
 	 *
-	 * A failure here only costs the rank column, so it is logged and the summary
-	 * is still produced from the local data.
+ * A failure here only costs the rank column. It is logged. The summary is
+ * still produced from the local data.
 	 *
 	 * @param {Object} ctf - The CTF row
 	 * @returns {Promise<Array>} Normalized scoreboard entries, empty when unavailable
@@ -98,7 +98,7 @@ class SummarizeCTFCommand extends Command {
 			});
 			return await client.getScoreboard();
 		} catch (error) {
-			this.container.logger.error('Failed to fetch scoreboard:', error);
+			this.container.logger.error('Failed to fetch scoreboard', error);
 			return [];
 		}
 	}
@@ -126,7 +126,7 @@ class SummarizeCTFCommand extends Command {
 
 		const embed = new EmbedBuilder()
 			.setColor(0x0099ff)
-			.setTitle(`📊 Summary for ${ctf.ctf_name}`)
+			.setTitle(`Summary for ${ctf.ctf_name}`)
 			.setDescription(output)
 			.setTimestamp();
 

@@ -51,7 +51,7 @@ class AddChalCTFCommand extends Command {
 		try {
 			const ctf = ctfOperations.getCTFByChannelId(channel.id);
 			if (!ctf) {
-				return interaction.editReply('❌ This channel is not registered as a CTF channel in the database.');
+				return interaction.editReply('This channel is not registered as a CTF channel in the database.');
 			}
 
 			try {
@@ -67,27 +67,27 @@ class AddChalCTFCommand extends Command {
 
 				const embed = new EmbedBuilder()
 					.setColor(0x00ff00)
-					.setTitle('✅ Challenge Added')
+					.setTitle('Challenge Added')
 					.setDescription(`Challenge **${chalName}** has been added to **${ctf.ctf_name}**!`)
 					.addFields(
-						{ name: '📝 Challenge Name', value: chalName, inline: true },
-						{ name: '📁 Category', value: chalCategory, inline: true },
-						{ name: '👤 Added by', value: `${interaction.user}`, inline: true }
+						{ name: 'Challenge Name', value: chalName, inline: true },
+						{ name: 'Category', value: chalCategory, inline: true },
+						{ name: 'Added by', value: `${interaction.user}`, inline: true }
 					)
 					.setTimestamp()
-					.setFooter({ text: `Challenge ID: ${chalId}` });
+					.setFooter({ text: `Challenge ID ${chalId}` });
 
 				await interaction.editReply({ embeds: [embed] });
 			} catch (dbError) {
 				if (dbError.message.includes('UNIQUE constraint failed')) {
-					return interaction.editReply(`❌ Challenge **${chalName}** already exists in this CTF.`);
+					return interaction.editReply(`Challenge **${chalName}** already exists in this CTF.`);
 				}
-				this.container.logger.error('Failed to add challenge:', dbError);
-				return interaction.editReply('❌ Failed to add challenge. Please try again later.');
+				this.container.logger.error('Failed to add challenge', dbError);
+				return interaction.editReply('Failed to add challenge. Please try again later.');
 			}
 		} catch (error) {
-			this.container.logger.error('Error adding challenge:', error);
-			return interaction.editReply('❌ Failed to add challenge. Please try again later.');
+			this.container.logger.error('Error adding challenge', error);
+			return interaction.editReply('Failed to add challenge. Please try again later.');
 		}
 	}
 }

@@ -40,27 +40,27 @@ class RepLeaderboardCommand extends Command {
 			const rows = reputationRepository.getLeaderboard(limit);
 
 			if (rows.length === 0) {
-				return interaction.editReply('📊 No rep data yet. Be the first to give rep!');
+				return interaction.editReply('No rep data yet. Be the first to give rep!');
 			}
 
-			const embed = new EmbedBuilder().setColor(0xf1c40f).setTitle('🏆 Reputation Leaderboard').setTimestamp();
+			const embed = new EmbedBuilder().setColor(0xf1c40f).setTitle('Reputation Leaderboard').setTimestamp();
 
 			const lines = [];
 			for (let i = 0; i < rows.length; i++) {
-				const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`;
+				const medal = `${i + 1}.`;
 				const user = await interaction.client.users.fetch(rows[i].user_id).catch(() => null);
 				const name = user ? user.tag : `\`${rows[i].user_id}\``;
 				const total = rows[i].total;
 				const sign = total >= 0 ? '+' : '';
-				lines.push(`${medal} **${name}** — ${sign}${total}`);
+				lines.push(`${medal} **${name}** ${sign}${total}`);
 			}
 
 			embed.setDescription(lines.join('\n'));
 
 			return interaction.editReply({ embeds: [embed] });
 		} catch (error) {
-			this.container.logger.error('Error fetching rep leaderboard:', error);
-			return interaction.editReply('❌ Failed to fetch leaderboard.');
+			this.container.logger.error('Error fetching rep leaderboard', error);
+			return interaction.editReply('Failed to fetch leaderboard.');
 		}
 	}
 }

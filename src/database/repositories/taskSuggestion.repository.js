@@ -1,5 +1,5 @@
 /**
- * Task suggestion repository — suggestion cards posted from conversations
+ * Task suggestion repository for the cards posted from conversations
  * @module database/repositories/taskSuggestion
  */
 
@@ -29,7 +29,7 @@ function createSuggestion({ id, channelId, sourceMessageId, title, description, 
 }
 
 /**
- * Remove a suggestion whose card could not be posted, so the decision can be
+ * Remove a suggestion whose card could not be posted. The decision can then be
  * suggested again on a later pass.
  */
 function deleteSuggestion(id) {
@@ -119,8 +119,8 @@ function suggestedSourceIds(channelId, sourceMessageIds) {
 }
 
 /**
- * Titles of the most recent suggestions in a channel, newest last, so the
- * model can avoid repeating them.
+ * Titles of the most recent suggestions in a channel, newest last. The model
+ * can then avoid repeating them.
  *
  * @returns {string[]}
  */
@@ -144,8 +144,8 @@ function recentHandled(channelId, limit = 20) {
 }
 
 /**
- * Suggestions in a channel that nobody has acted on yet, oldest first, so the
- * model can update one instead of suggesting the same task again.
+ * Suggestions in a channel that nobody has acted on yet, oldest first. The
+ * model can then update one instead of suggesting the same task again.
  *
  * @returns {Array<object>}
  */
@@ -181,10 +181,10 @@ function updateSuggestion(id, changes) {
 }
 
 /**
- * Drop the open suggestion whose card message was deleted from Discord, so
- * the model no longer sees it as open. Handled ones are kept: a created task
- * exists whether or not its message does, and dismissed cards are deleted by
- * the bot itself while the model should still know they were not wanted.
+ * Drop the open suggestion whose card message was deleted from Discord. The
+ * model no longer sees it as open. Handled ones are kept. A created task exists
+ * whether or not its message does. Dismissed cards are deleted by the bot itself
+ * while the model should still know they were not wanted.
  *
  * @returns {boolean} whether a suggestion was removed
  */

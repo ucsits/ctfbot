@@ -38,7 +38,7 @@ class PactCommand extends Command {
 		// Validate NRP is an integer
 		if (!/^\d+$/.test(nrp)) {
 			return interaction.reply({
-				content: '❌ NRP must be a valid integer number.',
+				content: 'NRP must be a valid integer number.',
 				ephemeral: true
 			});
 		}
@@ -48,17 +48,17 @@ class PactCommand extends Command {
 
 			const embed = new EmbedBuilder()
 				.setColor(0x00ff00)
-				.setTitle('✅ Pact Registered')
+				.setTitle('Pact Registered')
 				.setDescription('Your information has been securely saved.')
-				.addFields({ name: '👤 Name', value: name, inline: true }, { name: '🔢 NRP', value: nrp, inline: true })
+				.addFields({ name: 'Name', value: name, inline: true }, { name: 'NRP', value: nrp, inline: true })
 				.setTimestamp()
-				.setFooter({ text: `User ID: ${userId}` });
+				.setFooter({ text: `User ID ${userId}` });
 
 			return interaction.reply({ embeds: [embed], ephemeral: true });
 		} catch (error) {
-			this.container.logger.error('Error creating pact:', error);
+			this.container.logger.error('Error creating pact', error);
 			return interaction.reply({
-				content: '❌ Failed to register pact. Please try again later.',
+				content: 'Failed to register pact. Please try again later.',
 				ephemeral: true
 			});
 		}

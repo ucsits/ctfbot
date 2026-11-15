@@ -16,7 +16,7 @@ const { logger } = require('../logger');
  *
  * @example
  * const idHints = getIdHints('ping');
- * // Returns: ['1234567890', '0987654321']
+ * // Returns ['1234567890', '0987654321']
  */
 function getIdHints(commandName) {
 	const idHintsFile = path.join(__dirname, '..', '..', 'commandIds.json');

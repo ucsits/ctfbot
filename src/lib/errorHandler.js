@@ -2,7 +2,7 @@ function formatError(error) {
 	if (error && error.message) {
 		return error.message;
 	}
-	return '❌ An unknown error occurred. Please try again later.';
+	return 'An unknown error occurred. Please try again later.';
 }
 
 async function handleCommandError(interaction, error, context = 'command') {

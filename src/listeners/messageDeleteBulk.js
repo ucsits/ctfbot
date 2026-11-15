@@ -17,7 +17,7 @@ class MessageDeleteBulkListener extends Listener {
 			try {
 				taskSuggest.forgetMessage(channel.id, id);
 			} catch (error) {
-				this.container.logger.error('Error forgetting deleted message for task suggestions:', error);
+				this.container.logger.error('Error forgetting deleted message for task suggestions', error);
 			}
 		}
 	}

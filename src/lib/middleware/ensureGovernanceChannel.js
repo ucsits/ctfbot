@@ -17,11 +17,11 @@ function ensureGovernanceChannel(interaction) {
 	const channel = interaction.channel;
 
 	if (!channel) {
-		throw new GovernanceChannelError('❌ This command can only be used in a guild channel.');
+		throw new GovernanceChannelError('This command can only be used in a guild channel.');
 	}
 
 	if (!constants.GOVERNANCE_CATEGORIES.includes(channel.parentId)) {
-		throw new GovernanceChannelError('❌ This command is not available in this channel category.');
+		throw new GovernanceChannelError('This command is not available in this channel category.');
 	}
 
 	return channel;

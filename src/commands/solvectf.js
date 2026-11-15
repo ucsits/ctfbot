@@ -57,7 +57,7 @@ class SolveCTFCommand extends Command {
 
 			await interaction.respond(filtered);
 		} catch (error) {
-			this.container.logger.error('Error in autocomplete:', error);
+			this.container.logger.error('Error in autocomplete', error);
 			await interaction.respond([]);
 		}
 	}
@@ -120,8 +120,8 @@ class SolveCTFCommand extends Command {
 			}
 
 			// Mark challenge as solved. In team mode the team name is stored as the
-			// team key, so the partial unique index enforces one solve per team and
-			// this cannot be bypassed by two members racing.
+			// team key. The partial unique index then enforces one solve per team,
+			// and two members cannot bypass it by racing.
 			try {
 				challengeOperations.markChallengeSolved(
 					challenge.id,
@@ -165,11 +165,11 @@ class SolveCTFCommand extends Command {
 				if (dbError.message.includes('UNIQUE constraint failed')) {
 					return interaction.editReply(`You have already marked **${chalName}** as solved.`);
 				}
-				this.container.logger.error('Failed to mark challenge as solved:', dbError);
+				this.container.logger.error('Failed to mark challenge as solved', dbError);
 				return interaction.editReply('Failed to mark challenge as solved. Please try again later.');
 			}
 		} catch (error) {
-			this.container.logger.error('Error solving challenge:', error);
+			this.container.logger.error('Error solving challenge', error);
 			return interaction.editReply('Failed to solve challenge. Please try again later.');
 		}
 	}

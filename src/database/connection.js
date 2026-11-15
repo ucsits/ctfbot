@@ -8,10 +8,10 @@ function getConnection() {
 		const dbPath = path.join(process.cwd(), 'ctfbot.db');
 		dbInstance = new Database(dbPath);
 
-		dbInstance.pragma('foreign_keys = ON');
-		// WAL lets readers proceed while a writer is active, and busy_timeout makes
-		// a concurrent writer wait for the lock instead of failing immediately with
+		// WAL lets readers proceed while a writer is active. busy_timeout makes a
+		// concurrent writer wait for the lock instead of failing immediately with
 		// SQLITE_BUSY. Harmless for the current single-process deployment and
+		// required if the bot is ever run as more than one process.
 		// required if the bot is ever run as more than one process.
 		dbInstance.pragma('journal_mode = WAL');
 		dbInstance.pragma('busy_timeout = 5000');
@@ -31,9 +31,9 @@ function closeConnection() {
  * Run `fn` inside a single database transaction, returning its result.
  *
  * A throw inside `fn` rolls the whole transaction back. Nested calls are
- * supported: better-sqlite3 promotes them to savepoints, so a repository
- * function that already wraps itself in a transaction can safely be called
- * from another transaction scope.
+ * supported. better-sqlite3 promotes them to savepoints. A repository function
+ * that already wraps itself in a transaction can then be called safely from
+ * another transaction scope.
  *
  * @template T
  * @param {() => T} fn
