@@ -13,6 +13,7 @@ const {
 	computePeriodRange
 } = require('./date');
 const { getIdHints, saveCommandIds } = require('./commandIds');
+const { stripEmoji } = require('./emoji');
 const timezoneUtils = require('./timezones');
 
 module.exports = {
@@ -30,5 +31,8 @@ module.exports = {
 
 	// Command ID utilities
 	getIdHints,
-	saveCommandIds
+	saveCommandIds,
+
+	// Text utilities
+	stripEmoji
 };

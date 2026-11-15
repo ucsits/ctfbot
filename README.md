@@ -589,6 +589,10 @@ reply with a suggestion card offering to create a task with reminders.
 - The model is told to chat like a classmate in the group chat, in everyday
   Indonesian slang, with its humor setting at 10% (TARS from Interstellar),
   almost always to the point, with only a rare deadpan one-liner.
+- No emojis in anything the bot writes. The prompt forbids them, and the
+  output is stripped of Unicode and custom Discord emojis before it is posted,
+  so chat messages, card titles, descriptions and memory notes stay plain
+  text. Reaction controls (👍, 👎, 🔇, 🧠) are not affected.
 - When mentioned, the bot shows "typing..." while the model thinks, then
   sends one to three short chat messages. The first is a quick
   acknowledgment that fits the message ("wait" for a request, "hmm" for a

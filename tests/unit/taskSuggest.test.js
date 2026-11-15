@@ -268,7 +268,7 @@ describe('taskSuggest direct mentions', () => {
 		expect(globalThis.fetch).toHaveBeenCalledTimes(1);
 		expect(channel.sendTyping).toHaveBeenCalledTimes(1);
 		// Nothing is posted before the model answers. The "typing..." indicator is
-	// the feedback.
+		// the feedback.
 		expect(message.reply).not.toHaveBeenCalled();
 		expect(channel.send).not.toHaveBeenCalled();
 
@@ -481,6 +481,7 @@ describe('taskSuggest direct mentions', () => {
 		const [system] = taskSuggest._buildPrompt({ context: [], fresh, people, proposedTitles: [] });
 		expect(system.content).toContain('Your own earlier messages in the context are NOT proof');
 		expect(system.content).toContain('em dash');
+		expect(system.content).toContain('Jangan pakai emoji');
 	});
 });
 
@@ -497,6 +498,17 @@ describe('banned punctuation', () => {
 		);
 		expect(p.title).toBe('Sidang, Day 3');
 		expect(p.description).toBe('lanjut, day 2');
+	});
+
+	it('removes emojis from chat messages, titles and descriptions', async () => {
+		const taskSuggest = await import('../../src/services/taskSuggest.js');
+		expect(taskSuggest._chatMessages({ messages: ['oke 🚀 ini ya'] })).toEqual(['oke ini ya']);
+		const [p] = taskSuggest._normalizeProposals(
+			{ proposals: [{ title: 'Sidang ✅ Day 3', description: 'lanjut 🎉 day 2', source_message_id: '111' }] },
+			{ fresh, people, proposedSources: new Set() }
+		);
+		expect(p.title).toBe('Sidang Day 3');
+		expect(p.description).toBe('lanjut day 2');
 	});
 });
 
@@ -1152,7 +1164,7 @@ describe('deleted messages', () => {
 		expect(suggestions.getSuggestion(`open-${n}`)).toBeUndefined();
 		expect(suggestions.getSuggestion(`made-${n}`).status).toBe('created');
 		// Dismiss deletes the card itself. The model should still know it was not
-	// wanted.
+		// wanted.
 		expect(suggestions.getSuggestion(`nope-${n}`).status).toBe('dismissed');
 		expect(memory.listNotes('u1').map(x => x.note)).not.toContain(`note-${n}`);
 	});

@@ -230,6 +230,10 @@ describe('chat._sanitize', () => {
 		expect(chat._sanitize('"eh — coba ini @everyone"')).toBe('eh, coba ini everyone');
 	});
 
+	it('removes emojis', () => {
+		expect(chat._sanitize('gas 🔥 aja')).toBe('gas aja');
+	});
+
 	it('caps the length', () => {
 		process.env.CHAT_MAX_MESSAGE_CHARS = '20';
 		expect(chat._sanitize('a'.repeat(100)).length).toBeLessThanOrEqual(21);
@@ -253,6 +257,7 @@ describe('chat prompt', () => {
 		expect(system.content).toContain('Humor setting 10%');
 		expect(system.content).toContain('jangan jawab sendiri');
 		expect(system.content).toContain('Jangan pernah bilang seseorang kurang kreatif');
+		expect(system.content).toContain('Jangan pakai emoji');
 		expect(system.content).toContain('<search_results>');
 	});
 

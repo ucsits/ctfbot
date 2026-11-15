@@ -30,6 +30,7 @@ const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('
 const config = require('../config');
 const constants = require('../lib/constants/config');
 const { chatCompletion, parseJsonReply } = require('../lib/llm/openai');
+const { stripEmoji } = require('../lib/utils/emoji');
 const suggestionRepository = require('../database/repositories/taskSuggestion.repository');
 const memoryRepository = require('../database/repositories/actorMemory.repository');
 const { logger } = require('../lib/logger');
@@ -257,14 +258,14 @@ function _chatMessages(parsed) {
 }
 
 /**
- * Strip punctuation the bot must not use. Em and en dashes become a comma,
- * or a hyphen inside a number range.
+ * Strip punctuation the bot must not use. Emojis are removed, and em and en
+ * dashes become a comma, or a hyphen inside a number range.
  *
  * @param {string} text
  * @returns {string}
  */
 function _plain(text) {
-	return text
+	return stripEmoji(text)
 		.replace(/(\d)\s*[\u2013\u2014]\s*(\d)/g, '$1-$2')
 		.replace(/\s*[\u2013\u2014]\s*/g, ', ')
 		.replace(/,\s*([,.!?])/g, '$1')
@@ -385,9 +386,7 @@ async function _analyze(channelId, { trigger = null } = {}) {
 		try {
 			parsed = parseJsonReply(reply);
 		} catch (error) {
-			suggestLog.warn(
-				`Unparseable model reply for ${where} (${error.message}) ${_clip(reply, LOG_REPLY_CHARS)}`
-			);
+			suggestLog.warn(`Unparseable model reply for ${where} (${error.message}) ${_clip(reply, LOG_REPLY_CHARS)}`);
 			if (trigger) {
 				stopTyping();
 				await _replyTo(trigger, 'duh, jawabanku barusan kacau formatnya. coba mention aku lagi ya');
@@ -565,7 +564,7 @@ function _buildPrompt({
 		'Earlier messages are context. Use them to understand what the NEW messages refer to, but only act on what the NEW messages say. Do not repeat anything listed as already suggested.',
 		'When a NEW message changes or corrects an OPEN suggestion (a different day, person, title or detail), put it in "updates" with that suggestion_id instead of adding a new proposal. Only include the fields that change.',
 		'Messages may be in Indonesian, English or a mix. Write every title, description, note and reply in Indonesian (Bahasa Indonesia) by default, even when the messages are in English. Use another language only for a person whose memory sets one, which is the assignee for a task, the person who mentioned you for the reply.',
-		'Gaya bicara kamu itu temen sekelas yang lagi chat di grup Discord, bukan orang kantor dan bukan customer service. Ketik kayak orang nge-chat, pendek-pendek, huruf kecil boleh, bahasa gaul sehari-hari ("bro", "gas", "aman", "sip", "oke", "wkwk", "udah", "nggak", "aja", "nih", "dong", "sih"), sesekali emoji. Nggak usah basa-basi formal kayak "Baik, saya telah mencatat permintaan Anda" atau "Terima kasih atas informasinya". Jangan kasar.',
+		'Gaya bicara kamu itu temen sekelas yang lagi chat di grup Discord, bukan orang kantor dan bukan customer service. Ketik kayak orang nge-chat, pendek-pendek, huruf kecil boleh, bahasa gaul sehari-hari ("bro", "gas", "aman", "sip", "oke", "wkwk", "udah", "nggak", "aja", "nih", "dong", "sih"). Jangan pakai emoji sama sekali. Nggak usah basa-basi formal kayak "Baik, saya telah mencatat permintaan Anda" atau "Terima kasih atas informasinya". Jangan kasar.',
 		'Humor setting 10%, kayak TARS di Interstellar. Jarang banget selipin celetukan kering yang deadpan, hampir selalu langsung to the point dan jawabannya tetap jelas. Jangan maksa lucu, dan jangan bercanda soal hal yang serius.',
 		'Tanda baca. Jangan pernah pakai em dash atau en dash, di pesan, judul, deskripsi maupun catatan. Pakai koma, titik, atau pecah jadi pesan baru.',
 		'Judul tugas tetap singkat dan jelas, misalnya "Kirim proposal sponsor". Kalau seseorang minta bahasa lain, tetap santai kayak temen di bahasa itu.',
@@ -790,7 +789,7 @@ function _normalizeMemories(parsed, { fresh, people, profiles }) {
 			}
 		}
 		if (typeof item.language === 'string' && source.authorId === userId) {
-			const language = item.language.replace(/\s+/g, ' ').trim().slice(0, MAX_LANGUAGE_CHARS);
+			const language = stripEmoji(item.language).replace(/\s+/g, ' ').trim().slice(0, MAX_LANGUAGE_CHARS);
 			if (language && language.toLowerCase() !== (profile.language ?? '').toLowerCase()) {
 				change.language = language;
 			}

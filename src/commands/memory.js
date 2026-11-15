@@ -85,7 +85,7 @@ class MemoryCommand extends Command {
 		if (sub === 'remember') {
 			const note = interaction.options.getString('note', true).replace(/\s+/g, ' ').trim();
 			const id = memoryRepository.addNote(userId, note, { addedBy: userId });
-			return reply(id ? `Saved as note #${id}.` : 'ℹ️ That is already remembered.');
+			return reply(id ? `Saved as note #${id}.` : 'That is already remembered.');
 		}
 		if (sub === 'forget') {
 			const id = interaction.options.getInteger('number', true);

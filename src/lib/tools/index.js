@@ -12,6 +12,7 @@
 const serpbase = require('./serpbase');
 const channelMemory = require('../../database/repositories/channelMemory.repository');
 const actorMemory = require('../../database/repositories/actorMemory.repository');
+const { stripEmoji } = require('../utils/emoji');
 
 const TOOL_NAMES = {
 	search: 'search_web',
@@ -116,14 +117,22 @@ function createTools({ channelId, people = new Map(), onSearch }) {
 
 			case TOOL_NAMES.remember: {
 				const about = args.about_user_id ? String(args.about_user_id) : null;
+				// Notes are shown back to people (e.g. /memory view), so keep them
+				// plain text too.
+				const note = stripEmoji(String(args.note ?? ''))
+					.replace(/\s+/g, ' ')
+					.trim();
+				if (!note) {
+					return 'not saved. The note was empty';
+				}
 				if (about) {
 					if (!people.has(about)) {
 						return 'not saved. That user id is not in this conversation';
 					}
-					const id = actorMemory.addNote(about, args.note, { addedBy: 'self' });
+					const id = actorMemory.addNote(about, note, { addedBy: 'self' });
 					return id ? `saved note ${id} about ${people.get(about)}` : 'not saved. Already remembered';
 				}
-				const id = channelMemory.addNote(channelId, args.note, { kind: args.kind });
+				const id = channelMemory.addNote(channelId, note, { kind: args.kind });
 				return id ? `saved channel note ${id}` : 'not saved. Already remembered';
 			}
 
