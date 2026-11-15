@@ -1192,10 +1192,10 @@ describe('deleted messages', () => {
 		expect(suggestions.getSuggestion(`gone-${n}`)).toBeUndefined();
 	});
 
-	it('asks the model to chat like a classmate, with humor at 30%', () => {
+	it('asks the model to chat like a classmate, with humor at 10%', () => {
 		const [system] = taskSuggest._buildPrompt({ context: [], fresh, people, proposedTitles: [] });
 		expect(system.content).toContain('temen sekelas');
-		expect(system.content).toContain('Humor setting: 30%, kayak TARS di Interstellar');
+		expect(system.content).toContain('Humor setting: 10%, kayak TARS di Interstellar');
 		expect(system.content).toContain('"Jam 12 malam" on a day means the end of that day');
 	});
 });

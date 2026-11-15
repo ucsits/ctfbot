@@ -586,8 +586,8 @@ reply with a suggestion card offering to create a task with reminders.
   are removed. Cards deleted while the bot was offline are dropped on the
   next pass. Cards that already became a task are kept.
 - The model is told to chat like a classmate in the group chat, in everyday
-  Indonesian slang, with its humor setting at 30% (TARS from Interstellar):
-  mostly to the point, with the odd deadpan one-liner.
+  Indonesian slang, with its humor setting at 10% (TARS from Interstellar):
+  almost always to the point, with only a rare deadpan one-liner.
 - When mentioned, the bot shows "typing..." while the model thinks, then
   sends one to three short chat messages: the first is a quick
   acknowledgment that fits the message ("wait" for a request, "hmm" for a
