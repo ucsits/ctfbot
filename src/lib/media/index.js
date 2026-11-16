@@ -338,7 +338,7 @@ async function collectImages(entries, options = {}) {
 			const frames = await _imagesFor(entry, attachment, opts);
 			const take = frames.slice(0, maxImages - used);
 			if (take.length > 0) {
-				groups.push(take.map(frame => ({ messageId: entry.id, ...frame })));
+				groups.push(take.map(frame => ({ messageId: entry.id, authorId: entry.authorId ?? null, ...frame })));
 				used += take.length;
 			}
 		}

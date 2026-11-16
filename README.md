@@ -669,6 +669,33 @@ The service enforces when not to speak in code.
   bot's messages, or reply to it with "diem aja", and that channel stays quiet
   until the next local midnight. Other channels are unaffected.
 
+### How it writes
+
+The bot answers the question that was asked, not the most interesting thing on
+screen. A few rules in the prompt do the work.
+
+- **The question, not a summary.** A mention names the message it came from and
+  the message that one replies to, so "cek posternya" can be traced back to the
+  question it corrects. Asked a duration, the number comes first.
+- **The meaning, not the poster's wording.** "Mahasiswa aktif D3/D4 dan S1-S2
+  dari kampus manapun" becomes "semua kampus". Reading a form field back is not
+  an answer.
+- **No invented rules.** A consequence the poster never states ("bisa batal
+  isi") is treated the same as a made-up number.
+- **Not the organizer.** It does not tell people to pick an option or sort
+  something out. When two sources disagree it points at the disagreement and
+  stops.
+- **It can take a correction.** Its own recent messages are in the prompt with
+  their ids, so a member saying "cek posternya" can be met with "oh iya deng"
+  followed by the fact, instead of a fresh lecture.
+- **One clause per sentence.** "sentence 1, sentence 2" is not how anyone
+  chats, so a non-list comma is filtered in code, not just asked for in the
+  prompt. The text up to the first such comma is kept and the rest is dropped,
+  which is why the model's only way to keep both thoughts is to use a period.
+  A list ("elektro, komputer, elektronika"), a decimal ("1,5 menit") and a URL
+  are left alone. A reply that is nothing but filler after filtering is not
+  posted at all.
+
 ### Tools
 
 The model can call four tools. None of them can send a message, create a

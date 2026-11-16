@@ -51,14 +51,24 @@ function addNote(channelId, note, { kind = 'topic', sourceMessageId = null } = {
 	if (!text) {
 		return null;
 	}
+	const resolvedKind = KINDS.has(kind) ? kind : 'topic';
+	const values = [channelId, text, resolvedKind, sourceMessageId, nowSeconds()];
 	const result = db()
 		.prepare(
-			`
+			resolvedKind === 'said'
+				? `
+		INSERT INTO channel_memory (channel_id, note, kind, source_message_id, created_at)
+		VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(channel_id, note) DO UPDATE SET
+			source_message_id = excluded.source_message_id,
+			created_at = excluded.created_at
+	`
+				: `
 		INSERT OR IGNORE INTO channel_memory (channel_id, note, kind, source_message_id, created_at)
 		VALUES (?, ?, ?, ?, ?)
 	`
 		)
-		.run(channelId, text, KINDS.has(kind) ? kind : 'topic', sourceMessageId, nowSeconds());
+		.run(...values);
 	if (result.changes === 0) {
 		return null;
 	}
@@ -87,6 +97,22 @@ function recentSaid(channelId, limit = 5) {
 		.reverse();
 }
 
+/**
+ * The bot's own recent messages with the id of the Discord message it posted.
+ * The chat prompt needs the id so the model can see which one a member is
+ * replying to or correcting.
+ *
+ * @returns {Array<{ note: string, source_message_id: string|null, created_at: number }>}
+ */
+function recentSaidNotes(channelId, limit = 5) {
+	return db()
+		.prepare(
+			"SELECT note, source_message_id, created_at FROM channel_memory WHERE channel_id = ? AND kind = 'said' ORDER BY id DESC LIMIT ?"
+		)
+		.all(channelId, limit)
+		.reverse();
+}
+
 /** Drop every note for a channel. */
 function clearChannel(channelId) {
 	db().prepare('DELETE FROM channel_memory WHERE channel_id = ?').run(channelId);
@@ -104,6 +130,7 @@ module.exports = {
 	listNotes,
 	addNote,
 	recentSaid,
+	recentSaidNotes,
 	clearChannel,
 	_reset
 };

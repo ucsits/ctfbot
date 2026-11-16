@@ -237,7 +237,7 @@ describe('chat._backoffUntil', () => {
 
 describe('chat._sanitize', () => {
 	it('removes em dashes, @everyone and surrounding quotes', () => {
-		expect(chat._sanitize('"eh — coba ini @everyone"')).toBe('eh, coba ini everyone');
+		expect(chat._sanitize('"eh — coba ini @everyone"')).toBe('eh. coba ini everyone');
 	});
 
 	it('removes emojis', () => {
@@ -247,6 +247,50 @@ describe('chat._sanitize', () => {
 	it('caps the length', () => {
 		process.env.CHAT_MAX_MESSAGE_CHARS = '20';
 		expect(chat._sanitize('a'.repeat(100)).length).toBeLessThanOrEqual(21);
+	});
+
+	it('keeps the leading clause and drops what follows a clause comma', () => {
+		expect(chat._sanitize('oh iya deng, di posternya 7-10 menit')).toBe('oh iya deng');
+		expect(chat._sanitize('7-10 menit, harusnya aman')).toBe('7-10 menit');
+		expect(chat._sanitize('di posternya 7-10 menit, jadi aman')).toBe('di posternya 7-10 menit');
+	});
+
+	it('leaves a list of items alone', () => {
+		expect(chat._sanitize('elektro, komputer, elektronika, telekomunikasi')).toBe(
+			'elektro, komputer, elektronika, telekomunikasi'
+		);
+		expect(chat._sanitize('prodi elektro, informatika, sistem informasi')).toBe(
+			'prodi elektro, informatika, sistem informasi'
+		);
+		expect(chat._sanitize('elektro, komputer, dan informatika')).toBe('elektro, komputer, dan informatika');
+		// Two segments joined by "dan" is a clause, not a list.
+		expect(chat._sanitize('aman kok, dan harusnya gitu')).toBe('aman kok');
+	});
+
+	it('does not touch a decimal comma or a comma inside a link', () => {
+		expect(chat._sanitize('1,5 menit doang')).toBe('1,5 menit doang');
+		expect(chat._sanitize('cek https://example.com/a,b?x=1,y=2 dulu')).toBe(
+			'cek https://example.com/a,b?x=1,y=2 dulu'
+		);
+	});
+
+	it('drops a sentence that only recaps the answer', () => {
+		expect(chat._sanitize('sisanya sudah jelas, intinya gitu')).toBe('');
+		expect(chat._sanitize('di posternya 7-10 menit. sisanya sudah jelas')).toBe('di posternya 7-10 menit.');
+	});
+
+	it('keeps two short sentences apart when the model uses periods', () => {
+		expect(chat._sanitize('oh iya deng. 7-10 menit kok')).toBe('oh iya deng. 7-10 menit kok');
+	});
+});
+
+describe('chat._dropClauses', () => {
+	it('turns a dash into a sentence break instead of a comma', () => {
+		expect(chat._plain('eh — coba ini')).toBe('eh. coba ini');
+	});
+
+	it('leaves a single clause with no comma alone', () => {
+		expect(chat._dropClauses('7-10 menit kok')).toBe('7-10 menit kok');
 	});
 });
 
@@ -278,10 +322,14 @@ describe('chat prompt', () => {
 			notes: [],
 			profiles: new Map(),
 			recentSaid: [],
-			trigger: message(),
-			people: new Map()
+			trigger: message({ authorId: 'u1', id: 'm1', replyToId: 'm0' }),
+			people: new Map([['u1', 'Alice']])
 		});
-		expect(system.content).toContain('baru disebut langsung');
+		// The mention names the trigger and the message it answers, so the model
+		// can find the question instead of summarising whatever is on screen.
+		expect(system.content).toContain('Kamu disebut langsung oleh Alice di pesan id=m1');
+		expect(system.content).toContain('membalas id=m0');
+		expect(system.content).toContain('jangan berpidato');
 	});
 
 	it('tells the model that frames of one GIF are the same animation', () => {
@@ -323,11 +371,13 @@ describe('chat prompt', () => {
 			imageParts: [
 				{
 					messageId: 'm1',
+					authorId: 'u1',
 					label: 'GIF "x.gif" frame 1/18 (0% durasi)',
 					dataUrl: 'data:image/jpeg;base64,AAA'
 				},
 				{
 					messageId: 'm1',
+					authorId: 'u1',
 					label: 'GIF "x.gif" frame 5/18 (24% durasi)',
 					dataUrl: 'data:image/jpeg;base64,BBB'
 				}
@@ -337,10 +387,84 @@ describe('chat prompt', () => {
 		expect(Array.isArray(user.content)).toBe(true);
 		expect(user.content[0]).toEqual({ type: 'text', text: expect.stringContaining('ini posternya') });
 		expect(user.content[1].text).toContain('Gambar 1 dari 2');
+		expect(user.content[1].text).toContain('oleh Alice');
 		expect(user.content[1].text).toContain('frame 1/18');
 		expect(user.content[2]).toEqual({ type: 'image_url', image_url: { url: 'data:image/jpeg;base64,AAA' } });
 		expect(user.content[3].text).toContain('frame 5/18');
 		expect(user.content[4]).toEqual({ type: 'image_url', image_url: { url: 'data:image/jpeg;base64,BBB' } });
+	});
+
+	it('shows the reply chain so a correction is visibly aimed at a message', () => {
+		const [, user] = chat._buildPrompt({
+			channel: { id: 'c1', name: 'general' },
+			messages: [
+				message({ id: 'm0', authorId: 'u1', content: 'berapa menit nihnya' }),
+				message({ id: 'm1', authorId: 'u2', content: 'cek posternya', replyToId: 'm0' })
+			],
+			notes: [],
+			profiles: new Map(),
+			recentSaid: [],
+			trigger: null,
+			people: new Map([
+				['u1', 'Agus'],
+				['u2', 'Hanz']
+			])
+		});
+		expect(user.content).toContain('id=m1');
+		expect(user.content).toContain('(balas ke id=m0)');
+	});
+
+	it('shows its own earlier messages with an id so it can take one back', () => {
+		const [, user] = chat._buildPrompt({
+			channel: { id: 'c1', name: 'general' },
+			messages: [message()],
+			notes: [],
+			profiles: new Map(),
+			recentSaid: [{ note: 'D3/D4 dan S1-S2 dari kampus manapun', source_message_id: 'bot-1' }],
+			trigger: null,
+			people: new Map()
+		});
+		expect(user.content).toContain('id=bot-1 (kamu)');
+		expect(user.content).toContain('kecuali ada yang mengoreksi');
+	});
+
+	it('bans clause commas, reciting the poster and deciding for people', () => {
+		const [system] = chat._buildPrompt({
+			channel: { id: 'c1', name: 'general' },
+			messages: [message()],
+			notes: [],
+			profiles: new Map(),
+			recentSaid: [],
+			trigger: null,
+			people: new Map()
+		});
+		expect(system.content).toContain('Koma cuma buat daftar');
+		expect(system.content).toContain('Jangan merangkum seluruh isi gambar');
+		expect(system.content).toContain('Bilang "semua kampus"');
+		expect(system.content).toContain('Kamu bukan panitia');
+		expect(system.content).toContain('bisa batal isi');
+		expect(system.content).toContain('sisanya sudah jelas');
+		expect(system.content).toContain('Satu kalimat kalau cukup, maksimal dua');
+	});
+
+	it('shows a worked correction only when it actually said something', () => {
+		const base = {
+			channel: { id: 'c1', name: 'general' },
+			messages: [message()],
+			notes: [],
+			profiles: new Map(),
+			people: new Map([['u1', 'Alice']]),
+			trigger: message({ id: 'm1', authorId: 'u1' })
+		};
+		const [withSaid] = chat._buildPrompt({
+			...base,
+			recentSaid: [{ note: 'D3/D4 dan S1-S2 dari kampus manapun', source_message_id: 'bot-1' }]
+		});
+		expect(withSaid.content).toContain('Contoh yang benar. Agus tanya berapa menit surveinya');
+		expect(withSaid.content).toContain('7-10 menit');
+
+		const [withoutSaid] = chat._buildPrompt({ ...base, recentSaid: [] });
+		expect(withoutSaid.content).not.toContain('Contoh yang benar.');
 	});
 });
 
@@ -492,7 +616,7 @@ describe('chat._runPass', () => {
 			if (searches.length === 0) {
 				return Promise.resolve(llmTool('search_web', { query: 'padding oracle' }));
 			}
-			return Promise.resolve(llmText('eh ini mirip padding oracle, coba cek https://example.com/po'));
+			return Promise.resolve(llmText('eh ini mirip padding oracle. coba cek https://example.com/po'));
 		});
 
 		await chat._runPass(stateWith([message()], channel), { reason: 'signal: question' });
@@ -500,6 +624,31 @@ describe('chat._runPass', () => {
 		expect(searches).toEqual(['padding oracle']);
 		expect(channel.send).toHaveBeenCalledTimes(1);
 		expect(channel.send.mock.calls[0][0].content).toContain('https://example.com/po');
+	});
+
+	it('filters a clause comma out of the posted text', async () => {
+		const channel = makeChannel();
+		globalThis.fetch = vi
+			.fn()
+			.mockResolvedValue(
+				llmText(
+					'Posternya bilang D3/D4 dan S1-S2 dari kampus manapun, sedangkan chatnya cuma elektro dan komputer. Sisanya sudah jelas.'
+				)
+			);
+
+		await chat._runPass(stateWith([message()], channel), { reason: 'signal: image' });
+
+		expect(channel.send).toHaveBeenCalledTimes(1);
+		expect(channel.send.mock.calls[0][0].content).toBe('Posternya bilang D3/D4 dan S1-S2 dari kampus manapun');
+	});
+
+	it('stays silent when the reply is nothing but filler after filtering', async () => {
+		const channel = makeChannel();
+		globalThis.fetch = vi.fn().mockResolvedValue(llmText('Sisanya sudah jelas, intinya gitu'));
+
+		await chat._runPass(stateWith([message()], channel), { reason: 'signal: image' });
+
+		expect(channel.send).not.toHaveBeenCalled();
 	});
 });
 
