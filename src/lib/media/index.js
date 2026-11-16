@@ -29,6 +29,7 @@
  */
 
 const sharp = require('sharp');
+const { fetchBytes } = require('./fetch');
 const { logger } = require('../logger');
 
 const mediaLog = logger.child('Media');
@@ -216,23 +217,6 @@ function gifFrameIndices(pages) {
 	return [...new Set(indices)].filter(index => index >= 0 && index <= last).sort((a, b) => a - b);
 }
 
-/** Bounded download. Throws on a bad status, an oversized body or a timeout. */
-async function _fetchBytes(url, { maxBytes, timeoutMs }) {
-	const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
-	if (!res.ok) {
-		throw new Error(`HTTP ${res.status}`);
-	}
-	const declared = Number(res.headers?.get?.('content-length'));
-	if (Number.isFinite(declared) && declared > maxBytes) {
-		throw new Error(`too large (${declared} bytes)`);
-	}
-	const buffer = Buffer.from(await res.arrayBuffer());
-	if (buffer.length > maxBytes) {
-		throw new Error(`too large (${buffer.length} bytes)`);
-	}
-	return buffer;
-}
-
 /**
  * Decode one attachment into JPEG frames. An animation yields the four
  * sampled frames, a still image yields one.
@@ -286,7 +270,7 @@ async function _imagesFor(entry, attachment, options) {
 	}
 
 	try {
-		const buffer = await _fetchBytes(attachment.url, options);
+		const buffer = await fetchBytes(attachment.url, options);
 		const frames = await _decodeFrames(buffer, options);
 		const images = frames.map(frame => ({
 			kind: frame.pages > 1 ? 'gif' : 'image',

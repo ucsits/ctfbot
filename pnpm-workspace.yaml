@@ -1,3 +1,6 @@
 allowBuilds:
   better-sqlite3: true
   esbuild: true
+  # Optional dependency of pdfjs-dist, only needed to render pages to a canvas.
+  # Text extraction does not use it, and its native build is not worth running.
+  canvas: false

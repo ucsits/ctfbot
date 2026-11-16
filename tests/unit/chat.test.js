@@ -53,6 +53,7 @@ beforeEach(async () => {
 	delete process.env.CHAT_UNPROMPTED_ENABLED;
 	delete process.env.CHAT_COOLDOWN_MS;
 	delete process.env.CHAT_VISION_ENABLED;
+	delete process.env.CHAT_DOCUMENTS_ENABLED;
 	delete process.env.CHAT_GLOBAL_MEMORY_MAX;
 	delete process.env.CHAT_GLOBAL_MEMORY_PER_DAY;
 
@@ -938,5 +939,100 @@ describe('chat vision', () => {
 		expect(typeof modelBodies[0].messages[1].content).toBe('string');
 		expect(modelBodies[0].messages[1].content).toContain('ini poster');
 		expect(channel.send).toHaveBeenCalledTimes(1);
+	});
+});
+
+describe('chat documents', () => {
+	const csvBytes = Buffer.from('nama,poin\nAlice,120\nBob,80\n');
+	const csvAttachment = (bytes = csvBytes) => ({
+		id: 'a1',
+		name: 'rekap.csv',
+		contentType: 'text/csv',
+		size: bytes.length,
+		url: 'https://cdn.test/rekap.csv'
+	});
+
+	it('puts the text of a CSV attachment into the prompt', async () => {
+		const channel = makeChannel();
+		const modelBodies = [];
+		globalThis.fetch = vi.fn((url, init) => {
+			if (String(url).startsWith('https://cdn.test')) {
+				return Promise.resolve(imageResponse(csvBytes));
+			}
+			modelBodies.push(JSON.parse(init.body));
+			return Promise.resolve(llmText('Alice 120, Bob 80'));
+		});
+
+		const msg = message({
+			content: 'rekap poin kita\n[file "rekap.csv", text/csv, 30 B]',
+			hasVisuals: true,
+			attachments: [csvAttachment()]
+		});
+		await chat._runPass(stateWith([msg], channel), { reason: 'signal: image' });
+
+		expect(channel.send).toHaveBeenCalledTimes(1);
+		const content = modelBodies[0].messages[1].content;
+		expect(typeof content).toBe('string');
+		expect(content).toContain('Lampiran teks dari anggota');
+		expect(content).toContain('dokumen "rekap.csv" (CSV, 3 baris) dari pesan id=m1 oleh Alice');
+		expect(content).toContain('Alice\t120');
+		expect(content).toContain('--- akhir dokumen "rekap.csv" ---');
+	});
+
+	it('reads a PDF attachment even when vision is off', async () => {
+		process.env.CHAT_VISION_ENABLED = 'false';
+		const pdf = readFileSync(join(import.meta.dirname, '../fixtures/documents/sample.pdf'));
+		const channel = makeChannel();
+		const modelBodies = [];
+		globalThis.fetch = vi.fn((url, init) => {
+			if (String(url).startsWith('https://cdn.test')) {
+				return Promise.resolve(imageResponse(pdf));
+			}
+			modelBodies.push(JSON.parse(init.body));
+			return Promise.resolve(llmText('pesertanya 42 tim'));
+		});
+
+		const msg = message({
+			content: 'laporan terakhir',
+			hasVisuals: true,
+			attachments: [
+				{
+					id: 'a1',
+					name: 'laporan.pdf',
+					contentType: 'application/pdf',
+					size: pdf.length,
+					url: 'https://cdn.test/laporan.pdf'
+				}
+			]
+		});
+		await chat._runPass(stateWith([msg], channel), { reason: 'signal: image' });
+
+		const content = modelBodies[0].messages[1].content;
+		expect(typeof content).toBe('string');
+		expect(content).toContain('[halaman 1]');
+		expect(content).toContain('Peserta: 42 tim');
+		expect(channel.send).toHaveBeenCalledTimes(1);
+	}, 15_000);
+
+	it('skips document reading when it is disabled', async () => {
+		process.env.CHAT_DOCUMENTS_ENABLED = 'false';
+		const channel = makeChannel();
+		const modelBodies = [];
+		globalThis.fetch = vi.fn((url, init) => {
+			modelBodies.push(JSON.parse(init.body));
+			return Promise.resolve(llmText('coba kirim ulang rekapnya'));
+		});
+
+		const msg = message({
+			content: 'rekap poin kita',
+			hasVisuals: true,
+			attachments: [csvAttachment()]
+		});
+		await chat._runPass(stateWith([msg], channel), { reason: 'signal: image' });
+
+		expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+		const content = modelBodies[0].messages[1].content;
+		expect(content).toContain('rekap poin kita');
+		expect(content).not.toContain('Lampiran teks');
 	});
 });

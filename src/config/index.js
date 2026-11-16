@@ -214,6 +214,45 @@ const config = {
 			}
 		},
 		/**
+		 * Documents dropped in a channel: PDF, DOCX, XLSX, CSV and TSV. The text
+		 * is read into the prompt, because a filename alone tells the model
+		 * nothing. Bounds are per file and per prompt; a file that cannot be read
+		 * is skipped, never fatal.
+		 */
+		documents: {
+			get enabled() {
+				return process.env.CHAT_DOCUMENTS_ENABLED !== 'false';
+			},
+			/** Documents per pass, newest first. */
+			get maxFiles() {
+				return envInt('CHAT_DOCUMENT_MAX_FILES', 3);
+			},
+			/** Attachments larger than this are skipped instead of downloaded. */
+			get maxBytes() {
+				return envInt('CHAT_DOCUMENT_MAX_BYTES', 8 * 1024 * 1024);
+			},
+			/** Characters kept from one file before it is cut. */
+			get maxChars() {
+				return envInt('CHAT_DOCUMENT_MAX_CHARS', 12_000);
+			},
+			/** Characters kept from all documents in one prompt. */
+			get maxTotalChars() {
+				return envInt('CHAT_DOCUMENT_MAX_TOTAL_CHARS', 24_000);
+			},
+			/** PDF pages read. */
+			get maxPages() {
+				return envInt('CHAT_DOCUMENT_MAX_PAGES', 30);
+			},
+			/** Rows read from a spreadsheet or a delimited file. */
+			get maxRows() {
+				return envInt('CHAT_DOCUMENT_MAX_ROWS', 200);
+			},
+			/** Download timeout. */
+			get timeoutMs() {
+				return envInt('CHAT_DOCUMENT_TIMEOUT_MS', 15_000);
+			}
+		},
+		/**
 		 * Server-wide memory, the layer that tunes personality and house rules.
 		 * Anyone may teach it, so it is capped and rate limited.
 		 */
