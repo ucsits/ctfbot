@@ -534,6 +534,12 @@ explicitly reported.
 3. Due reminders are sent to channel `1524933314119467200`
 4. Reminder is marked `sent = 1` to prevent duplicates
 
+Each reminder carries a **Mark done** button. The task's assignee, or anyone
+who can manage messages, can click it to complete the task without leaving the
+channel. It runs the same path as `/task done`: blockchain anchoring, reminder
+removal and Google Calendar sync, then the reminder is edited to show who
+marked it done.
+
 ---
 
 ## Task Suggestions from Conversation
@@ -555,10 +561,11 @@ a message into a card when the message actually asks for one.
   in the conversation.
 - The model works through tools, not a one-shot JSON reply. It can call
   `list_pending_tasks`, `create_task_card`, `cancel_task_card`,
-  `update_task_card`, `remember_person`, `remember_server` and (on unprompted
-  passes) `stay_silent`. Tools only validate and queue. The service posts the
-  chat first and the cards after, so a failed pass never leaves a half-written
-  conversation. Parallel tool calls in one model turn all land.
+  `done_task_card`, `update_task_card`, `remember_person`, `remember_server`
+  and (on unprompted passes) `stay_silent`. Tools only validate and queue. The
+  service posts the chat first and the cards after, so a failed pass never
+  leaves a half-written conversation. Parallel tool calls in one model turn all
+  land.
 - One message can produce several cards. "Ganti LPJ ke hari ini dan esok"
   becomes two create cards with different deadlines, and a reschedule can
   produce a cancellation card plus a replacement card in the same pass.
@@ -589,6 +596,11 @@ a message into a card when the message actually asks for one.
   same path as `/task cancel`, with blockchain anchoring, reminder removal and
   Google Calendar sync. Nothing is cancelled until someone clicks, and **Keep**
   closes the card without touching the task.
+- A done card has **Mark done** and **Not yet**. It appears when a message says
+  a task is finished ("dah selesai", "udah kelar", "beres"). Saying "sip, aman"
+  alone records nothing, so the card is what turns a claim into a recorded
+  completion. **Mark done** runs the same path as `/task done`; **Not yet**
+  leaves the task pending and closes the card.
 - Accepted suggestions go through the same path as `/task add`, with blockchain
   anchoring, reminders and Google Calendar sync.
 - Only governance-channel messages are ever sent to the model.

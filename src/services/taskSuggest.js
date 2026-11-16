@@ -8,10 +8,10 @@
  *
  * The model works through tools, not a one-shot JSON reply. It can read the
  * pending tasks of the people in the conversation, then queue any number of
- * cards: create a task, cancel an existing one, edit an open card, or remember
- * a person. Tools only validate and queue. The service posts the chat messages
- * first and the cards after, so a failed pass never leaves a half-written
- * conversation. Parallel tool calls in one model turn all land.
+ * cards: create a task, cancel an existing one, mark one done, edit an open
+ * card, or remember a person. Tools only validate and queue. The service posts
+ * the chat messages first and the cards after, so a failed pass never leaves a
+ * half-written conversation. Parallel tool calls in one model turn all land.
  *
  * Each card is a suggestion, not an action. Nothing is created or cancelled
  * until someone presses a button, handled by
@@ -73,6 +73,7 @@ const MAX_UPDATES_PER_PASS = 3;
 const MAX_MESSAGE_CHARS = 1500;
 const MAX_PROPOSALS_PER_PASS = 3;
 const MAX_CANCELS_PER_PASS = 3;
+const MAX_DONE_PER_PASS = 3;
 const MIN_CONFIDENCE = 0.7;
 // Unprompted cards interrupt the conversation. They need more certainty
 // than an answer to someone who mentioned the bot.
@@ -104,13 +105,16 @@ const SUGGEST_IDS = {
 	dismiss: 'tsug_dismiss',
 	modal: 'tsug_modal',
 	cancel: 'tsug_cancel',
-	keep: 'tsug_keep'
+	keep: 'tsug_keep',
+	done: 'tsug_done',
+	notDone: 'tsug_notdone'
 };
 
 const TOOL_NAMES = {
 	listTasks: 'list_pending_tasks',
 	createCard: 'create_task_card',
 	cancelCard: 'cancel_task_card',
+	doneCard: 'done_task_card',
 	updateCard: 'update_task_card',
 	remember: 'remember_person',
 	rememberServer: 'remember_server',
@@ -189,6 +193,32 @@ const TOOL_SCHEMAS = [
 					confidence: {
 						type: 'number',
 						description: 'How sure you are the team wants this task gone, from 0 to 1.'
+					}
+				},
+				required: ['task_id']
+			}
+		}
+	},
+	{
+		type: 'function',
+		function: {
+			name: TOOL_NAMES.doneCard,
+			description:
+				'Queue a card that marks an existing pending task as done when someone confirms it. Use it when a NEW message says the work is finished. Never mark a task done without a card, and never say it is recorded.',
+			parameters: {
+				type: 'object',
+				properties: {
+					task_id: {
+						type: 'string',
+						description: 'task_id from the PENDING tasks list in the prompt.'
+					},
+					source_message_id: {
+						type: 'string',
+						description: 'Id of the NEW message that said it was finished. Omit to use the current one.'
+					},
+					confidence: {
+						type: 'number',
+						description: 'How sure you are this task is really finished, from 0 to 1.'
 					}
 				},
 				required: ['task_id']
@@ -559,6 +589,20 @@ function _createToolkit({
 		return task;
 	};
 
+	/** A pending task the model may mark done. Same pool as a cancellation. */
+	const completableTask = taskId => {
+		const task = cancellableTask(taskId);
+		if (!task) {
+			return null;
+		}
+		const existing = suggestionRepository.findSuggestionForTarget({
+			channelId,
+			kind: 'done',
+			targetTaskId: task.task_id
+		});
+		return existing ? null : task;
+	};
+
 	const duplicateCreate = ({ title, deadline, targetTaskId = null }) =>
 		queue.creates.find(
 			c =>
@@ -683,6 +727,32 @@ function _createToolkit({
 
 				queue.cancels.push({ task, sourceMessageId: src.id });
 				return `queued a cancellation card for "${task.title}"`;
+			}
+
+			case TOOL_NAMES.doneCard: {
+				queue.dones ??= [];
+				const taskId = String(args.task_id ?? '').trim();
+				const task = completableTask(taskId);
+				if (!task) {
+					return `not queued. No pending task ${taskId} assigned to someone in this conversation, or a card for it already exists`;
+				}
+				const src = sourceOf(args.source_message_id);
+				if (!src) {
+					return `not queued. source_message_id ${args.source_message_id} is not a NEW message`;
+				}
+				const confidence = Number(args.confidence);
+				if (Number.isFinite(confidence) && confidence < minConfidence) {
+					return `not queued. confidence ${confidence} is below ${minConfidence}`;
+				}
+				if (queue.dones.some(d => d.task.task_id === task.task_id)) {
+					return `not queued. A done card for "${task.title}" is already queued this pass`;
+				}
+				if (queue.dones.length >= MAX_DONE_PER_PASS) {
+					return `not queued. At most ${MAX_DONE_PER_PASS} done cards per pass`;
+				}
+
+				queue.dones.push({ task, sourceMessageId: src.id });
+				return `queued a done card for "${task.title}"`;
 			}
 
 			case TOOL_NAMES.updateCard: {
@@ -910,7 +980,7 @@ async function _analyze(channelId, { trigger = null } = {}) {
 			`Prompt input for ${where} ${context.length} context message(s), ${open.length} open suggestion(s) [${open.map(r => `"${_clip(r.title, 40)}"`).join(', ')}], ${handled.length} handled, ${pending.length} pending task(s), ${state.people.size} participant(s), ${profiles.size ?? 0} profile(s)`
 		);
 
-		const queue = { creates: [], cancels: [], updates: [], memories: [], serverNotes: [] };
+		const queue = { creates: [], cancels: [], dones: [], updates: [], memories: [], serverNotes: [] };
 		const toolkit = _createToolkit({
 			channelId,
 			channel: state.channel,
@@ -989,7 +1059,7 @@ async function _analyze(channelId, { trigger = null } = {}) {
 			}
 		}
 
-		const posted = { create: 0, cancel: 0 };
+		const posted = { create: 0, cancel: 0, done: 0 };
 		const failed = [];
 		// Cancellation cards first, so a replacement task is never created
 		// before the thing it replaces is offered for cancellation.
@@ -1013,6 +1083,28 @@ async function _analyze(channelId, { trigger = null } = {}) {
 				failed.push({ kind: 'cancel', title: proposal.title, reason: error.message });
 			}
 		}
+		// Done cards next. A finished task is the other half of "this one is
+		// done, that one replaces it", so it lands before any new card.
+		for (const d of queue.dones) {
+			const proposal = {
+				kind: 'done',
+				targetTaskId: d.task.task_id,
+				title: d.task.title,
+				description: d.task.description,
+				assigneeId: d.task.assigned_to,
+				deadline: d.task.deadline,
+				sourceMessageId: d.sourceMessageId
+			};
+			try {
+				if (await _postProposal(state.channel, proposal, { reply: !trigger })) {
+					posted.done++;
+				} else {
+					failed.push({ kind: 'done', title: proposal.title, reason: 'the row could not be stored' });
+				}
+			} catch (error) {
+				failed.push({ kind: 'done', title: proposal.title, reason: error.message });
+			}
+		}
 		for (const p of queue.creates) {
 			try {
 				if (await _postProposal(state.channel, p, { reply: !trigger })) {
@@ -1027,11 +1119,12 @@ async function _analyze(channelId, { trigger = null } = {}) {
 
 		const learned = await _applyMemories(state.channel, queue.memories);
 		const serverLearned = await _applyServerNotes(state.channel, queue.serverNotes);
-		const summary = `Pass in ${where} done in ${Date.now() - passStartedAt}ms (${trigger ? `mention ${trigger.id}` : 'passive'}). Queued ${queue.creates.length} create(s), ${queue.cancels.length} cancel(s), ${queue.updates.length} update(s), ${queue.memories.length} memory change(s), ${queue.serverNotes.length} server note(s) and ${chat.length} chat message(s). Posted ${posted.create} create card(s), ${posted.cancel} cancel card(s), updated ${updated}, saved ${learned}, learned ${serverLearned}, failed ${failed.length}`;
+		const summary = `Pass in ${where} done in ${Date.now() - passStartedAt}ms (${trigger ? `mention ${trigger.id}` : 'passive'}). Queued ${queue.creates.length} create(s), ${queue.cancels.length} cancel(s), ${queue.dones.length} done(s), ${queue.updates.length} update(s), ${queue.memories.length} memory change(s), ${queue.serverNotes.length} server note(s) and ${chat.length} chat message(s). Posted ${posted.create} create card(s), ${posted.cancel} cancel card(s), ${posted.done} done card(s), updated ${updated}, saved ${learned}, learned ${serverLearned}, failed ${failed.length}`;
 		if (
 			trigger ||
 			posted.create > 0 ||
 			posted.cancel > 0 ||
+			posted.done > 0 ||
 			updated > 0 ||
 			learned > 0 ||
 			serverLearned > 0 ||
@@ -1059,7 +1152,14 @@ async function _analyze(channelId, { trigger = null } = {}) {
 		}
 
 		if (trigger && chat.length === 0 && failed.length === 0) {
-			if (posted.create === 0 && posted.cancel === 0 && updated === 0 && learned === 0 && serverLearned === 0) {
+			if (
+				posted.create === 0 &&
+				posted.cancel === 0 &&
+				posted.done === 0 &&
+				updated === 0 &&
+				learned === 0 &&
+				serverLearned === 0
+			) {
 				await _replyTo(trigger, 'ooo okay');
 			}
 		}
@@ -1161,7 +1261,7 @@ function _buildPrompt({
 
 	const system = [
 		"You are a member of a Discord server where an organisation's administrators hang out. You are not a task bot and not a tool with a chat window. You talk about anything anyone brings up, the way a friend in the group chat would. Watching for tasks is one small thing you can do, not who you are.",
-		'You work through tools. Read the real tasks with list_pending_tasks, queue cards with create_task_card and cancel_task_card, edit an open card with update_task_card, remember people with remember_person, and remember the organisation itself with remember_server. You cannot create or cancel anything yourself. A card is an offer that only takes effect when someone clicks it.',
+		'You work through tools. Read the real tasks with list_pending_tasks, queue cards with create_task_card, cancel_task_card and done_task_card, edit an open card with update_task_card, remember people with remember_person, and remember the organisation itself with remember_server. You cannot create, cancel or complete anything yourself. A card is an offer that only takes effect when someone clicks it.',
 		'Find tasks in the NEW messages that deserve a tracked task with a reminder. A task here is follow-up work the administrators themselves have to do, with an owner among them.',
 		'Propose a task only when (1) someone asks you or the team to remind them or to make a task ("ingetin aku ...", "buatin task ...", "remind us to ..."), or (2) the administrators agree that one of them will do a specific thing later ("oke aku yang kirim proposal sponsor jumat").',
 		'Do NOT propose assignments, homework, exercises or instructions an administrator gives to members or participants, even with a deadline and even when members reply "siap" (that is the members\' work, not an admin task). Also do not propose announcements, event info, rules and open invitations ("yang mau ikut reply MAU"), acknowledgments and reactions on their own ("siap", "oke", emoji), open questions, ideas still being debated, things already done, jokes, or actions finished within the next hour.',
@@ -1171,6 +1271,7 @@ function _buildPrompt({
 		'Never announce your own process. Do not say you were checking for tasks, do not say there was nothing to note, and do not report on your queue. Nobody asked for a status update, and "nggak ada yang perlu dicatat dari chat ini" is exactly the kind of line that makes you sound like a bot.',
 		'One NEW message can ask for several separate tasks. Call create_task_card once for each of them, in the same turn. For example "ganti LPJ ke hari ini dan esok" means two cards with different deadlines, not one. Never merge two deadlines into one task.',
 		'When a NEW message drops, replaces or reschedules a task, call cancel_task_card for the old task first. Then call create_task_card for any replacement, so both cards are posted together. A task that already exists is in the PENDING tasks list. If a task is listed here it exists. Never propose a new card for work that is already a pending task, and never say a task is missing when it is listed there.',
+		'When a NEW message says a task is finished ("dah selesai", "udah kelar", "beres", "done", "sudah dikirim"), call done_task_card for the matching PENDING task. Replying "sip, aman" on its own records nothing, and the task stays pending. If the message could mean more than one pending task, ask which one and queue nothing. Several finished tasks in one message means one card per task. Never say a task is marked done or recorded unless a done card was queued this pass or the task is no longer in PENDING.',
 		'Earlier messages are context. Use them to understand what the NEW messages refer to, but only act on what the NEW messages say. Do not repeat anything listed as already suggested.',
 		'When a NEW message changes or corrects an OPEN suggestion (a different day, person, title or detail), call update_task_card with that suggestion_id instead of creating a new card. Only include the fields that change.',
 		'Messages may be in Indonesian, English or a mix. Write every title, description, note and reply in Indonesian (Bahasa Indonesia) by default, even when the messages are in English. Use another language only for a person whose memory sets one, which is the assignee for a task, the person who mentioned you for the reply.',
@@ -1203,7 +1304,7 @@ function _buildPrompt({
 			`You were mentioned directly as <@${botId}>. Someone is talking to you, not filing a request. Answer them like a friend in the group chat: usually one short message, at most three lines, in plain chat text.`,
 			'A quick acknowledgment like "wait" or "oke bentar" is only worth sending when you actually have to check something first. A plain question or a remark needs a real answer, not a receipt.',
 			'Never narrate your process. Do not say you were checking for tasks, do not say there was nothing to note, and do not report what you queued unless a card was actually posted. If the message is just conversation, reply to the conversation and stop.',
-			'Queue a card only when the person asks for a reminder or a task, or the admins clearly decided one. A question about this server, about what you remember, or about anything else is ordinary chat. Answer it. Use the mentioning message as source_message_id when a request is made there.',
+			'Queue a card only when the person asks for a reminder or a task, says a task is finished, or the admins clearly decided one. A question about this server, about what you remember, or about anything else is ordinary chat. Answer it. Use the mentioning message as source_message_id when a request is made there.',
 			'When someone tells you a lasting fact about the organisation, like where you all work or what a channel is for, save it with remember_server and just answer normally. Do not thank them for the information and do not repeat it back as a record.',
 			'Any card is posted right after your messages, so a card needs only something short like "oke ini ya".',
 			'Example 1, a request: "brooooo @bot minta tolong buatin task ABC deadlinenya besok jam 12 malam" → call create_task_card, then reply "oke ini ya". Example 2, a question: "<@bot> deadline inaff kapan sih?" → reply "jumat jam 23:59, masih aman kok". Example 3, just chatting: "<@bot> kita kan dari UKM Cyber Security ITS" → call remember_server, then reply "ooo okay".'
@@ -1426,6 +1527,22 @@ async function _postProposal(channel, found, { reply = true } = {}) {
  * @returns {EmbedBuilder}
  */
 function buildProposalEmbed(proposal) {
+	if (proposal.kind === 'done') {
+		const embed = new EmbedBuilder()
+			.setColor(0x2ecc71)
+			.setTitle('Mark this task as done?')
+			.setDescription(`**${proposal.title}**${proposal.description ? `\n${proposal.description}` : ''}`)
+			.addFields({ name: 'Assign To', value: `<@${proposal.assigneeId}>`, inline: true });
+		if (proposal.deadline) {
+			embed.addFields({
+				name: 'Deadline',
+				value: `<t:${proposal.deadline}:F> (<t:${proposal.deadline}:R>)`,
+				inline: true
+			});
+		}
+		return embed.setFooter({ text: 'Nothing is recorded until someone confirms.' });
+	}
+
 	if (proposal.kind === 'cancel') {
 		const embed = new EmbedBuilder()
 			.setColor(0xe74c3c)
@@ -1467,6 +1584,19 @@ function buildProposalEmbed(proposal) {
  * @returns {ActionRowBuilder}
  */
 function buildProposalButtons(proposal) {
+	if (proposal.kind === 'done') {
+		return new ActionRowBuilder().addComponents(
+			new ButtonBuilder()
+				.setCustomId(`${SUGGEST_IDS.done}:${proposal.id}`)
+				.setLabel('Mark done')
+				.setStyle(ButtonStyle.Success),
+			new ButtonBuilder()
+				.setCustomId(`${SUGGEST_IDS.notDone}:${proposal.id}`)
+				.setLabel('Not yet')
+				.setStyle(ButtonStyle.Secondary)
+		);
+	}
+
 	if (proposal.kind === 'cancel') {
 		return new ActionRowBuilder().addComponents(
 			new ButtonBuilder()
@@ -1542,7 +1672,7 @@ function releaseProposal(id) {
  * Close a suggestion once it was handled.
  *
  * @param {string} id
- * @param {{ status: 'created'|'cancelled'|'kept'|'dismissed', handledBy: string, taskId?: string }} outcome
+ * @param {{ status: 'created'|'cancelled'|'done'|'kept'|'dismissed', handledBy: string, taskId?: string }} outcome
  */
 function finishProposal(id, outcome) {
 	suggestionRepository.finishSuggestion(id, outcome);
@@ -1563,6 +1693,9 @@ function unavailableMessage(id) {
 	}
 	if (row.status === 'cancelled') {
 		return `<@${row.handled_by}> already cancelled this task${row.task_id ? ` (\`${row.task_id}\`)` : ''}.`;
+	}
+	if (row.status === 'done') {
+		return `<@${row.handled_by}> already marked this task as done${row.task_id ? ` (\`${row.task_id}\`)` : ''}.`;
 	}
 	if (row.status === 'kept') {
 		return `<@${row.handled_by}> kept this task.`;

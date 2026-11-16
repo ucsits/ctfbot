@@ -138,7 +138,7 @@ describe('taskSuggest._createToolkit', () => {
 	let channel;
 
 	const build = (overrides = {}) => {
-		queue = { creates: [], cancels: [], updates: [], memories: [] };
+		queue = { creates: [], cancels: [], dones: [], updates: [], memories: [] };
 		toolkit = taskSuggest._createToolkit({
 			channelId: channel.id,
 			channel,
@@ -269,6 +269,39 @@ describe('taskSuggest._createToolkit', () => {
 		expect(reply).toContain('queued a cancellation card');
 		expect(queue.cancels).toHaveLength(1);
 		expect(queue.cancels[0].task.task_id).toBe('task-1');
+	});
+
+	it('queues a done card for a pending task, and only once', async () => {
+		createPendingTask('done-1');
+		createPendingTask('done-2', { assignedTo: 'stranger' });
+		build({ pending: [taskRepository.getTask('done-1')] });
+
+		expect(await toolkit.dispatch('done_task_card', { task_id: 'done-2' })).toContain('No pending task');
+		const reply = await toolkit.dispatch('done_task_card', { task_id: 'done-1', confidence: 0.9 });
+		expect(reply).toContain('queued a done card');
+		expect(queue.dones).toHaveLength(1);
+		expect(queue.dones[0].task.task_id).toBe('done-1');
+		expect(await toolkit.dispatch('done_task_card', { task_id: 'done-1' })).toContain('already queued this pass');
+	});
+
+	it('refuses a second done card while one is still open', async () => {
+		createPendingTask('done-3');
+		build({ pending: [taskRepository.getTask('done-3')] });
+
+		expect(
+			await taskSuggest._postProposal(channel, {
+				kind: 'done',
+				targetTaskId: 'done-3',
+				title: 'Pengecekan LPJ',
+				description: null,
+				assigneeId: 'u1',
+				deadline: null,
+				sourceMessageId: '111'
+			})
+		).toBe(true);
+
+		expect(await toolkit.dispatch('done_task_card', { task_id: 'done-3' })).toContain('already exists');
+		expect(queue.dones).toHaveLength(0);
 	});
 
 	it('updates only an open card, and only when something changed', async () => {
@@ -413,6 +446,14 @@ describe('taskSuggest._buildPrompt', () => {
 			expect(system.content).toContain('"ganti LPJ ke hari ini dan esok" means two cards');
 		});
 	});
+
+	it('tells the model to offer a done card when a task is finished', async () => {
+		const taskSuggest = await import('../../src/services/taskSuggest.js');
+		const [system] = taskSuggest._buildPrompt({ context: [], fresh, people, proposedTitles: [] });
+		expect(system.content).toContain('call done_task_card');
+		expect(system.content).toContain('Replying "sip, aman" on its own records nothing');
+		expect(system.content).toContain('Never say a task is marked done or recorded unless a done card was queued');
+	});
 });
 
 describe('taskSuggest._analyze', () => {
@@ -552,6 +593,44 @@ describe('taskSuggest._analyze', () => {
 		expect(rows.find(r => r.kind === 'cancel')).toMatchObject({
 			title: 'Pengecekan LPJ',
 			target_task_id: 'old-task'
+		});
+	});
+
+	it('offers a done card when someone says the task is finished', async () => {
+		const channel = makeChannel({ id: `done-${n}` });
+		const taskRepository = await import('../../src/database/repositories/task.repository.js');
+		taskRepository.createTask({
+			taskId: 'finish-me',
+			title: 'Review PPT LPJ',
+			description: null,
+			assignedTo: 'u1',
+			createdBy: 'u1',
+			deadline: DateTime.now().setZone(zone).plus({ days: 1 }).toUnixInteger(),
+			blockHeight: 1
+		});
+
+		globalThis.fetch = vi
+			.fn()
+			.mockResolvedValueOnce(toolCall('done_task_card', { task_id: 'finish-me', confidence: 0.9 }))
+			.mockResolvedValueOnce(text('sip, aman'));
+
+		const message = makeMessage({
+			channel,
+			id: 'm1',
+			content: '<@bot-1> dah selesai ini gus',
+			mentionBot: true
+		});
+		taskSuggest.observe(message);
+		await vi.waitFor(() => expect(channel.send).toHaveBeenCalledTimes(1));
+
+		const card = channel.send.mock.calls[0][0];
+		expect(card.embeds[0].toJSON().title).toBe('Mark this task as done?');
+		expect(card.components[0].toJSON().components[0].custom_id).toMatch(/^tsug_done:/);
+
+		const rows = suggestions.recentHandled(channel.id);
+		expect(rows.find(r => r.kind === 'done')).toMatchObject({
+			title: 'Review PPT LPJ',
+			target_task_id: 'finish-me'
 		});
 	});
 
@@ -733,6 +812,32 @@ describe('banned punctuation and chat splitting', () => {
 	});
 });
 
+describe('done cards', () => {
+	it('renders a confirmation card with a mark done and a not yet button', async () => {
+		const taskSuggest = await import('../../src/services/taskSuggest.js');
+		const proposal = {
+			id: 'p1',
+			kind: 'done',
+			targetTaskId: 't1',
+			title: 'Review PPT LPJ',
+			description: null,
+			assigneeId: 'u1',
+			deadline: Math.floor(Date.now() / 1000) + 3600
+		};
+
+		const embed = taskSuggest.buildProposalEmbed(proposal);
+		expect(embed.data.title).toBe('Mark this task as done?');
+		expect(embed.data.color).toBe(0x2ecc71);
+		expect(embed.data.description).toContain('Review PPT LPJ');
+		expect(embed.data.footer.text).toContain('Nothing is recorded');
+
+		const buttons = taskSuggest.buildProposalButtons(proposal).toJSON().components;
+		expect(buttons.map(b => b.custom_id)).toEqual(['tsug_done:p1', 'tsug_notdone:p1']);
+		expect(buttons[0].label).toBe('Mark done');
+		expect(buttons[1].label).toBe('Not yet');
+	});
+});
+
 describe('task suggestion persistence', () => {
 	let taskSuggest;
 	let repo;
@@ -860,6 +965,16 @@ describe('task suggestion persistence', () => {
 		expect(taskSuggest.unavailableMessage(dismissed)).toContain('dismissed by <@u6>');
 
 		expect(taskSuggest.unavailableMessage('unknown-id')).toContain('could not be found');
+	});
+
+	it('closes a done card with who completed the task', async () => {
+		await taskSuggest._postProposal(channel, found({ kind: 'done', targetTaskId: 'task-9' }));
+		const id = postedId(0);
+
+		taskSuggest.claimProposal(id);
+		taskSuggest.finishProposal(id, { status: 'done', handledBy: 'u4', taskId: 'task-9' });
+		expect(taskSuggest.claimProposal(id)).toBeNull();
+		expect(taskSuggest.unavailableMessage(id)).toBe('<@u4> already marked this task as done (`task-9`).');
 	});
 });
 
@@ -1528,6 +1643,17 @@ describe('task suggestion wiring (source level)', () => {
 		expect(listener).toContain('taskCommand._executeCancel');
 	});
 
+	it('completes suggested tasks through the same path as /task done', () => {
+		expect(listener).toContain('taskCommand._executeDone');
+	});
+
+	it('puts a Mark done button on reminders and handles it in the button listener', () => {
+		const reminder = readFileSync(join(root, 'src/services/reminder.js'), 'utf8');
+		expect(reminder).toContain('buildReminderButtons(reminder.task_id)');
+		expect(interactionCreate).toContain('REMINDER_IDS.done');
+		expect(interactionCreate).toContain('taskCommand._executeDone');
+	});
+
 	it('parses custom ids on the colon, not per character', () => {
 		expect(listener).toContain("interaction.customId.split(':')");
 		expect(interactionCreate).toContain("interaction.customId.split(':')");
@@ -1537,7 +1663,7 @@ describe('task suggestion wiring (source level)', () => {
 
 	it('claims a proposal before acting on it and checks permissions on every action', () => {
 		expect(listener.match(/claimProposal\(/g).length).toBeGreaterThanOrEqual(3);
-		expect(listener.match(/await this\._denied\(interaction\)/g)).toHaveLength(6);
+		expect(listener.match(/await this\._denied\(interaction\)/g)).toHaveLength(8);
 	});
 
 	it('feeds every non-bot message to the suggestion service', () => {

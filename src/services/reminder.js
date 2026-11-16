@@ -10,11 +10,17 @@
  */
 
 const { container } = require('@sapphire/framework');
-const { EmbedBuilder } = require('discord.js');
+const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = require('discord.js');
 const { DateTime } = require('luxon');
 const constants = require('../lib/constants/config');
 const taskRepository = require('../database/repositories/task.repository');
 const { computePeriodRange } = require('../lib/utils/date');
+
+// Custom id namespaces for the buttons on a reminder message. The format is
+// <namespace>:<taskId>. Handled by src/listeners/interactionCreate.js.
+const REMINDER_IDS = {
+	done: 'remind_done'
+};
 
 let intervalHandle = null;
 let clientRef = null;
@@ -82,6 +88,22 @@ async function poll() {
 //  Per-task reminders (existing)
 // ──────────────────────────────────────────────
 
+/**
+ * Buttons under a per-task reminder. One click marks the task done, through
+ * the same path as /task done.
+ *
+ * @param {string} taskId
+ * @returns {ActionRowBuilder}
+ */
+function buildReminderButtons(taskId) {
+	return new ActionRowBuilder().addComponents(
+		new ButtonBuilder()
+			.setCustomId(`${REMINDER_IDS.done}:${taskId}`)
+			.setLabel('Mark done')
+			.setStyle(ButtonStyle.Success)
+	);
+}
+
 async function pollReminders() {
 	if (!clientRef) {
 		return;
@@ -120,7 +142,8 @@ async function pollReminders() {
 							],
 							timestamp: new Date().toISOString()
 						}
-					]
+					],
+					components: [buildReminderButtons(reminder.task_id)]
 				});
 
 				taskRepository.markReminderSent(reminder.id);
@@ -500,6 +523,7 @@ async function pollDailyDigest() {
 }
 
 module.exports = {
+	REMINDER_IDS,
 	startReminderService,
 	stopReminderService,
 	// Exported for testing
@@ -507,6 +531,7 @@ module.exports = {
 	pollReminders,
 	pollWeeklyDigest,
 	pollDailyDigest,
+	buildReminderButtons,
 	_sendDigest,
 	_groupTasksForFields,
 	_formatTaskGroup,

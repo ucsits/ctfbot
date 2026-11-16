@@ -272,4 +272,15 @@ describe('Reminder Service', () => {
 			expect(result).toBeUndefined();
 		});
 	});
+
+	describe('buildReminderButtons', () => {
+		it('adds a Mark done button that carries the task id', () => {
+			const row = mod.buildReminderButtons('task-7').toJSON();
+			expect(row.components).toHaveLength(1);
+			expect(row.components[0].custom_id).toBe('remind_done:task-7');
+			expect(row.components[0].label).toBe('Mark done');
+			// ButtonStyle.Success
+			expect(row.components[0].style).toBe(3);
+		});
+	});
 });

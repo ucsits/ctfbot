@@ -1,11 +1,12 @@
 const { Listener } = require('@sapphire/framework');
-const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits } = require('discord.js');
 const { randomUUID } = require('crypto');
 const { activityRepository } = require('../database');
 const luce = require('../lib/luce');
 const { STORE_IDS } = require('../commands/store');
 const storeLayout = require('../lib/store');
 const { TASK_DONE_IDS, TASK_CANCEL_IDS } = require('../commands/task');
+const { REMINDER_IDS } = require('../services/reminder');
 const taskRepository = require('../database/repositories/task.repository');
 
 // Cache gallery posters per item slug so repeated buys don't re-compose.
@@ -39,6 +40,12 @@ class StoreInteractionListener extends Listener {
 	async run(interaction) {
 		if (!interaction.isButton()) {
 			return;
+		}
+
+		// "Mark done" button on a reminder message.
+		//   remind_done:<taskId>
+		if (interaction.customId.startsWith(`${REMINDER_IDS.done}:`)) {
+			return this._handleReminderDone(interaction);
 		}
 
 		// Task confirmation buttons for /task done and /task cancel.
@@ -211,6 +218,69 @@ class StoreInteractionListener extends Listener {
 			embeds: [],
 			components: []
 		});
+	}
+
+	/**
+	 * "Mark done" on a reminder message. The assignee or anyone who can manage
+	 * messages may confirm it, since a reminder is posted in a public channel and
+	 * the person who finished the work may not have Manage Messages. Runs the
+	 * same transition as /task done.
+	 */
+	async _handleReminderDone(interaction) {
+		const taskId = interaction.customId.split(':')[1];
+		if (!taskId) {
+			return;
+		}
+
+		let task;
+		try {
+			task = taskRepository.getTask(taskId);
+		} catch (error) {
+			this.container.logger.error('Reminder done failed to load task', error);
+			return interaction.reply({ content: 'Failed to load the task.', ephemeral: true });
+		}
+		if (!task) {
+			return interaction.reply({ content: 'Task not found. It may have been removed.', ephemeral: true });
+		}
+
+		const canManage = Boolean(interaction.member?.permissions?.has?.(PermissionFlagsBits.ManageMessages));
+		if (interaction.user.id !== task.assigned_to && !canManage) {
+			return interaction.reply({
+				content:
+					'Only the person this task is assigned to, or someone who can manage messages, can mark it done.',
+				ephemeral: true
+			});
+		}
+
+		if (task.status === 'done' || task.cancelled) {
+			return interaction.update({
+				content: 'This task was already done or cancelled.',
+				embeds: interaction.message.embeds,
+				components: []
+			});
+		}
+
+		const taskCommand = this.container.stores.get('commands').get('task');
+		if (!taskCommand) {
+			return interaction.reply({ content: 'Task command is not loaded.', ephemeral: true });
+		}
+
+		// The chain append can outlast Discord's 3s acknowledgement window.
+		await interaction.deferUpdate();
+		const result = await taskCommand._executeDone(task, interaction);
+		if (typeof result !== 'object') {
+			return interaction.followUp({ content: result, ephemeral: true });
+		}
+
+		const source = interaction.message.embeds?.[0];
+		const embed = source ? EmbedBuilder.from(source) : new EmbedBuilder().setTitle(task.title);
+		embed.setColor(0x00ff00);
+		// Discord allows at most 25 fields. The reminder card has two.
+		if ((embed.data.fields?.length ?? 0) < 25) {
+			embed.addFields({ name: 'Status', value: `Done by ${interaction.user}`, inline: false });
+		}
+
+		return interaction.editReply({ content: result.content, embeds: [embed], components: [] }).catch(() => {});
 	}
 
 	/**

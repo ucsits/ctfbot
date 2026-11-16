@@ -26,8 +26,11 @@ const { SUGGEST_IDS, TIMEZONE } = taskSuggest;
  *   tsug_dismiss:<id>  close the suggestion without creating anything
  *   tsug_cancel:<id>   cancel the existing task a cancellation card targets
  *   tsug_keep:<id>     keep the existing task and close the cancellation card
+ *   tsug_done:<id>     mark the existing task done, from a done card
+ *   tsug_notdone:<id>  leave the task pending and close the done card
  * Tasks are written through TaskCommand.createTaskRecord, the same path as
- * /task add, and cancellations through TaskCommand._executeCancel, the same
+ * /task add, completions through TaskCommand._executeDone, the same path as
+ * /task done, and cancellations through TaskCommand._executeCancel, the same
  * path as /task cancel.
  */
 class TaskSuggestInteractionListener extends Listener {
@@ -65,6 +68,12 @@ class TaskSuggestInteractionListener extends Listener {
 				}
 				if (namespace === SUGGEST_IDS.keep) {
 					return await this._keep(interaction, proposalId);
+				}
+				if (namespace === SUGGEST_IDS.done) {
+					return await this._completeTask(interaction, proposalId);
+				}
+				if (namespace === SUGGEST_IDS.notDone) {
+					return await this._notDone(interaction, proposalId);
 				}
 			} else if (namespace === SUGGEST_IDS.modal) {
 				return await this._submitModal(interaction, proposalId);
@@ -320,6 +329,89 @@ class TaskSuggestInteractionListener extends Listener {
 			taskId: task.task_id
 		});
 		return interaction.editReply({ content: result.content, embeds: [], components: [] });
+	}
+
+	/**
+	 * Mark the task a done card targets as done, through the same path as
+	 * /task done. The card is only closed once the transition succeeded.
+	 */
+	async _completeTask(interaction, proposalId) {
+		if (await this._denied(interaction)) {
+			return;
+		}
+
+		const proposal = taskSuggest.claimProposal(proposalId);
+		if (!proposal) {
+			return this._unavailable(interaction, proposalId);
+		}
+		if (proposal.kind !== 'done' || !proposal.targetTaskId) {
+			taskSuggest.releaseProposal(proposalId);
+			return interaction.reply({
+				content: 'This card is not a done card.',
+				ephemeral: true
+			});
+		}
+
+		const task = taskRepository.getTask(proposal.targetTaskId);
+		if (!task || task.status !== 'pending' || task.cancelled) {
+			// Nothing left to complete. Close the card instead of leaving it open.
+			taskSuggest.finishProposal(proposalId, {
+				status: 'done',
+				handledBy: interaction.user.id,
+				taskId: proposal.targetTaskId
+			});
+			return interaction.update({
+				content: 'This task was already done or cancelled.',
+				embeds: [],
+				components: []
+			});
+		}
+
+		await interaction.deferUpdate();
+		const taskCommand = this.container.stores.get('commands').get('task');
+		const result = await taskCommand._executeDone(task, interaction);
+
+		if (typeof result !== 'object') {
+			taskSuggest.releaseProposal(proposalId);
+			return interaction.followUp({ content: result, ephemeral: true });
+		}
+
+		taskSuggest.finishProposal(proposalId, {
+			status: 'done',
+			handledBy: interaction.user.id,
+			taskId: task.task_id
+		});
+		return interaction.editReply({ content: result.content, embeds: [], components: [] });
+	}
+
+	/** Leave the task pending and close the done card without recording anything. */
+	async _notDone(interaction, proposalId) {
+		if (await this._denied(interaction)) {
+			return;
+		}
+
+		const proposal = taskSuggest.claimProposal(proposalId);
+		if (!proposal) {
+			return this._unavailable(interaction, proposalId);
+		}
+		if (proposal.kind !== 'done') {
+			taskSuggest.releaseProposal(proposalId);
+			return interaction.reply({
+				content: 'This card is not a done card.',
+				ephemeral: true
+			});
+		}
+		taskSuggest.finishProposal(proposalId, {
+			status: 'kept',
+			handledBy: interaction.user.id,
+			taskId: proposal.targetTaskId
+		});
+
+		return interaction.update({
+			content: `Left **${proposal.title}** pending. Nothing was recorded.`,
+			embeds: [],
+			components: []
+		});
 	}
 
 	/** Keep the task and close the cancellation card without recording anything. */
