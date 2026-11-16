@@ -216,6 +216,36 @@ function listPendingTasks({ assignedTo, deadlineAfter, deadlineBefore } = {}) {
 }
 
 /**
+ * Pending, non-cancelled tasks assigned to any of the given users.
+ *
+ * The suggestion service uses this to see the real tasks of the people in a
+ * conversation, not only the cards that are still open. Without it the model
+ * cannot tell that a task exists after its card was accepted, and it wrongly
+ * says the task is missing.
+ *
+ * @param {string[]} userIds - Discord user ids
+ * @param {{ limit?: number }} [options]
+ * @returns {Array<object>} oldest deadline first
+ */
+function listPendingTasksForUsers(userIds, { limit = 50 } = {}) {
+	if (!Array.isArray(userIds) || userIds.length === 0) {
+		return [];
+	}
+	const placeholders = userIds.map(() => '?').join(', ');
+	return db()
+		.prepare(
+			`
+		SELECT task_id, title, description, assigned_to, created_by, deadline, status, cancelled
+		FROM tasks
+		WHERE status = 'pending' AND cancelled = 0 AND assigned_to IN (${placeholders})
+		ORDER BY deadline ASC
+		LIMIT ?
+	`
+		)
+		.all(...userIds, limit);
+}
+
+/**
  * All pending, non-cancelled tasks, used as the candidate pool for fuzzy
  * title/description search (see lib/utils/fuzzyMatch.js). Returns the fields
  * needed to render a confirmation embed and run the transition.
@@ -340,6 +370,7 @@ module.exports = {
 	cancelTask,
 	getTask,
 	listPendingTasks,
+	listPendingTasksForUsers,
 	searchTasksByQuery,
 	getDueReminders,
 	claimDueReminders,

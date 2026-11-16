@@ -10,21 +10,46 @@ const db = () => getConnection();
 const nowSeconds = () => Math.floor(Date.now() / 1000);
 
 /**
- * Insert a suggestion. Returns false when one already exists for the same
- * source message in that channel, in which case no card should be posted.
+ * Insert a suggestion. Returns false when the row could not be written.
+ *
+ * Several cards may come from one source message (for example "cancel the old
+ * LPJ, then do it today and tomorrow"), so the source message is no longer
+ * unique. Duplicates are rejected by the service, which compares the kind,
+ * target task and title before queueing a card.
  *
  * @returns {boolean}
  */
-function createSuggestion({ id, channelId, sourceMessageId, title, description, assigneeId, deadline }) {
+function createSuggestion({
+	id,
+	channelId,
+	sourceMessageId,
+	title,
+	description,
+	assigneeId,
+	deadline,
+	kind = 'create',
+	targetTaskId = null
+}) {
 	const result = db()
 		.prepare(
 			`
-		INSERT OR IGNORE INTO task_suggestions
-			(id, channel_id, source_message_id, title, description, assignee_id, deadline, status, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?)
+		INSERT INTO task_suggestions
+			(id, channel_id, source_message_id, title, description, assignee_id, deadline, kind, target_task_id, status, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?)
 	`
 		)
-		.run(id, channelId, sourceMessageId, title, description || null, assigneeId, deadline ?? null, nowSeconds());
+		.run(
+			id,
+			channelId,
+			sourceMessageId,
+			title,
+			description || null,
+			assigneeId,
+			deadline ?? null,
+			kind,
+			targetTaskId,
+			nowSeconds()
+		);
 	return result.changes > 0;
 }
 
@@ -101,21 +126,45 @@ function finishSuggestion(id, { status, handledBy, taskId = null }) {
 }
 
 /**
- * Source message ids that already have a suggestion in this channel.
+ * The card with this kind, target task, title and deadline in this channel, if
+ * any. Used to reject a duplicate before a second card is posted. Titles are
+ * compared case-insensitively, which is how people read them. The deadline is
+ * part of the key so "LPJ hari ini" and "LPJ besok" can both exist.
  *
- * @returns {Set<string>}
+ * @returns {object|undefined}
  */
-function suggestedSourceIds(channelId, sourceMessageIds) {
-	if (sourceMessageIds.length === 0) {
-		return new Set();
-	}
-	const placeholders = sourceMessageIds.map(() => '?').join(', ');
-	const rows = db()
+function findSuggestionByTitle({ channelId, kind = 'create', targetTaskId = null, title, deadline = null }) {
+	return db()
 		.prepare(
-			`SELECT source_message_id FROM task_suggestions WHERE channel_id = ? AND source_message_id IN (${placeholders})`
+			`
+		SELECT * FROM task_suggestions
+		WHERE channel_id = ? AND kind = ? AND target_task_id IS ? AND lower(title) = lower(?) AND deadline IS ?
+		AND status IN ('open', 'working')
+		ORDER BY created_at DESC, rowid DESC
+		LIMIT 1
+	`
 		)
-		.all(channelId, ...sourceMessageIds);
-	return new Set(rows.map(r => r.source_message_id));
+		.get(channelId, kind, targetTaskId, title, deadline);
+}
+
+/**
+ * The card that already targets a task, if any. A task needs at most one
+ * cancellation card.
+ *
+ * @returns {object|undefined}
+ */
+function findSuggestionForTarget({ channelId, kind = 'cancel', targetTaskId }) {
+	return db()
+		.prepare(
+			`
+		SELECT * FROM task_suggestions
+		WHERE channel_id = ? AND kind = ? AND target_task_id = ?
+		AND status IN ('open', 'working')
+		ORDER BY created_at DESC, rowid DESC
+		LIMIT 1
+	`
+		)
+		.get(channelId, kind, targetTaskId);
 }
 
 /**
@@ -137,7 +186,7 @@ function recentTitles(channelId, limit = 20) {
 function recentHandled(channelId, limit = 20) {
 	return db()
 		.prepare(
-			'SELECT title, status FROM task_suggestions WHERE channel_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ?'
+			'SELECT title, status, kind, target_task_id FROM task_suggestions WHERE channel_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ?'
 		)
 		.all(channelId, limit)
 		.reverse();
@@ -204,7 +253,8 @@ module.exports = {
 	claimSuggestion,
 	releaseSuggestion,
 	finishSuggestion,
-	suggestedSourceIds,
+	findSuggestionByTitle,
+	findSuggestionForTarget,
 	recentTitles,
 	recentHandled,
 	listOpenSuggestions,

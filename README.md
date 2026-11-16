@@ -540,13 +540,24 @@ explicitly reported.
 
 The bot can watch governance channels (the `GOVERNANCE_CATEGORIES` where
 `/task` is allowed) and, when admins decide to do something in the future,
-reply with a suggestion card offering to create a task with reminders.
+reply with a suggestion card offering to create a task with reminders. It can
+also offer to cancel a task the conversation just dropped or rescheduled.
 
 - Messages are buffered per channel. After 60 seconds of quiet (and at most
   once every 2 minutes per channel) the new messages are sent to an
   [OI]-compatible model, along with the channel's last 20 messages read
-  from Discord history, which keeps context across a bot restart, and the
-  suggestion cards that are still open.
+  from Discord history, which keeps context across a bot restart, the
+  suggestion cards that are still open, and the pending tasks of the people
+  in the conversation.
+- The model works through tools, not a one-shot JSON reply. It can call
+  `list_pending_tasks`, `create_task_card`, `cancel_task_card`,
+  `update_task_card`, `remember_person` and (on unprompted passes)
+  `stay_silent`. Tools only validate and queue. The service posts the chat
+  first and the cards after, so a failed pass never leaves a half-written
+  conversation. Parallel tool calls in one model turn all land.
+- One message can produce several cards. "Ganti LPJ ke hari ini dan esok"
+  becomes two create cards with different deadlines, and a reschedule can
+  produce a cancellation card plus a replacement card in the same pass.
 - A message that corrects an open suggestion ("not Sunday, make it Friday")
   updates that card in place instead of creating a new one, and the bot
   replies with what changed and a link to the card.
@@ -561,16 +572,20 @@ reply with a suggestion card offering to create a task with reminders.
   replies do not. Unprompted cards need higher model confidence (0.85) than
   answers to a mention (0.7), and dismissed cards are shown to the model as
   things this channel does not want tracked.
-- Each such task becomes a card with **Create task**, **Edit & create**
+- Each new task becomes a card with **Create task**, **Edit & create**
   (pre-filled form with title, assignee, deadline and description) and
   **Dismiss**. Nothing is created until someone clicks.
+- A cancellation card has **Cancel task** and **Keep**. Cancelling runs the
+  same path as `/task cancel`, with blockchain anchoring, reminder removal and
+  Google Calendar sync. Nothing is cancelled until someone clicks, and **Keep**
+  closes the card without touching the task.
 - Accepted suggestions go through the same path as `/task add`, with blockchain
   anchoring, reminders and Google Calendar sync.
 - Only governance-channel messages are ever sent to the model.
-- Suggestions are stored in the `task_suggestions` table (migration 026). A
-  card keeps working across restarts, with no time limit, until someone
-  creates the task or dismisses it. Clicking a card that was already handled
-  says who handled it.
+- Suggestions are stored in the `task_suggestions` table (migration 026, extended
+  by 029 with `kind` and `target_task_id`). A card keeps working across
+  restarts, with no time limit, until someone handles it. Clicking a card that
+  was already handled says who handled it.
 - **Dismiss** deletes the card to keep the channel clean. The dismissal is
   still recorded, and the model then knows the channel did not want it.
 - The bot remembers people. When someone states a lasting fact or preference
@@ -594,10 +609,13 @@ reply with a suggestion card offering to create a task with reminders.
   so chat messages, card titles, descriptions and memory notes stay plain
   text. Reaction controls (👍, 👎, 🔇, 🧠) are not affected.
 - When mentioned, the bot shows "typing..." while the model thinks, then
-  sends one to three short chat messages. The first is a quick
+  sends one to three short chat messages, one per line. The first is a quick
   acknowledgment that fits the message ("wait" for a request, "hmm" for a
   question) sent as a reply. The rest and any cards follow as plain channel
   messages, e.g. "wait", "oke ini ya", then the card.
+- If a queued card fails to post, the bot names it instead of pretending it
+  arrived. A duplicate is refused at tool time, with a link to the existing
+  card, so the model can point at it rather than say the card is missing.
 - `/memory view` shows what the bot remembers about you (Manage Messages can
   view others). `/memory remember`, `/memory forget <number>`,
   `/memory language` and `/memory clear` edit or delete it.
@@ -616,6 +634,10 @@ If the log shows `No reply from ... within Ns`, the endpoint answered too
 slowly. Raise `OPENAI_TIMEOUT_MS`, pick a faster (non-reasoning) model, or
 check that `OPENAI_BASE_URL` is reachable from the bot's host. Messages from a
 failed pass are retried when the next message arrives in that channel.
+
+The suggestion model must support tool calling, since the pass reads tasks and
+queues cards through tools. A provider that rejects tool schemas fails the
+pass, and the mention gets the model-error reply.
 
 The **Message Content** privileged intent must be enabled for the bot in the
 Discord Developer Portal.

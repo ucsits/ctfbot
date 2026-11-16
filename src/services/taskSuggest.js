@@ -2,13 +2,20 @@
  * Task Suggestion Service
  *
  * Watches governance channels and, when the conversation settles, asks an
- * OpenAI-compatible model whether the admins decided to do something in the
+ * [OI]-compatible model whether the admins decided to do something in the
  * future. Mentioning the bot skips the wait. It analyses immediately, shows
  * "typing..." while the model works, and always answers the mention.
- * Each firm decision is posted as a suggestion card (reply to the
- * message where it was made) with Create / Edit & create / Dismiss buttons,
- * handled by src/listeners/taskSuggestInteraction.js. Nothing is created
- * until someone confirms.
+ *
+ * The model works through tools, not a one-shot JSON reply. It can read the
+ * pending tasks of the people in the conversation, then queue any number of
+ * cards: create a task, cancel an existing one, edit an open card, or remember
+ * a person. Tools only validate and queue. The service posts the chat messages
+ * first and the cards after, so a failed pass never leaves a half-written
+ * conversation. Parallel tool calls in one model turn all land.
+ *
+ * Each card is a suggestion, not an action. Nothing is created or cancelled
+ * until someone presses a button, handled by
+ * src/listeners/taskSuggestInteraction.js.
  *
  * The bot also remembers people. Each pass sees the notes and preferences
  * stored for the participants (actor_profiles / actor_memories) and may add
@@ -19,7 +26,7 @@
  * Only messages from GOVERNANCE_CATEGORIES channels are buffered or sent to
  * the model. Message buffers live in memory. Suggestions are stored in the
  * task_suggestions table. A card stays actionable (across restarts, with no
- * time limit) until someone creates the task or dismisses it.
+ * time limit) until someone handles it.
  *
  * @module services/taskSuggest
  */
@@ -29,10 +36,11 @@ const { DateTime } = require('luxon');
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const config = require('../config');
 const constants = require('../lib/constants/config');
-const { chatCompletion, parseJsonReply } = require('../lib/llm/openai');
+const { runWithTools } = require('../lib/llm/openai');
 const { stripEmoji } = require('../lib/utils/emoji');
 const suggestionRepository = require('../database/repositories/taskSuggestion.repository');
 const memoryRepository = require('../database/repositories/actorMemory.repository');
+const taskRepository = require('../database/repositories/task.repository');
 const { logger } = require('../lib/logger');
 
 const suggestLog = logger.child('TaskSuggest');
@@ -63,6 +71,7 @@ const HISTORY_MESSAGES = 20;
 const MAX_UPDATES_PER_PASS = 3;
 const MAX_MESSAGE_CHARS = 1500;
 const MAX_PROPOSALS_PER_PASS = 3;
+const MAX_CANCELS_PER_PASS = 3;
 const MIN_CONFIDENCE = 0.7;
 // Unprompted cards interrupt the conversation. They need more certainty
 // than an answer to someone who mentioned the bot.
@@ -73,10 +82,15 @@ const MAX_LANGUAGE_CHARS = 30;
 // The model answers a mention with a few short chat messages, sent one by one.
 const MAX_CHAT_MESSAGES = 3;
 const MAX_CHAT_CHARS = 1000;
+// How many of a participant's pending tasks are preloaded into the prompt.
+const MAX_TASK_LIST = 50;
+// Enough turns to list tasks, then queue cancels and creates in one turn.
+const MAX_TOOL_ITERATIONS = 6;
 const MEMORY_REACTION = '🧠';
 // Discord shows "typing..." for about 10s per call. Refresh it before then.
 const TYPING_REFRESH_MS = 8_000;
 const TIMEZONE = constants.DEFAULT_TIMEZONE;
+const DEADLINE_FORMAT = 'yyyy-MM-dd HH:mm';
 
 // Custom ID namespaces for the suggestion card. The format is
 // <namespace>:<proposalId>
@@ -84,8 +98,153 @@ const SUGGEST_IDS = {
 	create: 'tsug_create',
 	edit: 'tsug_edit',
 	dismiss: 'tsug_dismiss',
-	modal: 'tsug_modal'
+	modal: 'tsug_modal',
+	cancel: 'tsug_cancel',
+	keep: 'tsug_keep'
 };
+
+const TOOL_NAMES = {
+	listTasks: 'list_pending_tasks',
+	createCard: 'create_task_card',
+	cancelCard: 'cancel_task_card',
+	updateCard: 'update_task_card',
+	remember: 'remember_person',
+	silent: 'stay_silent'
+};
+
+/** [OI]-style function schemas, sent as the `tools` array. */
+const TOOL_SCHEMAS = [
+	{
+		type: 'function',
+		function: {
+			name: TOOL_NAMES.listTasks,
+			description:
+				'Read the pending tasks of the people in this conversation. Use it when a message refers to an earlier task and you are not sure it exists, or when someone asks what is still open.',
+			parameters: {
+				type: 'object',
+				properties: {
+					user_id: {
+						type: 'string',
+						description: 'Discord user id to filter by. Omit to read everyone in the conversation.'
+					},
+					query: { type: 'string', description: 'Optional words to look for in the title or description.' }
+				}
+			}
+		}
+	},
+	{
+		type: 'function',
+		function: {
+			name: TOOL_NAMES.createCard,
+			description:
+				'Queue a card that creates a task when someone confirms it. Call it once for each separate task, including several tasks from the same message.',
+			parameters: {
+				type: 'object',
+				properties: {
+					title: { type: 'string', description: 'Short imperative title, max 100 characters.' },
+					description: { type: 'string', description: 'One or two sentences of context, or omit.' },
+					assignee_id: {
+						type: 'string',
+						description: 'Discord user id of the owner from the participants list. Omit to use the author.'
+					},
+					deadline: {
+						type: 'string',
+						description: `Deadline as "${DEADLINE_FORMAT}" in the local time given in the prompt. Omit when no time frame was mentioned; the card then needs Edit & create.`
+					},
+					source_message_id: {
+						type: 'string',
+						description: 'Id of the NEW message where this was decided. Omit to use the current one.'
+					},
+					confidence: {
+						type: 'number',
+						description: 'How sure you are this is a real admin task, from 0 to 1.'
+					}
+				},
+				required: ['title']
+			}
+		}
+	},
+	{
+		type: 'function',
+		function: {
+			name: TOOL_NAMES.cancelCard,
+			description:
+				'Queue a card that cancels an existing pending task when someone confirms it. Use it when a NEW message drops, replaces or reschedules a task. Never cancel without a card.',
+			parameters: {
+				type: 'object',
+				properties: {
+					task_id: {
+						type: 'string',
+						description: 'task_id from the PENDING tasks list in the prompt.'
+					},
+					source_message_id: {
+						type: 'string',
+						description: 'Id of the NEW message that asked for this. Omit to use the current one.'
+					},
+					confidence: {
+						type: 'number',
+						description: 'How sure you are the team wants this task gone, from 0 to 1.'
+					}
+				},
+				required: ['task_id']
+			}
+		}
+	},
+	{
+		type: 'function',
+		function: {
+			name: TOOL_NAMES.updateCard,
+			description:
+				'Change an OPEN suggestion card, for example a corrected day, person or title. Only include the fields that change.',
+			parameters: {
+				type: 'object',
+				properties: {
+					suggestion_id: { type: 'string', description: 'suggestion_id of the OPEN card.' },
+					title: { type: 'string', description: 'New title, or omit.' },
+					description: { type: 'string', description: 'New description, or omit.' },
+					assignee_id: { type: 'string', description: 'New assignee id, or omit.' },
+					deadline: { type: 'string', description: `New deadline as "${DEADLINE_FORMAT}", or omit.` },
+					source_message_id: { type: 'string', description: 'Id of the NEW message asking for the change.' }
+				},
+				required: ['suggestion_id']
+			}
+		}
+	},
+	{
+		type: 'function',
+		function: {
+			name: TOOL_NAMES.remember,
+			description:
+				'Save or forget a lasting fact or preference about a participant. Never save one-off task details, secrets, credentials or sensitive personal data.',
+			parameters: {
+				type: 'object',
+				properties: {
+					user_id: { type: 'string', description: 'Discord user id the note is about.' },
+					remember: { type: 'string', description: 'Short note in the third person, max 200 characters.' },
+					forget: { type: 'string', description: 'Id of a remembered note that is no longer true.' },
+					language: { type: 'string', description: 'Language the person asked you to use with them.' },
+					source_message_id: { type: 'string', description: 'Id of the NEW message it came from.' }
+				},
+				required: ['user_id']
+			}
+		}
+	},
+	{
+		type: 'function',
+		function: {
+			name: TOOL_NAMES.silent,
+			description:
+				'Choose not to act on a pass where nobody mentioned you. Call it when nothing in the NEW messages deserves a card.',
+			parameters: {
+				type: 'object',
+				properties: {
+					reason: { type: 'string', description: 'One short sentence on why there is nothing to do.' }
+				},
+				required: ['reason']
+			}
+		}
+	}
+];
 
 /** @type {Map<string, object>} channelId → buffer state */
 const channels = new Map();
@@ -243,18 +402,26 @@ async function _sendChat(channel, messages, trigger) {
 }
 
 /**
- * The model's chat messages for a mention, taken from "messages" (an array)
- * or an older-style single "reply" string.
+ * Split the model's plain-text reply into the chat messages it wants to send.
+ * The prompt asks for one message per line, at most three. Empty text means the
+ * model chose not to say anything.
  *
+ * @param {string} text
  * @returns {string[]}
  */
-function _chatMessages(parsed) {
-	const raw = Array.isArray(parsed?.messages) ? parsed.messages : [parsed?.reply];
+function _chatMessages(text) {
+	const raw = String(text ?? '').trim();
+	// Some providers ignore the "no JSON" rule. A JSON object is never chat,
+	// and posting it raw would be worse than staying quiet.
+	if (!raw || raw.startsWith('{')) {
+		return [];
+	}
 	return raw
-		.filter(m => typeof m === 'string')
-		.map(m => _plain(m).slice(0, MAX_CHAT_CHARS))
+		.split(/\n+/)
+		.map(line => _plain(line.replace(/^[-*•]\s+|^\d+[.)]\s+/, '').replace(/^["'`]+|["'`]+$/g, '')))
 		.filter(Boolean)
-		.slice(0, MAX_CHAT_MESSAGES);
+		.slice(0, MAX_CHAT_MESSAGES)
+		.map(m => (m.length > MAX_CHAT_CHARS ? `${m.slice(0, MAX_CHAT_CHARS).trimEnd()}…` : m));
 }
 
 /**
@@ -265,7 +432,7 @@ function _chatMessages(parsed) {
  * @returns {string}
  */
 function _plain(text) {
-	return stripEmoji(text)
+	return stripEmoji(String(text ?? ''))
 		.replace(/(\d)\s*[\u2013\u2014]\s*(\d)/g, '$1-$2')
 		.replace(/\s*[\u2013\u2014]\s*/g, ', ')
 		.replace(/,\s*([,.!?])/g, '$1')
@@ -279,9 +446,315 @@ function _replyTo(message, content) {
 		.catch(error => suggestLog.warn(`Could not reply to message ${message.id} ${error.message}`));
 }
 
+/** Link to a card, or an empty string when the ids are unknown. */
+function _cardLink(channel, row) {
+	if (!row?.card_message_id || !channel?.guildId) {
+		return '';
+	}
+	return ` https://discord.com/channels/${channel.guildId}/${channel.id}/${row.card_message_id}`;
+}
+
+/** One line describing a real task, for the prompt and the task tool. */
+function _taskLine(task, people) {
+	const who = people.get(task.assigned_to) ?? 'unknown';
+	const deadline = DateTime.fromSeconds(task.deadline).setZone(TIMEZONE);
+	const overdue = deadline.toMillis() < Date.now() ? ' (overdue)' : '';
+	return `- task_id=${task.task_id} "${task.title}" assigned=${who} (${task.assigned_to}) deadline=${deadline.toFormat('yyyy-MM-dd HH:mm cccc')}${overdue}`;
+}
+
 /**
- * Send the unanalysed messages (plus some context) to the model and post a
- * suggestion card for each decision it finds.
+ * Build the tool dispatcher for one pass.
+ *
+ * Tools validate their arguments against what was actually said and then
+ * append to the pass queue. They never post anything. A rejected call returns
+ * a short "not queued. ..." string, which the model can read and correct in a
+ * later turn instead of the service silently dropping the card.
+ *
+ * @param {object} params
+ * @param {string} params.channelId
+ * @param {import('discord.js').GuildChannel} params.channel
+ * @param {Map<string, string>} params.people - Discord id → display name
+ * @param {Map<string, object>} params.profiles - memory profiles of the participants
+ * @param {Array<object>} params.open - open suggestions
+ * @param {Array<object>} params.pending - pending tasks of the participants
+ * @param {Array<object>} params.fresh - messages this pass is analysing
+ * @param {import('discord.js').Message|null} params.trigger
+ * @param {number} params.minConfidence
+ * @param {object} params.queue - mutated by the tools
+ * @returns {{ schemas: Array<object>, dispatch: (name: string, args: object) => Promise<string|object> }}
+ */
+function _createToolkit({ channelId, channel, people, profiles, open, pending, fresh, trigger, minConfidence, queue }) {
+	const freshById = new Map(fresh.map(m => [String(m.id), m]));
+	const fallbackSourceId = trigger?.id ?? fresh[fresh.length - 1]?.id ?? null;
+	const openById = new Map(open.map(r => [String(r.id), r]));
+	const pendingById = new Map(pending.map(t => [String(t.task_id), t]));
+
+	/** Resolve the NEW message a tool call is about. */
+	const sourceOf = raw => {
+		const id = raw === undefined || raw === null || raw === '' ? fallbackSourceId : String(raw);
+		return freshById.get(id) ?? null;
+	};
+
+	const deadlineOf = raw => {
+		if (typeof raw !== 'string' || !raw.trim()) {
+			return null;
+		}
+		const dt = DateTime.fromFormat(raw.trim(), DEADLINE_FORMAT, { zone: TIMEZONE });
+		return dt.isValid && dt.toMillis() > Date.now() + 5 * 60_000 ? dt : null;
+	};
+
+	/** A pending task the model may cancel. */
+	const cancellableTask = taskId => {
+		const known = pendingById.get(taskId);
+		if (known) {
+			return known;
+		}
+		const task = taskRepository.getTask(taskId);
+		if (!task || task.status !== 'pending' || task.cancelled || !people.has(task.assigned_to)) {
+			return null;
+		}
+		pendingById.set(taskId, task);
+		return task;
+	};
+
+	const duplicateCreate = ({ title, deadline, targetTaskId = null }) =>
+		queue.creates.find(
+			c =>
+				c.title.toLowerCase() === title.toLowerCase() &&
+				c.deadline === deadline &&
+				c.targetTaskId === targetTaskId
+		);
+
+	const existingCreate = ({ title, deadline }) =>
+		suggestionRepository.findSuggestionByTitle({
+			channelId,
+			kind: 'create',
+			targetTaskId: null,
+			title,
+			deadline
+		});
+
+	async function dispatch(name, args = {}) {
+		switch (name) {
+			case TOOL_NAMES.listTasks: {
+				const userId = args.user_id ? String(args.user_id) : null;
+				const query = String(args.query ?? '')
+					.toLowerCase()
+					.trim();
+				let tasks = pending;
+				if (userId) {
+					tasks = tasks.filter(t => t.assigned_to === userId);
+				}
+				if (query) {
+					tasks = tasks.filter(t => `${t.title} ${t.description ?? ''}`.toLowerCase().includes(query));
+				}
+				if (tasks.length === 0) {
+					return 'no pending tasks match';
+				}
+				return tasks
+					.slice(0, MAX_TASK_LIST)
+					.map(t => _taskLine(t, people))
+					.join('\n');
+			}
+
+			case TOOL_NAMES.createCard: {
+				const title = _plain(String(args.title ?? '').replace(/\s+/g, ' ')).slice(0, 100);
+				if (!title) {
+					return 'not queued. The title was empty';
+				}
+				const src = sourceOf(args.source_message_id);
+				if (!src) {
+					return `not queued. source_message_id ${args.source_message_id} is not a NEW message`;
+				}
+				const confidence = Number(args.confidence);
+				if (Number.isFinite(confidence) && confidence < minConfidence) {
+					return `not queued. confidence ${confidence} is below ${minConfidence}`;
+				}
+				const deadline =
+					args.deadline === undefined || args.deadline === null || args.deadline === ''
+						? null
+						: deadlineOf(args.deadline);
+				if (args.deadline && !deadline) {
+					return `not queued. deadline must be "${DEADLINE_FORMAT}" in the future, or omitted`;
+				}
+				const assigneeId =
+					args.assignee_id && people.has(String(args.assignee_id)) ? String(args.assignee_id) : src.authorId;
+				const deadlineUnix = deadline ? deadline.toUnixInteger() : null;
+				const description =
+					typeof args.description === 'string' && args.description.trim()
+						? _plain(args.description).slice(0, 1000) || null
+						: null;
+
+				if (duplicateCreate({ title, deadline: deadlineUnix })) {
+					return `not queued. "${title}" with that deadline is already queued this pass`;
+				}
+				const existing = existingCreate({ title, deadline: deadlineUnix });
+				if (existing) {
+					return `not queued. A card for "${existing.title}" with that deadline already exists${_cardLink(channel, existing)}`;
+				}
+				if (queue.creates.length >= MAX_PROPOSALS_PER_PASS) {
+					return `not queued. At most ${MAX_PROPOSALS_PER_PASS} new cards per pass`;
+				}
+
+				queue.creates.push({
+					kind: 'create',
+					targetTaskId: null,
+					title,
+					description,
+					assigneeId,
+					deadline: deadlineUnix,
+					sourceMessageId: src.id
+				});
+				return deadline
+					? `queued "${title}" for ${people.get(assigneeId) ?? assigneeId} at ${deadline.toFormat(DEADLINE_FORMAT)}`
+					: `queued "${title}" for ${people.get(assigneeId) ?? assigneeId} with no deadline yet`;
+			}
+
+			case TOOL_NAMES.cancelCard: {
+				const taskId = String(args.task_id ?? '').trim();
+				const task = cancellableTask(taskId);
+				if (!task) {
+					return `not queued. No pending task ${taskId} assigned to someone in this conversation`;
+				}
+				const src = sourceOf(args.source_message_id);
+				if (!src) {
+					return `not queued. source_message_id ${args.source_message_id} is not a NEW message`;
+				}
+				const confidence = Number(args.confidence);
+				if (Number.isFinite(confidence) && confidence < minConfidence) {
+					return `not queued. confidence ${confidence} is below ${minConfidence}`;
+				}
+				if (queue.cancels.some(c => c.task.task_id === task.task_id)) {
+					return `not queued. A cancellation card for "${task.title}" is already queued this pass`;
+				}
+				const existing = suggestionRepository.findSuggestionForTarget({
+					channelId,
+					kind: 'cancel',
+					targetTaskId: task.task_id
+				});
+				if (existing) {
+					return `not queued. A cancellation card for "${task.title}" already exists${_cardLink(channel, existing)}`;
+				}
+				if (queue.cancels.length >= MAX_CANCELS_PER_PASS) {
+					return `not queued. At most ${MAX_CANCELS_PER_PASS} cancellation cards per pass`;
+				}
+
+				queue.cancels.push({ task, sourceMessageId: src.id });
+				return `queued a cancellation card for "${task.title}"`;
+			}
+
+			case TOOL_NAMES.updateCard: {
+				const row = openById.get(String(args.suggestion_id));
+				if (!row) {
+					return `not queued. suggestion_id ${args.suggestion_id} is not an open card`;
+				}
+				if ((row.kind ?? 'create') !== 'create') {
+					return `not queued. suggestion_id ${args.suggestion_id} is a cancellation card, not a task card`;
+				}
+				if (queue.updates.some(u => u.id === row.id)) {
+					return `not queued. "${row.title}" was already updated this pass`;
+				}
+
+				const changes = {};
+				if (typeof args.title === 'string') {
+					const title = _plain(args.title.replace(/\s+/g, ' ')).slice(0, 100);
+					if (title && title !== row.title) {
+						changes.title = title;
+					}
+				}
+				if (typeof args.description === 'string') {
+					const description = _plain(args.description).slice(0, 1000) || null;
+					if (description !== row.description) {
+						changes.description = description;
+					}
+				}
+				if (
+					args.assignee_id &&
+					people.has(String(args.assignee_id)) &&
+					String(args.assignee_id) !== row.assignee_id
+				) {
+					changes.assigneeId = String(args.assignee_id);
+				}
+				if (typeof args.deadline === 'string') {
+					const deadline = deadlineOf(args.deadline);
+					if (deadline && deadline.toUnixInteger() !== row.deadline) {
+						changes.deadline = deadline.toUnixInteger();
+					}
+				}
+				if (Object.keys(changes).length === 0) {
+					return `not queued. Nothing changed on "${row.title}"`;
+				}
+				if (queue.updates.length >= MAX_UPDATES_PER_PASS) {
+					return `not queued. At most ${MAX_UPDATES_PER_PASS} card updates per pass`;
+				}
+
+				const src = sourceOf(args.source_message_id);
+				if (!src) {
+					return `not queued. source_message_id ${args.source_message_id} is not a NEW message`;
+				}
+				queue.updates.push({ id: row.id, changes, sourceMessageId: src.id });
+				return `queued an update to "${row.title}"`;
+			}
+
+			case TOOL_NAMES.remember: {
+				const userId = String(args.user_id ?? '');
+				const src = sourceOf(args.source_message_id);
+				if (!people.has(userId) || !src) {
+					return 'not saved. That user id is not in this conversation';
+				}
+				const profile = profiles.get(userId) ?? { language: null, notes: [] };
+				const change = { userId, authorId: src.authorId, sourceMessageId: src.id };
+
+				if (args.forget !== undefined && args.forget !== null) {
+					const noteId = Number(String(args.forget).replace(/^#/, ''));
+					const note = profile.notes.find(n => n.id === noteId);
+					if (note) {
+						change.forget = note;
+					}
+				}
+				if (typeof args.remember === 'string') {
+					const note = _plain(args.remember.replace(/\s+/g, ' ')).slice(0, MAX_NOTE_CHARS);
+					const known = profile.notes.some(
+						n => n !== change.forget && n.note.toLowerCase() === note.toLowerCase()
+					);
+					if (note && !known) {
+						change.remember = note;
+					}
+				}
+				if (typeof args.language === 'string' && src.authorId === userId) {
+					const language = stripEmoji(args.language).replace(/\s+/g, ' ').trim().slice(0, MAX_LANGUAGE_CHARS);
+					if (language && language.toLowerCase() !== (profile.language ?? '').toLowerCase()) {
+						change.language = language;
+					}
+				}
+				if (!change.remember && !change.forget && !change.language) {
+					return `not saved. Nothing new about ${people.get(userId)}`;
+				}
+				if (queue.memories.length >= MAX_MEMORY_CHANGES_PER_PASS) {
+					return `not saved. At most ${MAX_MEMORY_CHANGES_PER_PASS} memory changes per pass`;
+				}
+
+				queue.memories.push(change);
+				return `remembered for ${people.get(userId)}`;
+			}
+
+			case TOOL_NAMES.silent:
+				if (trigger) {
+					return 'you were mentioned, answer the person instead of staying silent';
+				}
+				return { content: 'staying silent', stop: true };
+
+			default:
+				return `unknown tool ${name}`;
+		}
+	}
+
+	return { schemas: TOOL_SCHEMAS, dispatch };
+}
+
+/**
+ * Send the unanalysed messages (plus some context) to the model, let it use
+ * tools to queue cards, then post the chat and the cards.
  *
  * @param {string} channelId
  * @param {object} [options]
@@ -343,29 +816,53 @@ async function _analyze(channelId, { trigger = null } = {}) {
 		const open = await _dropDeletedCards(state.channel, suggestionRepository.listOpenSuggestions(channelId));
 		const handled = suggestionRepository.recentHandled(channelId).filter(r => r.status !== 'open');
 		const profiles = memoryRepository.getProfiles([...state.people.keys()]);
+		// The real tasks of the people here. Without this the model only sees
+		// cards that are still open and thinks an accepted task disappeared.
+		const pending = taskRepository.listPendingTasksForUsers([...state.people.keys()], {
+			limit: MAX_TASK_LIST
+		});
 		suggestLog.debug(
-			`Prompt input for ${where} ${context.length} context message(s), ${open.length} open suggestion(s) [${open.map(r => `"${_clip(r.title, 40)}"`).join(', ')}], ${handled.length} handled, ${state.people.size} participant(s), ${profiles.size ?? 0} profile(s)`
+			`Prompt input for ${where} ${context.length} context message(s), ${open.length} open suggestion(s) [${open.map(r => `"${_clip(r.title, 40)}"`).join(', ')}], ${handled.length} handled, ${pending.length} pending task(s), ${state.people.size} participant(s), ${profiles.size ?? 0} profile(s)`
 		);
 
-		let reply;
+		const queue = { creates: [], cancels: [], updates: [], memories: [] };
+		const toolkit = _createToolkit({
+			channelId,
+			channel: state.channel,
+			people: state.people,
+			profiles,
+			open,
+			pending,
+			fresh,
+			trigger,
+			minConfidence: trigger ? MIN_CONFIDENCE : PASSIVE_MIN_CONFIDENCE,
+			queue
+		});
+		const prompt = _buildPrompt({
+			context,
+			fresh,
+			people: state.people,
+			open,
+			pending,
+			profiles,
+			proposedTitles: handled.filter(r => r.status === 'created').map(r => r.title),
+			dismissedTitles: handled.filter(r => r.status === 'dismissed').map(r => r.title),
+			botId: trigger ? trigger.client.user.id : null
+		});
+		suggestLog.trace(`Prompt for ${where}:\n${prompt.map(m => `--- ${m.role} ---\n${m.content}`).join('\n')}`);
+
+		let result;
 		try {
-			const prompt = _buildPrompt({
-				context,
-				fresh,
-				people: state.people,
-				open,
-				profiles,
-				proposedTitles: handled.filter(r => r.status !== 'dismissed').map(r => r.title),
-				dismissedTitles: handled.filter(r => r.status === 'dismissed').map(r => r.title),
-				botId: trigger ? trigger.client.user.id : null
-			});
-			suggestLog.trace(`Prompt for ${where}:\n${prompt.map(m => `--- ${m.role} ---\n${m.content}`).join('\n')}`);
-			reply = await chatCompletion({
+			result = await runWithTools({
 				messages: prompt,
-				json: true,
-				// Spotting decisions in chat does not need deep reasoning. Low effort
-				// keeps replies fast and cheap.
-				reasoningEffort: 'low'
+				tools: toolkit.schemas,
+				dispatch: toolkit.dispatch,
+				maxIterations: MAX_TOOL_ITERATIONS,
+				// Spotting decisions in chat does not need deep reasoning. Low
+				// effort keeps replies fast and cheap.
+				reasoningEffort: 'low',
+				onToolCall: (name, args) =>
+					suggestLog.debug(`Tool ${name} in ${where} ${_clip(JSON.stringify(args), 200)}`)
 			});
 		} catch (error) {
 			// Put the messages back so the next pass (triggered by the next
@@ -381,79 +878,92 @@ async function _analyze(channelId, { trigger = null } = {}) {
 			}
 			throw error;
 		}
-		suggestLog.trace(`Model reply for ${where}:\n${reply}`);
-		let parsed;
-		try {
-			parsed = parseJsonReply(reply);
-		} catch (error) {
-			suggestLog.warn(`Unparseable model reply for ${where} (${error.message}) ${_clip(reply, LOG_REPLY_CHARS)}`);
-			if (trigger) {
-				stopTyping();
-				await _replyTo(trigger, 'duh, jawabanku barusan kacau formatnya. coba mention aku lagi ya');
-			}
-			throw error;
+
+		suggestLog.debug(
+			`Model reply for ${where} ${_clip(result.text, LOG_REPLY_CHARS)} (tools ${result.toolCalls.map(c => c.name).join(', ') || 'none'}${result.exhausted ? ', tool loop exhausted' : ''})`
+		);
+		if (result.exhausted) {
+			suggestLog.warn(`Tool loop hit its limit in ${where}. Posted what was queued`);
 		}
-		suggestLog.debug(`Model reply for ${where} ${_clip(reply, LOG_REPLY_CHARS)}`);
-		const dropped = [];
-		const found = _normalizeProposals(parsed, {
-			fresh,
-			people: state.people,
-			minConfidence: trigger ? MIN_CONFIDENCE : PASSIVE_MIN_CONFIDENCE,
-			fallbackSourceId: trigger?.id ?? null,
-			dropped,
-			proposedSources: suggestionRepository.suggestedSourceIds(
-				channelId,
-				fresh.map(m => m.id)
-			)
-		});
 
-		const updates = _normalizeUpdates(parsed, { fresh, people: state.people, open });
-
-		// For a mention the model's chat messages come first and the cards
-		// follow them in the channel, like "oke ini ya" and then the card.
-		const chat = trigger ? _chatMessages(parsed) : [];
+		// A mention gets the model's chat first, then the cards, so it reads
+		// like "oke ini ya" followed by the card. A passive pass never chats.
+		const chat = trigger ? _chatMessages(result.text) : [];
 		await _sendChat(state.channel, chat, trigger);
 
 		let updated = 0;
-		for (const u of updates) {
-			if (await _applyUpdate(state.channel, u)) {
-				updated++;
+		for (const u of queue.updates) {
+			try {
+				if (await _applyUpdate(state.channel, u)) {
+					updated++;
+				}
+			} catch (error) {
+				suggestLog.warn(`Could not apply update to suggestion ${u.id} in ${where} ${error.message}`);
 			}
 		}
-		let posted = 0;
-		for (const p of found) {
-			if (await _postProposal(state.channel, p, { reply: !trigger })) {
-				posted++;
-			} else {
-				dropped.push(`"${p.title}" was already suggested from message ${p.sourceMessageId}`);
+
+		const posted = { create: 0, cancel: 0 };
+		const failed = [];
+		// Cancellation cards first, so a replacement task is never created
+		// before the thing it replaces is offered for cancellation.
+		for (const c of queue.cancels) {
+			const proposal = {
+				kind: 'cancel',
+				targetTaskId: c.task.task_id,
+				title: c.task.title,
+				description: c.task.description,
+				assigneeId: c.task.assigned_to,
+				deadline: c.task.deadline,
+				sourceMessageId: c.sourceMessageId
+			};
+			try {
+				if (await _postProposal(state.channel, proposal, { reply: !trigger })) {
+					posted.cancel++;
+				} else {
+					failed.push({ kind: 'cancel', title: proposal.title, reason: 'the row could not be stored' });
+				}
+			} catch (error) {
+				failed.push({ kind: 'cancel', title: proposal.title, reason: error.message });
 			}
 		}
-		if (dropped.length > 0) {
-			suggestLog.warn(`Dropped ${dropped.length} proposal(s) in channel ${channelId}. ${dropped.join(', ')}`);
-			// The chat may already have promised these cards. Say they did not come
-			// instead of leaving the person looking for them.
-			if (trigger && chat.length > 0) {
-				await state.channel
-					.send({
-						content: `eh ${dropped.length > 1 ? 'beberapa kartu' : 'kartunya'} gagal kubikin barusan. coba sebut lagi detailnya, atau pake /task add aja`,
-						allowedMentions: { parse: [] }
-					})
-					.catch(() => {});
+		for (const p of queue.creates) {
+			try {
+				if (await _postProposal(state.channel, p, { reply: !trigger })) {
+					posted.create++;
+				} else {
+					failed.push({ kind: 'create', title: p.title, reason: 'the row could not be stored' });
+				}
+			} catch (error) {
+				failed.push({ kind: 'create', title: p.title, reason: error.message });
 			}
 		}
-		const learned = await _applyMemories(
-			state.channel,
-			_normalizeMemories(parsed, { fresh, people: state.people, profiles })
-		);
-		const raw = key => (Array.isArray(parsed?.[key]) ? parsed[key].length : 0);
-		const summary = `Pass in ${where} done in ${Date.now() - passStartedAt}ms (${trigger ? `mention ${trigger.id}` : 'passive'}). Model gave ${raw('proposals')} proposal(s), ${raw('updates')} update(s), ${raw('memories')} memory change(s) and ${chat.length} chat message(s). Posted ${posted}, updated ${updated}, dropped ${dropped.length}, saved ${learned} memory change(s)`;
-		if (trigger || posted > 0 || updated > 0 || learned > 0 || dropped.length > 0) {
+
+		const learned = await _applyMemories(state.channel, queue.memories);
+		const summary = `Pass in ${where} done in ${Date.now() - passStartedAt}ms (${trigger ? `mention ${trigger.id}` : 'passive'}). Queued ${queue.creates.length} create(s), ${queue.cancels.length} cancel(s), ${queue.updates.length} update(s), ${queue.memories.length} memory change(s) and ${chat.length} chat message(s). Posted ${posted.create} create card(s), ${posted.cancel} cancel card(s), updated ${updated}, saved ${learned}, failed ${failed.length}`;
+		if (trigger || posted.create > 0 || posted.cancel > 0 || updated > 0 || learned > 0 || failed.length > 0) {
 			suggestLog.info(summary);
 		} else {
 			suggestLog.debug(summary);
 		}
-		if (trigger && chat.length === 0) {
-			if (posted === 0 && updated === 0 && learned === 0) {
+
+		if (failed.length > 0) {
+			suggestLog.warn(
+				`Could not post ${failed.length} card(s) in ${where}: ${failed.map(f => `"${_clip(f.title, 60)}" (${f.reason})`).join(', ')}`
+			);
+			// The chat may already have promised these cards. Say which ones did
+			// not come instead of leaving the person looking for them.
+			if (trigger || chat.length > 0) {
+				const names = failed.map(f => `"${f.title}"`).join(', ');
+				const payload = {
+					content: `eh kartu buat ${names} gagal kubikin barusan. coba sebut lagi detailnya, atau pake /task add aja`,
+					allowedMentions: { parse: [] }
+				};
+				await (trigger ? _replyTo(trigger, payload.content) : state.channel.send(payload)).catch(() => {});
+			}
+		}
+
+		if (trigger && chat.length === 0 && failed.length === 0) {
+			if (posted.create === 0 && posted.cancel === 0 && updated === 0 && learned === 0) {
 				await _replyTo(
 					trigger,
 					'hmm aku nggak nemu keputusan baru atau perubahan buat saran yang masih kebuka nih'
@@ -542,6 +1052,7 @@ function _buildPrompt({
 	proposedTitles,
 	dismissedTitles = [],
 	open = [],
+	pending = [],
 	profiles = new Map(),
 	botId = null,
 	now = DateTime.now()
@@ -556,29 +1067,35 @@ function _buildPrompt({
 
 	const system = [
 		"You watch a Discord channel where an organisation's administrators coordinate.",
+		'You work through tools. Read the real tasks with list_pending_tasks, queue cards with create_task_card and cancel_task_card, edit an open card with update_task_card, and remember people with remember_person. You cannot create or cancel anything yourself. A card is an offer that only takes effect when someone clicks it.',
 		'Find tasks in the NEW messages that deserve a tracked task with a reminder. A task here is follow-up work the administrators themselves have to do, with an owner among them.',
 		'Propose a task only when (1) someone asks you or the team to remind them or to make a task ("ingetin aku ...", "buatin task ...", "remind us to ..."), or (2) the administrators agree that one of them will do a specific thing later ("oke aku yang kirim proposal sponsor jumat").',
 		'Do NOT propose assignments, homework, exercises or instructions an administrator gives to members or participants, even with a deadline and even when members reply "siap" (that is the members\' work, not an admin task). Also do not propose announcements, event info, rules and open invitations ("yang mau ikut reply MAU"), acknowledgments and reactions on their own ("siap", "oke", emoji), open questions, ideas still being debated, things already done, jokes, or actions finished within the next hour.',
 		'Example: an admin posts "Latihan kecil untuk @A dan @B, download aplikasi ini, catat pengeluaran sepekan, hari Minggu kirim laporan PDF ke channel ini" and @A replies "siap mas" → nothing. Later the admin writes "ingatkan saya hari Minggu jam 12 siang untuk menagih laporan peserta" → a task for that admin.',
 		'When unsure, propose nothing. A missed task costs little because people can mention you, but a wrong card is noise. Suggestions the team dismissed show what they do not want tracked. Do not propose those or similar things again.',
+		'One NEW message can ask for several separate tasks. Call create_task_card once for each of them, in the same turn. For example "ganti LPJ ke hari ini dan esok" means two cards with different deadlines, not one. Never merge two deadlines into one task.',
+		'When a NEW message drops, replaces or reschedules a task, call cancel_task_card for the old task first. Then call create_task_card for any replacement, so both cards are posted together. A task that already exists is in the PENDING tasks list. If a task is listed here it exists. Never propose a new card for work that is already a pending task, and never say a task is missing when it is listed there.',
 		'Earlier messages are context. Use them to understand what the NEW messages refer to, but only act on what the NEW messages say. Do not repeat anything listed as already suggested.',
-		'When a NEW message changes or corrects an OPEN suggestion (a different day, person, title or detail), put it in "updates" with that suggestion_id instead of adding a new proposal. Only include the fields that change.',
+		'When a NEW message changes or corrects an OPEN suggestion (a different day, person, title or detail), call update_task_card with that suggestion_id instead of creating a new card. Only include the fields that change.',
 		'Messages may be in Indonesian, English or a mix. Write every title, description, note and reply in Indonesian (Bahasa Indonesia) by default, even when the messages are in English. Use another language only for a person whose memory sets one, which is the assignee for a task, the person who mentioned you for the reply.',
 		'Gaya bicara kamu itu temen sekelas yang lagi chat di grup Discord, bukan orang kantor dan bukan customer service. Ketik kayak orang nge-chat, pendek-pendek, huruf kecil boleh, bahasa gaul sehari-hari ("bro", "gas", "aman", "sip", "oke", "wkwk", "udah", "nggak", "aja", "nih", "dong", "sih"). Jangan pakai emoji sama sekali. Nggak usah basa-basi formal kayak "Baik, saya telah mencatat permintaan Anda" atau "Terima kasih atas informasinya". Jangan kasar.',
 		'Humor setting 10%, kayak TARS di Interstellar. Jarang banget selipin celetukan kering yang deadpan, hampir selalu langsung to the point dan jawabannya tetap jelas. Jangan maksa lucu, dan jangan bercanda soal hal yang serius.',
 		'Tanda baca. Jangan pernah pakai em dash atau en dash, di pesan, judul, deskripsi maupun catatan. Pakai koma, titik, atau pecah jadi pesan baru.',
 		'Judul tugas tetap singkat dan jelas, misalnya "Kirim proposal sponsor". Kalau seseorang minta bahasa lain, tetap santai kayak temen di bahasa itu.',
 		'You remember participants between conversations. Use what you remember to pick assignees and deadlines the way each person prefers.',
-		'In "memories", save lasting facts or preferences a NEW message states about its author or a teammate that will help with later tasks, such as role or responsibilities, usual availability, preferred reminder time, how they want to be addressed. Do not save one-off task details, anything already remembered, secrets or credentials, or sensitive personal data. When a NEW message says a remembered note is no longer true, "forget" it by note id (and "remember" the corrected one). Set "language" only when a person asks you to use a language with them.',
-		'Reply with a JSON object only.',
-		'{"proposals":[{"title":"short imperative, max 80 chars","description":"one or two sentences of context, or empty","assignee_id":"Discord user id from the participants list, or null if unclear","deadline":"YYYY-MM-DD HH:mm in the given local time, or null if no time frame was mentioned","source_message_id":"id of the NEW message where it was decided","confidence":0.0}],"updates":[{"suggestion_id":"id of the OPEN suggestion","title":"new title, or omit","description":"new description, or omit","assignee_id":"new assignee id, or omit","deadline":"new YYYY-MM-DD HH:mm, or omit","source_message_id":"id of the NEW message asking for the change"}],"memories":[{"user_id":"Discord user id the note is about","remember":"short note in the third person, max 200 chars, or omit","forget":"id of a remembered note that is no longer true, or omit","language":"language the person asked you to use with them, or omit","source_message_id":"id of the NEW message it came from"}]}',
-		'Be honest about cards. A card exists only if it is listed under OPEN suggestions or "Already suggested and handled" below, or if you put it in "proposals" in this reply. Your own earlier messages in the context are NOT proof. A card you promised there may never have been posted. Never say a card is coming, or that a task is recorded ("udah kecatat"), unless it is in "proposals" now or in those lists. When someone says a card is missing and it is not in those lists, believe them and propose it again (source_message_id = their NEW message), taking the details from the earlier messages.',
-		'Resolve relative dates ("besok", "next Friday", "end of the month") against the current local time. When only a day is given, use the time the assignee prefers if you remember one, otherwise 23:59 that day. "Jam 12 malam" on a day means the end of that day, and 23:59 is the right time.',
-		'Return {"proposals":[],"updates":[],"memories":[]} when there is nothing to do.'
+		'Use remember_person for lasting facts or preferences a NEW message states about its author or a teammate that will help with later tasks, such as role or responsibilities, usual availability, preferred reminder time, how they want to be addressed. Do not save one-off task details, anything already remembered, secrets or credentials, or sensitive personal data. When a NEW message says a remembered note is no longer true, forget it by note id and remember the corrected one. Set language only when a person asks you to use a language with them.',
+		'Be honest about cards. A card exists only if it is listed under OPEN suggestions or "Already suggested and handled" below, or if a tool returned "queued" in this pass. Your own earlier messages in the context are NOT proof. A card you promised there may never have been posted. Never say a card is coming, or that a task is recorded ("udah kecatat"), unless a tool queued it now or it is in those lists. When someone says a card is missing and it is not in those lists, believe them and queue it again, taking the details from the earlier messages.',
+		'Never answer with JSON. The tools carry the structured data. Your text is only chat.',
+		'Resolve relative dates ("besok", "next Friday", "end of the month") against the current local time. When only a day is given, use the time the assignee prefers if you remember one, otherwise 23:59 that day. "Jam 12 malam" on a day means the end of that day, and 23:59 is the right time. If no time frame is mentioned at all, omit the deadline; the card then needs Edit & create.',
+		'If a tool returns "not queued", read the reason. Fix the arguments and try again once when it is a mistake you can fix (a bad date, a missing assignee). Otherwise say plainly that the card could not be made and why.'
 	];
 	if (botId) {
 		system.push(
-			`You were mentioned directly as <@${botId}>. Someone is asking you to look for tasks now. Treat an explicit request such as "remind us to X by Y" as a decision. Use the mentioning message as source_message_id when the request is made there. Also add "messages" to the JSON object, holding one to three short chat messages to the person who mentioned you, each sent as its own Discord message, like texting a friend. The first message is sent as a reply to them and must be a quick acknowledgment of a few words that fits what they said, like "wait" or "oke bentar" for a request, a short reaction like "ohh itu" or "hmm" for a question. Put the actual answer in the next message(s). Any suggestion card is posted right after your messages. A card therefore needs only something short like "oke ini ya". Say what you suggested, changed or remembered, or why there was nothing to do, and answer questions about what you remember from the memory list. For example, "brooooo @bot minta tolong buatin task ABC deadlinenya besok jam 12 malam" → {"proposals":[{"title":"ABC",...}],"messages":["wait","oke ini ya"]}. "<@bot> deadline inaff kapan sih?" → {"proposals":[],"messages":["hmm bentar","jumat jam 23:59, masih aman kok"]}.`
+			`You were mentioned directly as <@${botId}>. Someone is asking you to look for tasks now. Treat an explicit request such as "remind us to X by Y" as a decision. Use the mentioning message as source_message_id when the request is made there. Reply with plain chat text, one short message per line, at most three lines, like texting a friend. The first line is sent as a reply to them and must be a quick acknowledgment of a few words that fits what they said, like "wait" or "oke bentar" for a request, a short reaction like "ohh itu" or "hmm" for a question. Put the actual answer in the next line(s). Any card is posted right after your messages, so a card needs only something short like "oke ini ya". Say what you queued, changed or remembered, or why there was nothing to do, and answer questions about what you remember from the memory list. For example, "brooooo @bot minta tolong buatin task ABC deadlinenya besok jam 12 malam" → call create_task_card, then reply "wait" and "oke ini ya". "<@bot> deadline inaff kapan sih?" → reply "hmm bentar" and "jumat jam 23:59, masih aman kok".`
+		);
+	} else {
+		system.push(
+			'You were not mentioned. Do not write chat text. Only queue cards, update cards or remember people. If nothing in the NEW messages deserves a card, call stay_silent.'
 		);
 	}
 	const systemText = system.join('\n');
@@ -592,8 +1109,9 @@ function _buildPrompt({
 	});
 	const openLines = open.map(
 		r =>
-			`- suggestion_id=${r.id} title="${r.title}" assignee=${people.get(r.assignee_id) ?? 'unknown'} (${r.assignee_id}) deadline=${r.deadline ? localTime(r.deadline) : 'none'} from message id=${r.source_message_id}${r.description ? ` details="${r.description}"` : ''}`
+			`- suggestion_id=${r.id} kind=${r.kind ?? 'create'} title="${r.title}" assignee=${people.get(r.assignee_id) ?? 'unknown'} (${r.assignee_id}) deadline=${r.deadline ? localTime(r.deadline) : 'none'} from message id=${r.source_message_id}${r.description ? ` details="${r.description}"` : ''}`
 	);
+	const pendingLines = pending.map(t => _taskLine(t, people));
 	const user = [
 		`Current local time is ${local.toFormat('yyyy-MM-dd HH:mm cccc')} (${TIMEZONE})`,
 		'',
@@ -602,6 +1120,9 @@ function _buildPrompt({
 		'',
 		'What you remember about participants',
 		memoryLines.join('\n'),
+		'',
+		'PENDING tasks of the people here (real tasks, already created). If a task is listed here it exists.',
+		pendingLines.length ? pendingLines.join('\n') : '(none)',
 		'',
 		'OPEN suggestions (posted, not yet accepted). Update these rather than suggesting them again.',
 		openLines.length ? openLines.join('\n') : '(none)',
@@ -620,189 +1141,6 @@ function _buildPrompt({
 		{ role: 'system', content: systemText },
 		{ role: 'user', content: user }
 	];
-}
-
-/**
- * Validate the model's proposals against what was actually said. Anything
- * pointing at an unknown message, or below the confidence bar, is dropped.
- * Unknown assignees fall back to the author of the source message.
- *
- * @returns {Array<object>}
- */
-function _normalizeProposals(
-	parsed,
-	{
-		fresh,
-		people,
-		proposedSources,
-		minConfidence = MIN_CONFIDENCE,
-		fallbackSourceId = null,
-		dropped = [],
-		now = Date.now()
-	}
-) {
-	const raw = Array.isArray(parsed?.proposals) ? parsed.proposals : [];
-	const freshById = new Map(fresh.map(m => [String(m.id), m]));
-	const seen = new Set();
-	const out = [];
-
-	for (const item of raw) {
-		if (!item || typeof item !== 'object') {
-			continue;
-		}
-		const title = typeof item.title === 'string' ? _plain(item.title.replace(/\s+/g, ' ')).slice(0, 100) : '';
-		// After a mention the model sometimes points at the earlier message
-		// that first mentioned the task. The mention itself is the request.
-		const source =
-			freshById.get(String(item.source_message_id)) ??
-			(fallbackSourceId ? freshById.get(String(fallbackSourceId)) : undefined);
-		const why = !title
-			? 'no title'
-			: !source
-				? `source ${item.source_message_id} is not a new message`
-				: proposedSources.has(source.id) || seen.has(source.id)
-					? `message ${source.id} already has a suggestion`
-					: typeof item.confidence === 'number' && item.confidence < minConfidence
-						? `confidence ${item.confidence} < ${minConfidence}`
-						: null;
-		if (why) {
-			dropped.push(`"${title || '?'}" ${why}`);
-			continue;
-		}
-
-		const assigneeId =
-			item.assignee_id && people.has(String(item.assignee_id)) ? String(item.assignee_id) : source.authorId;
-
-		let deadline = null;
-		if (typeof item.deadline === 'string') {
-			const dt = DateTime.fromFormat(item.deadline.trim(), 'yyyy-MM-dd HH:mm', { zone: TIMEZONE });
-			if (dt.isValid && dt.toMillis() > now + 5 * 60_000) {
-				deadline = dt.toUnixInteger();
-			}
-		}
-
-		const description =
-			typeof item.description === 'string' && item.description.trim()
-				? _plain(item.description).slice(0, 1000)
-				: null;
-
-		seen.add(source.id);
-		out.push({ title, description, assigneeId, deadline, sourceMessageId: source.id });
-		if (out.length >= MAX_PROPOSALS_PER_PASS) {
-			break;
-		}
-	}
-	return out;
-}
-
-/**
- * Validate the model's updates to open suggestions. Unknown suggestions,
- * invalid values and no-op changes are dropped.
- *
- * @returns {Array<{ id: string, changes: object, sourceMessageId: string }>}
- */
-function _normalizeUpdates(parsed, { fresh, people, open, now = Date.now() }) {
-	const raw = Array.isArray(parsed?.updates) ? parsed.updates : [];
-	const openById = new Map(open.map(r => [String(r.id), r]));
-	const freshById = new Map(fresh.map(m => [String(m.id), m]));
-	const seen = new Set();
-	const out = [];
-
-	for (const item of raw) {
-		const row = item && typeof item === 'object' ? openById.get(String(item.suggestion_id)) : null;
-		if (!row || seen.has(row.id)) {
-			continue;
-		}
-
-		const changes = {};
-		if (typeof item.title === 'string') {
-			const title = _plain(item.title.replace(/\s+/g, ' ')).slice(0, 100);
-			if (title && title !== row.title) {
-				changes.title = title;
-			}
-		}
-		if (typeof item.description === 'string') {
-			const description = _plain(item.description).slice(0, 1000) || null;
-			if (description !== row.description) {
-				changes.description = description;
-			}
-		}
-		if (item.assignee_id && people.has(String(item.assignee_id)) && String(item.assignee_id) !== row.assignee_id) {
-			changes.assigneeId = String(item.assignee_id);
-		}
-		if (typeof item.deadline === 'string') {
-			const dt = DateTime.fromFormat(item.deadline.trim(), 'yyyy-MM-dd HH:mm', { zone: TIMEZONE });
-			if (dt.isValid && dt.toMillis() > now + 5 * 60_000 && dt.toUnixInteger() !== row.deadline) {
-				changes.deadline = dt.toUnixInteger();
-			}
-		}
-		if (Object.keys(changes).length === 0) {
-			continue;
-		}
-
-		const source = freshById.get(String(item.source_message_id)) ?? fresh[fresh.length - 1];
-		seen.add(row.id);
-		out.push({ id: row.id, changes, sourceMessageId: source.id });
-		if (out.length >= MAX_UPDATES_PER_PASS) {
-			break;
-		}
-	}
-	return out;
-}
-
-/**
- * Validate the model's memory changes. A note must be about a known
- * participant and come from a NEW message. Only the person themselves can
- * change their language. "forget" must name one of that person's notes.
- *
- * @returns {Array<{ userId: string, authorId: string, sourceMessageId: string, remember?: string, forget?: { id: number, note: string }, language?: string }>}
- */
-function _normalizeMemories(parsed, { fresh, people, profiles }) {
-	const raw = Array.isArray(parsed?.memories) ? parsed.memories : [];
-	const freshById = new Map(fresh.map(m => [String(m.id), m]));
-	const out = [];
-
-	for (const item of raw) {
-		if (!item || typeof item !== 'object') {
-			continue;
-		}
-		const userId = String(item.user_id);
-		const source = freshById.get(String(item.source_message_id));
-		if (!people.has(userId) || !source) {
-			continue;
-		}
-		const profile = profiles.get(userId) ?? { language: null, notes: [] };
-		const change = { userId, authorId: source.authorId, sourceMessageId: source.id };
-
-		if (item.forget !== undefined && item.forget !== null) {
-			const noteId = Number(String(item.forget).replace(/^#/, ''));
-			const note = profile.notes.find(n => n.id === noteId);
-			if (note) {
-				change.forget = note;
-			}
-		}
-		if (typeof item.remember === 'string') {
-			const note = _plain(item.remember.replace(/\s+/g, ' ')).slice(0, MAX_NOTE_CHARS);
-			const known = profile.notes.some(n => n !== change.forget && n.note.toLowerCase() === note.toLowerCase());
-			if (note && !known) {
-				change.remember = note;
-			}
-		}
-		if (typeof item.language === 'string' && source.authorId === userId) {
-			const language = stripEmoji(item.language).replace(/\s+/g, ' ').trim().slice(0, MAX_LANGUAGE_CHARS);
-			if (language && language.toLowerCase() !== (profile.language ?? '').toLowerCase()) {
-				change.language = language;
-			}
-		}
-		if (!change.remember && !change.forget && !change.language) {
-			continue;
-		}
-		out.push(change);
-		if (out.length >= MAX_MEMORY_CHANGES_PER_PASS) {
-			break;
-		}
-	}
-	return out;
 }
 
 /**
@@ -887,13 +1225,13 @@ async function _applyUpdate(channel, { id, changes, sourceMessageId }) {
 /**
  * Store a suggestion and post its card, as a reply to the message where it
  * was decided unless `reply` is false (after a mention, the card follows the
- * bot's own chat messages instead). Returns false when the decision was
- * already suggested (e.g. before a restart) and nothing was posted.
+ * bot's own chat messages instead). Returns false when the row could not be
+ * stored.
  *
  * @returns {Promise<boolean>}
  */
 async function _postProposal(channel, found, { reply = true } = {}) {
-	const proposal = { ...found, id: randomUUID() };
+	const proposal = { kind: 'create', targetTaskId: null, ...found, id: randomUUID() };
 	const inserted = suggestionRepository.createSuggestion({
 		id: proposal.id,
 		channelId: channel.id,
@@ -901,7 +1239,9 @@ async function _postProposal(channel, found, { reply = true } = {}) {
 		title: proposal.title,
 		description: proposal.description,
 		assigneeId: proposal.assigneeId,
-		deadline: proposal.deadline
+		deadline: proposal.deadline,
+		kind: proposal.kind,
+		targetTaskId: proposal.targetTaskId
 	});
 	if (!inserted) {
 		return false;
@@ -917,7 +1257,7 @@ async function _postProposal(channel, found, { reply = true } = {}) {
 		const card = await (source ? source.reply(payload) : channel.send(payload));
 		suggestionRepository.setCardMessage(proposal.id, card.id);
 		suggestLog.debug(
-			`Posted suggestion ${proposal.id} "${_clip(proposal.title, 60)}" as card ${card.id} in ${_where(channel)}: assignee=${proposal.assigneeId} deadline=${proposal.deadline ? DateTime.fromSeconds(proposal.deadline).setZone(TIMEZONE).toFormat('yyyy-MM-dd HH:mm') : 'none'} source=${proposal.sourceMessageId}`
+			`Posted ${proposal.kind} suggestion ${proposal.id} "${_clip(proposal.title, 60)}" as card ${card.id} in ${_where(channel)}: assignee=${proposal.assigneeId} deadline=${proposal.deadline ? DateTime.fromSeconds(proposal.deadline).setZone(TIMEZONE).toFormat('yyyy-MM-dd HH:mm') : 'none'} source=${proposal.sourceMessageId}${proposal.targetTaskId ? ` target=${proposal.targetTaskId}` : ''}`
 		);
 	} catch (error) {
 		suggestLog.warn(
@@ -935,6 +1275,24 @@ async function _postProposal(channel, found, { reply = true } = {}) {
  * @returns {EmbedBuilder}
  */
 function buildProposalEmbed(proposal) {
+	if (proposal.kind === 'cancel') {
+		const embed = new EmbedBuilder()
+			.setColor(0xe74c3c)
+			.setTitle('Cancel this task?')
+			.setDescription(`**${proposal.title}**${proposal.description ? `\n${proposal.description}` : ''}`)
+			.addFields({ name: 'Assign To', value: `<@${proposal.assigneeId}>`, inline: true });
+		if (proposal.deadline) {
+			embed.addFields({
+				name: 'Deadline',
+				value: `<t:${proposal.deadline}:F> (<t:${proposal.deadline}:R>)`,
+				inline: true
+			});
+		}
+		return embed.setFooter({
+			text: 'Suggested from this conversation. Nothing is cancelled until someone confirms.'
+		});
+	}
+
 	const embed = new EmbedBuilder()
 		.setColor(0xf1c40f)
 		.setTitle('Set a task reminder?')
@@ -958,6 +1316,19 @@ function buildProposalEmbed(proposal) {
  * @returns {ActionRowBuilder}
  */
 function buildProposalButtons(proposal) {
+	if (proposal.kind === 'cancel') {
+		return new ActionRowBuilder().addComponents(
+			new ButtonBuilder()
+				.setCustomId(`${SUGGEST_IDS.cancel}:${proposal.id}`)
+				.setLabel('Cancel task')
+				.setStyle(ButtonStyle.Danger),
+			new ButtonBuilder()
+				.setCustomId(`${SUGGEST_IDS.keep}:${proposal.id}`)
+				.setLabel('Keep')
+				.setStyle(ButtonStyle.Secondary)
+		);
+	}
+
 	return new ActionRowBuilder().addComponents(
 		new ButtonBuilder()
 			.setCustomId(`${SUGGEST_IDS.create}:${proposal.id}`)
@@ -980,6 +1351,8 @@ function _toProposal(row) {
 		id: row.id,
 		channelId: row.channel_id,
 		sourceMessageId: row.source_message_id,
+		kind: row.kind ?? 'create',
+		targetTaskId: row.target_task_id ?? null,
 		title: row.title,
 		description: row.description,
 		assigneeId: row.assignee_id,
@@ -1015,10 +1388,10 @@ function releaseProposal(id) {
 }
 
 /**
- * Close a suggestion once it was turned into a task or dismissed.
+ * Close a suggestion once it was handled.
  *
  * @param {string} id
- * @param {{ status: 'created'|'dismissed', handledBy: string, taskId?: string }} outcome
+ * @param {{ status: 'created'|'cancelled'|'kept'|'dismissed', handledBy: string, taskId?: string }} outcome
  */
 function finishProposal(id, outcome) {
 	suggestionRepository.finishSuggestion(id, outcome);
@@ -1036,6 +1409,12 @@ function unavailableMessage(id) {
 	}
 	if (row.status === 'created') {
 		return `<@${row.handled_by}> already created this task${row.task_id ? ` (\`${row.task_id}\`)` : ''}.`;
+	}
+	if (row.status === 'cancelled') {
+		return `<@${row.handled_by}> already cancelled this task${row.task_id ? ` (\`${row.task_id}\`)` : ''}.`;
+	}
+	if (row.status === 'kept') {
+		return `<@${row.handled_by}> kept this task.`;
 	}
 	if (row.status === 'dismissed') {
 		return `This suggestion was dismissed by <@${row.handled_by}>.`;
@@ -1110,7 +1489,10 @@ function _reset() {
 module.exports = {
 	_plain,
 	_chatMessages,
+	_taskLine,
 	SUGGEST_IDS,
+	TOOL_NAMES,
+	TOOL_SCHEMAS,
 	TIMEZONE,
 	isEnabled,
 	observe,
@@ -1125,9 +1507,7 @@ module.exports = {
 	_analyze,
 	_keepTyping,
 	_buildPrompt,
-	_normalizeProposals,
-	_normalizeUpdates,
-	_normalizeMemories,
+	_createToolkit,
 	_applyMemories,
 	_applyUpdate,
 	_loadContext,

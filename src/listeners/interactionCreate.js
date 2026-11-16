@@ -56,11 +56,11 @@ class StoreInteractionListener extends Listener {
 			TASK_CANCEL_IDS.candidate,
 			TASK_CANCEL_IDS.deny
 		]);
-		if (taskIds.has(interaction.customId.split('')[0])) {
+		if (taskIds.has(interaction.customId.split(':')[0])) {
 			return this._handleTaskConfirm(interaction);
 		}
 
-		const [namespace, slug] = interaction.customId.split('');
+		const [namespace, slug] = interaction.customId.split(':');
 
 		if (!slug) {
 			return;
@@ -87,7 +87,7 @@ class StoreInteractionListener extends Listener {
 	 *   <namespace>:<taskId>[:<score>]:<userId>
 	 */
 	async _handleTaskConfirm(interaction) {
-		const parts = interaction.customId.split('');
+		const parts = interaction.customId.split(':');
 		const namespace = parts[0];
 		const taskId = parts[1];
 		const score = parts[2] ? Number(parts[2]) : undefined;

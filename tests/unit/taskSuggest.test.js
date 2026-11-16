@@ -4,6 +4,7 @@ import { readFileSync, mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import Database from 'better-sqlite3';
+import constants from '../../src/lib/constants/config.js';
 
 const root = join(import.meta.dirname, '../..');
 
@@ -17,8 +18,17 @@ beforeAll(() => {
 	originalCwd = process.cwd();
 	tmpDir = mkdtempSync(join(tmpdir(), 'ctfbot-task-suggest-'));
 	const db = new Database(join(tmpDir, 'ctfbot.db'));
-	db.exec(readFileSync(join(root, 'migrations/026_add_task_suggestions.sql'), 'utf8'));
-	db.exec(readFileSync(join(root, 'migrations/027_add_actor_memory.sql'), 'utf8'));
+	for (const migration of [
+		'011_add_tasks_reps_docs.sql',
+		'013_add_task_cancelled.sql',
+		'018_add_task_transition_claim.sql',
+		'023_add_task_transition_blocks.sql',
+		'026_add_task_suggestions.sql',
+		'027_add_actor_memory.sql',
+		'029_task_suggestions_tools.sql'
+	]) {
+		db.exec(readFileSync(join(root, 'migrations', migration), 'utf8'));
+	}
 	db.close();
 	process.chdir(tmpDir);
 });
@@ -29,6 +39,11 @@ afterAll(async () => {
 	process.chdir(originalCwd);
 	rmSync(tmpDir, { recursive: true, force: true });
 });
+
+const zone = 'Asia/Jakarta';
+const BOT_ID = 'bot-1';
+const future = DateTime.now().setZone(zone).plus({ days: 3 }).toFormat('yyyy-MM-dd HH:mm');
+const tomorrow = DateTime.now().setZone(zone).plus({ days: 1 }).toFormat('yyyy-MM-dd HH:mm');
 
 const fresh = [
 	{
@@ -44,76 +59,274 @@ const people = new Map([
 	['u1', 'Alice'],
 	['u2', 'Budi']
 ]);
-const future = DateTime.now().setZone('Asia/Jakarta').plus({ days: 3 }).toFormat('yyyy-MM-dd HH:mm');
 
-describe('taskSuggest._normalizeProposals', () => {
+const llmReply = message => ({
+	ok: true,
+	json: () => Promise.resolve({ choices: [{ message, finish_reason: 'stop' }] })
+});
+const text = content => llmReply({ role: 'assistant', content });
+const toolCall = (name, args, id = 'call-1') =>
+	llmReply({
+		role: 'assistant',
+		content: null,
+		tool_calls: [{ id, type: 'function', function: { name, arguments: JSON.stringify(args) } }]
+	});
+const toolCalls = calls =>
+	llmReply({
+		role: 'assistant',
+		content: null,
+		tool_calls: calls.map((c, i) => ({
+			id: `call-${i}`,
+			type: 'function',
+			function: { name: c.name, arguments: JSON.stringify(c.args) }
+		}))
+	});
+
+const makeChannel = ({ id, fetch = () => Promise.resolve(null), send } = {}) => ({
+	id: id ?? 'chan-1',
+	guildId: 'g1',
+	parentId: constants.GOVERNANCE_CATEGORIES[0],
+	sendTyping: vi.fn().mockResolvedValue(undefined),
+	messages: { fetch: vi.fn(fetch) },
+	send: send ?? vi.fn().mockResolvedValue({ id: 'card-1' })
+});
+
+const makeMessage = ({ channel, id, content, authorId = 'u1', mentionBot = false }) => ({
+	id,
+	channelId: channel.id,
+	channel,
+	guild: {},
+	client: { user: { id: BOT_ID } },
+	author: { id: authorId, bot: false, username: authorId },
+	member: { displayName: authorId === 'u1' ? 'Alice' : 'Budi' },
+	mentions: {
+		users: new Map(mentionBot ? [[BOT_ID, { id: BOT_ID, bot: true }]] : []),
+		members: new Map()
+	},
+	content,
+	createdTimestamp: Date.now(),
+	reply: vi.fn().mockResolvedValue({ id: `reply-${id}` })
+});
+
+const createPendingTask = (taskId, overrides = {}) => {
+	const db = new Database(join(process.cwd(), 'ctfbot.db'));
+	db.prepare(
+		`
+		INSERT INTO tasks (task_id, title, description, assigned_to, created_by, deadline, block_height, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`
+	).run(
+		taskId,
+		overrides.title ?? 'Pengecekan LPJ',
+		overrides.description ?? null,
+		overrides.assignedTo ?? 'u1',
+		overrides.createdBy ?? 'u1',
+		overrides.deadline ?? DateTime.now().setZone(zone).plus({ days: 1 }).toUnixInteger(),
+		overrides.blockHeight ?? 1,
+		Math.floor(Date.now() / 1000)
+	);
+	db.close();
+};
+
+describe('taskSuggest._createToolkit', () => {
 	let taskSuggest;
+	let suggestions;
+	let taskRepository;
+	let queue;
+	let toolkit;
+	let channel;
+
+	const build = (overrides = {}) => {
+		queue = { creates: [], cancels: [], updates: [], memories: [] };
+		toolkit = taskSuggest._createToolkit({
+			channelId: channel.id,
+			channel,
+			people,
+			profiles: new Map(),
+			open: [],
+			pending: [],
+			fresh,
+			trigger: null,
+			minConfidence: 0.7,
+			queue,
+			...overrides
+		});
+		return toolkit;
+	};
 
 	beforeEach(async () => {
 		vi.resetModules();
 		taskSuggest = await import('../../src/services/taskSuggest.js');
+		suggestions = await import('../../src/database/repositories/taskSuggestion.repository.js');
+		taskRepository = await import('../../src/database/repositories/task.repository.js');
+		channel = makeChannel({ id: `toolkit-${Date.now()}-${Math.random()}` });
+		build();
 	});
 
-	const normalize = (proposals, proposedSources = new Set()) =>
-		taskSuggest._normalizeProposals({ proposals }, { fresh, people, proposedSources });
+	it('queues a create card and reports it to the model', async () => {
+		const reply = await toolkit.dispatch('create_task_card', {
+			title: 'Kirim proposal sponsor',
+			deadline: future,
+			assignee_id: 'u2',
+			confidence: 0.9
+		});
+		expect(reply).toContain('queued "Kirim proposal sponsor" for Budi');
+		expect(queue.creates).toHaveLength(1);
+		expect(queue.creates[0]).toMatchObject({
+			kind: 'create',
+			title: 'Kirim proposal sponsor',
+			assigneeId: 'u2',
+			sourceMessageId: '222'
+		});
+	});
 
-	it('keeps a well-formed proposal and converts the deadline to unix seconds in Jakarta time', () => {
-		const [p] = normalize([
-			{
-				title: 'Kirim proposal sponsor',
-				description: '',
-				assignee_id: 'u2',
-				deadline: future,
-				source_message_id: '222',
-				confidence: 0.9
-			}
-		]);
-		expect(p.title).toBe('Kirim proposal sponsor');
-		expect(p.assigneeId).toBe('u2');
-		expect(p.description).toBeNull();
-		expect(p.deadline).toBe(
-			DateTime.fromFormat(future, 'yyyy-MM-dd HH:mm', { zone: 'Asia/Jakarta' }).toUnixInteger()
+	it('allows several cards from one source message, even with the same title but a different deadline', async () => {
+		const args = { title: 'Cek LPJ', confidence: 0.9 };
+		expect(await toolkit.dispatch('create_task_card', { ...args, deadline: future })).toContain('queued');
+		expect(await toolkit.dispatch('create_task_card', { ...args, deadline: tomorrow })).toContain('queued');
+		expect(queue.creates).toHaveLength(2);
+		expect(queue.creates[0].sourceMessageId).toBe(queue.creates[1].sourceMessageId);
+	});
+
+	it('refuses the exact same title and deadline twice in one pass', async () => {
+		const args = { title: 'Cek LPJ', deadline: future, confidence: 0.9 };
+		await toolkit.dispatch('create_task_card', args);
+		expect(await toolkit.dispatch('create_task_card', args)).toContain('already queued this pass');
+		expect(queue.creates).toHaveLength(1);
+	});
+
+	it('links the existing card instead of pretending a duplicate is missing', async () => {
+		suggestions.createSuggestion({
+			id: 'existing-1',
+			channelId: channel.id,
+			sourceMessageId: '222',
+			title: 'Cek LPJ',
+			assigneeId: 'u1',
+			deadline: DateTime.fromFormat(future, 'yyyy-MM-dd HH:mm', { zone }).toUnixInteger()
+		});
+		suggestions.setCardMessage('existing-1', 'card-existing');
+
+		const reply = await toolkit.dispatch('create_task_card', {
+			title: 'Cek LPJ',
+			deadline: future,
+			confidence: 0.9
+		});
+		expect(reply).toContain('already exists');
+		expect(reply).toContain(`/g1/${channel.id}/card-existing`);
+		expect(queue.creates).toHaveLength(0);
+	});
+
+	it('rejects an explicit source that is not one of the NEW messages', async () => {
+		const reply = await toolkit.dispatch('create_task_card', {
+			title: 'X',
+			deadline: future,
+			source_message_id: 'old-message',
+			confidence: 0.9
+		});
+		expect(reply).toContain('is not a NEW message');
+		expect(queue.creates).toHaveLength(0);
+	});
+
+	it('enforces the confidence bar and a future deadline', async () => {
+		expect(await toolkit.dispatch('create_task_card', { title: 'X', deadline: future, confidence: 0.4 })).toContain(
+			'below 0.7'
 		);
-	});
-
-	it('drops proposals pointing at messages that were not in the new batch', () => {
-		expect(normalize([{ title: 'X', source_message_id: '999', deadline: future }])).toEqual([]);
-	});
-
-	it('drops low-confidence proposals and ones already suggested for that message', () => {
-		expect(normalize([{ title: 'X', source_message_id: '111', confidence: 0.4 }])).toEqual([]);
-		expect(normalize([{ title: 'X', source_message_id: '111' }], new Set(['111']))).toEqual([]);
-	});
-
-	it('falls back to the source author when the assignee is unknown', () => {
-		const [p] = normalize([{ title: 'X', assignee_id: 'stranger', source_message_id: '111' }]);
-		expect(p.assigneeId).toBe('u1');
-	});
-
-	it('leaves the deadline empty when it is missing, malformed or in the past', () => {
-		const past = DateTime.now().setZone('Asia/Jakarta').minus({ days: 1 }).toFormat('yyyy-MM-dd HH:mm');
-		for (const deadline of [null, 'next friday', past]) {
-			const [p] = normalize([{ title: 'X', source_message_id: '111', deadline }]);
-			expect(p.deadline).toBeNull();
-		}
-	});
-
-	it('ignores malformed replies and caps the number of proposals', () => {
-		expect(taskSuggest._normalizeProposals(null, { fresh, people, proposedSources: new Set() })).toEqual([]);
 		expect(
-			taskSuggest._normalizeProposals({ proposals: 'nope' }, { fresh, people, proposedSources: new Set() })
-		).toEqual([]);
-		const many = Array.from({ length: 6 }, (_, i) => ({
-			id: String(i),
-			authorId: 'u1',
-			content: 'x',
-			createdAt: 0
-		}));
-		const out = taskSuggest._normalizeProposals(
-			{ proposals: many.map(m => ({ title: `T${m.id}`, source_message_id: m.id })) },
-			{ fresh: many, people, proposedSources: new Set() }
+			await toolkit.dispatch('create_task_card', {
+				title: 'X',
+				deadline: DateTime.now().minus({ days: 1 }).toFormat('yyyy-MM-dd HH:mm'),
+				confidence: 0.9
+			})
+		).toContain('deadline must be');
+		expect(queue.creates).toHaveLength(0);
+	});
+
+	it('falls back to the source author when the assignee is unknown', async () => {
+		await toolkit.dispatch('create_task_card', {
+			title: 'X',
+			deadline: future,
+			assignee_id: 'stranger',
+			source_message_id: '111',
+			confidence: 0.9
+		});
+		expect(queue.creates[0].assigneeId).toBe('u1');
+	});
+
+	it('queues a card with no deadline so Edit & create can set one', async () => {
+		const reply = await toolkit.dispatch('create_task_card', { title: 'Rapikan dokumentasi', confidence: 0.9 });
+		expect(reply).toContain('no deadline yet');
+		expect(queue.creates[0].deadline).toBeNull();
+	});
+
+	it('cancels only a pending task assigned to someone in the conversation', async () => {
+		createPendingTask('task-1');
+		createPendingTask('task-2', { assignedTo: 'stranger' });
+		build({ pending: [taskRepository.getTask('task-1')] });
+
+		expect(await toolkit.dispatch('cancel_task_card', { task_id: 'task-2' })).toContain('No pending task');
+		const reply = await toolkit.dispatch('cancel_task_card', { task_id: 'task-1', confidence: 0.9 });
+		expect(reply).toContain('queued a cancellation card');
+		expect(queue.cancels).toHaveLength(1);
+		expect(queue.cancels[0].task.task_id).toBe('task-1');
+	});
+
+	it('updates only an open card, and only when something changed', async () => {
+		const open = [
+			{
+				id: 'sug-1',
+				title: 'Book venue',
+				description: null,
+				assignee_id: 'u1',
+				deadline: DateTime.now().setZone(zone).plus({ days: 3 }).toUnixInteger(),
+				kind: 'create'
+			}
+		];
+		build({ open });
+
+		expect(await toolkit.dispatch('update_task_card', { suggestion_id: 'nope', title: 'X' })).toContain(
+			'not an open card'
 		);
-		expect(out).toHaveLength(3);
+		expect(await toolkit.dispatch('update_task_card', { suggestion_id: 'sug-1', title: 'Book venue' })).toContain(
+			'Nothing changed'
+		);
+		expect(await toolkit.dispatch('update_task_card', { suggestion_id: 'sug-1', assignee_id: 'u2' })).toContain(
+			'queued an update'
+		);
+		expect(queue.updates).toEqual([{ id: 'sug-1', changes: { assigneeId: 'u2' }, sourceMessageId: '222' }]);
+	});
+
+	it('validates memory changes against the participants and their notes', async () => {
+		const profiles = new Map([['u1', { language: null, notes: [{ id: 3, note: 'Works evenings' }] }]]);
+		build({ profiles });
+
+		expect(await toolkit.dispatch('remember_person', { user_id: 'stranger', remember: 'x' })).toContain(
+			'not in this conversation'
+		);
+		expect(
+			await toolkit.dispatch('remember_person', { user_id: 'u1', forget: 3, remember: 'Works mornings' })
+		).toContain('remembered for Alice');
+		expect(queue.memories[0]).toMatchObject({
+			userId: 'u1',
+			forget: { id: 3, note: 'Works evenings' },
+			remember: 'Works mornings'
+		});
+		// Someone else cannot change Budi's language.
+		expect(
+			await toolkit.dispatch('remember_person', {
+				user_id: 'u2',
+				language: 'English',
+				source_message_id: '111'
+			})
+		).toContain('Nothing new');
+	});
+
+	it('allows stay_silent only on an unprompted pass', async () => {
+		expect(await toolkit.dispatch('stay_silent', { reason: 'nothing' })).toEqual({
+			content: 'staying silent',
+			stop: true
+		});
+		build({ trigger: { id: '222', client: { user: { id: BOT_ID } } } });
+		expect(await toolkit.dispatch('stay_silent', { reason: 'nothing' })).toContain('you were mentioned');
 	});
 });
 
@@ -129,97 +342,52 @@ describe('taskSuggest._buildPrompt', () => {
 			now
 		});
 		expect(system.role).toBe('system');
-		expect(system.content).toContain('JSON');
+		expect(system.content).toContain('You work through tools');
 		expect(user.content).toContain('Current local time is 2026-10-30 23:00 Friday (Asia/Jakarta)');
 		expect(user.content).toContain('- Budi (u2)');
 		expect(user.content).toContain('"Book venue"');
 		expect(user.content).toContain('id=222');
 		expect(user.content.indexOf('NEW messages:')).toBeLessThan(user.content.indexOf('id=111'));
 	});
+
+	it('shows the real pending tasks as authoritative', async () => {
+		const taskSuggest = await import('../../src/services/taskSuggest.js');
+		const pending = [
+			{
+				task_id: 'task-9',
+				title: 'Pengecekan LPJ',
+				assigned_to: 'u1',
+				deadline: DateTime.now().setZone(zone).plus({ days: 2 }).toUnixInteger()
+			}
+		];
+		const [system, user] = taskSuggest._buildPrompt({
+			context: [],
+			fresh,
+			people,
+			proposedTitles: [],
+			pending
+		});
+		expect(user.content).toContain('PENDING tasks of the people here');
+		expect(user.content).toContain('task_id=task-9 "Pengecekan LPJ"');
+		expect(system.content).toContain('If a task is listed here it exists');
+		expect(system.content).toContain('call cancel_task_card');
+	});
+
+	it('tells the model one message can become several cards', () => {
+		return import('../../src/services/taskSuggest.js').then(taskSuggest => {
+			const [system] = taskSuggest._buildPrompt({ context: [], fresh, people, proposedTitles: [] });
+			expect(system.content).toContain('Call create_task_card once for each of them, in the same turn');
+			expect(system.content).toContain('"ganti LPJ ke hari ini dan esok" means two cards');
+		});
+	});
 });
 
 describe('taskSuggest._analyze', () => {
 	const originalEnv = { ...process.env };
 	const originalFetch = globalThis.fetch;
-
-	afterEach(() => {
-		process.env = { ...originalEnv };
-		globalThis.fetch = originalFetch;
-	});
-
-	it('puts messages back for the next pass when the model call fails', async () => {
-		vi.resetModules();
-		vi.useFakeTimers();
-		process.env.TASK_SUGGESTIONS_ENABLED = 'true';
-		process.env.OPENAI_API_KEY = 'sk-test';
-		process.env.OPENAI_MODEL = 'test-model';
-		globalThis.fetch = vi.fn().mockRejectedValue(Object.assign(new Error('aborted'), { name: 'TimeoutError' }));
-
-		const taskSuggest = await import('../../src/services/taskSuggest.js');
-		const constants = (await import('../../src/lib/constants/config.js')).default;
-		taskSuggest._reset();
-
-		const channel = { id: 'c1', parentId: constants.GOVERNANCE_CATEGORIES[0], messages: { fetch: vi.fn() } };
-		const message = {
-			id: 'm1',
-			channelId: 'c1',
-			channel,
-			guild: {},
-			author: { id: 'u1', bot: false, username: 'alice' },
-			member: { displayName: 'Alice' },
-			mentions: { users: new Map() },
-			content: 'we will submit the report next friday',
-			createdTimestamp: Date.now()
-		};
-
-		taskSuggest.observe(message);
-		await expect(taskSuggest._analyze('c1')).rejects.toThrow('within 300s');
-
-		// The retry sends the same message again rather than dropping it.
-		globalThis.fetch = vi.fn().mockResolvedValue({
-			ok: true,
-			json: () => Promise.resolve({ choices: [{ message: { content: '{"proposals":[]}' } }] })
-		});
-		await taskSuggest._analyze('c1');
-		const body = JSON.parse(globalThis.fetch.mock.calls[0][1].body);
-		expect(body.messages[1].content).toContain('id=m1');
-		expect(body.reasoning_effort).toBe('low');
-
-		taskSuggest._reset();
-		vi.useRealTimers();
-	});
-});
-
-describe('taskSuggest direct mentions', () => {
-	const originalEnv = { ...process.env };
-	const originalFetch = globalThis.fetch;
-	const BOT_ID = 'bot-1';
 	let taskSuggest;
-	let constants;
-	let channel;
+	let suggestions;
 	let n = 0;
-
-	const llmReply = content => ({
-		ok: true,
-		json: () => Promise.resolve({ choices: [{ message: { content } }] })
-	});
-
-	const makeMessage = ({ id, content, mentionBot = false }) => {
-		const users = new Map(mentionBot ? [[BOT_ID, { id: BOT_ID, bot: true, username: 'ctfbot' }]] : []);
-		return {
-			id,
-			channelId: channel.id,
-			channel,
-			guild: {},
-			client: { user: { id: BOT_ID } },
-			author: { id: 'u1', bot: false, username: 'alice' },
-			member: { displayName: 'Alice' },
-			mentions: { users, members: new Map() },
-			content,
-			createdTimestamp: Date.now(),
-			reply: vi.fn().mockResolvedValue({ id: `reply-${id}` })
-		};
-	};
 
 	beforeEach(async () => {
 		vi.resetModules();
@@ -227,198 +395,63 @@ describe('taskSuggest direct mentions', () => {
 		process.env.OPENAI_API_KEY = 'sk-test';
 		process.env.OPENAI_MODEL = 'test-model';
 		taskSuggest = await import('../../src/services/taskSuggest.js');
-		constants = (await import('../../src/lib/constants/config.js')).default;
+		suggestions = await import('../../src/database/repositories/taskSuggestion.repository.js');
 		taskSuggest._reset();
 		n++;
-		channel = {
-			id: `mention-chan-${n}`,
-			parentId: constants.GOVERNANCE_CATEGORIES[0],
-			sendTyping: vi.fn().mockResolvedValue(undefined),
-			messages: { fetch: vi.fn().mockResolvedValue(null) },
-			send: vi.fn().mockResolvedValue({ id: `card-${n}` })
-		};
 	});
 
 	afterEach(() => {
 		taskSuggest._reset();
-		vi.useRealTimers();
 		process.env = { ...originalEnv };
 		globalThis.fetch = originalFetch;
 	});
 
-	it('waits for the discussion to end when the bot is not mentioned', () => {
+	it('puts messages back for the next pass when the model call fails', async () => {
 		vi.useFakeTimers();
-		globalThis.fetch = vi.fn().mockResolvedValue(llmReply('{"proposals":[]}'));
-		taskSuggest.observe(makeMessage({ id: 'm1', content: 'we will book the venue friday' }));
-		expect(globalThis.fetch).not.toHaveBeenCalled();
-		expect(channel.sendTyping).not.toHaveBeenCalled();
-	});
-
-	it('analyses immediately on a mention and keeps "typing..." up while the model thinks', async () => {
-		vi.useFakeTimers();
-		let resolveLlm;
-		globalThis.fetch = vi.fn(() => new Promise(resolve => (resolveLlm = resolve)));
-		const deadline = DateTime.now().setZone('Asia/Jakarta').plus({ days: 2 }).toFormat('yyyy-MM-dd HH:mm');
-
-		const message = makeMessage({ id: 'm1', content: '<@bot-1> remind us to submit the report', mentionBot: true });
-		taskSuggest.observe(message);
-
-		// Only the history read sits between the mention and the model call.
-		await vi.advanceTimersByTimeAsync(0);
-		expect(globalThis.fetch).toHaveBeenCalledTimes(1);
-		expect(channel.sendTyping).toHaveBeenCalledTimes(1);
-		// Nothing is posted before the model answers. The "typing..." indicator is
-		// the feedback.
-		expect(message.reply).not.toHaveBeenCalled();
-		expect(channel.send).not.toHaveBeenCalled();
-
-		// A reasoning model taking 20s still shows the indicator throughout.
-		const before = channel.sendTyping.mock.calls.length;
-		await vi.advanceTimersByTimeAsync(20_000);
-		expect(channel.sendTyping).toHaveBeenCalledTimes(before + 2);
-
-		const body = JSON.parse(globalThis.fetch.mock.calls[0][1].body);
-		expect(body.messages[0].content).toContain('You were mentioned directly as <@bot-1>');
-
-		resolveLlm(
-			llmReply(
-				JSON.stringify({
-					proposals: [{ title: 'Submit the report', deadline, source_message_id: 'm1', confidence: 0.9 }]
-				})
-			)
-		);
-		await vi.waitFor(() => expect(channel.send).toHaveBeenCalledTimes(1));
-
-		// Typing stops once the answer is posted.
-		const after = channel.sendTyping.mock.calls.length;
-		await vi.advanceTimersByTimeAsync(30_000);
-		expect(channel.sendTyping).toHaveBeenCalledTimes(after);
-		expect(message.reply).not.toHaveBeenCalled();
-	});
-
-	it('answers the mention when no decision is found', async () => {
-		globalThis.fetch = vi.fn().mockResolvedValue(llmReply('{"proposals":[]}'));
-		const message = makeMessage({ id: 'm1', content: '<@bot-1> anything to note?', mentionBot: true });
-		taskSuggest.observe(message);
-
-		await vi.waitFor(() => expect(message.reply).toHaveBeenCalledTimes(1));
-		expect(message.reply.mock.calls[0][0].content).toContain('nggak nemu keputusan baru');
-		expect(channel.send).not.toHaveBeenCalled();
-	});
-
-	it('answers the mention with the error when the model call fails', async () => {
 		globalThis.fetch = vi.fn().mockRejectedValue(Object.assign(new Error('aborted'), { name: 'TimeoutError' }));
-		const message = makeMessage({ id: 'm1', content: '<@bot-1> check this', mentionBot: true });
+
+		const constants = (await import('../../src/lib/constants/config.js')).default;
+		const channel = makeChannel({ id: `fail-${n}` });
+		channel.parentId = constants.GOVERNANCE_CATEGORIES[0];
+		const message = makeMessage({ channel, id: 'm1', content: 'we will submit the report next friday' });
+
 		taskSuggest.observe(message);
+		await expect(taskSuggest._analyze(channel.id)).rejects.toThrow('within 300s');
 
-		await vi.waitFor(() => expect(message.reply).toHaveBeenCalledTimes(1));
-		expect(globalThis.fetch).toHaveBeenCalledTimes(1);
-		const error = message.reply.mock.calls[0][0].content;
-		expect(error).toContain('lagi nggak nyaut');
-		expect(error).toContain('within 300s');
-	});
-
-	it('runs a mention that arrives mid-pass right after the current pass', async () => {
-		let resolveFirst;
-		globalThis.fetch = vi
-			.fn()
-			.mockImplementationOnce(() => new Promise(resolve => (resolveFirst = resolve)))
-			.mockResolvedValue(llmReply('{"proposals":[]}'));
-
-		taskSuggest.observe(makeMessage({ id: 'm1', content: '<@bot-1> look', mentionBot: true }));
-		const second = makeMessage({ id: 'm2', content: '<@bot-1> and this', mentionBot: true });
-		taskSuggest.observe(second);
-		await vi.waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(1));
-
-		resolveFirst(llmReply('{"proposals":[]}'));
-		await vi.waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(2));
-		const body = JSON.parse(globalThis.fetch.mock.calls[1][1].body);
-		expect(body.messages[1].content).toContain('id=m2');
-		await vi.waitFor(() => expect(second.reply).toHaveBeenCalledTimes(1));
-	});
-
-	it('shows "typing..." right away when a mention has to wait for a background pass', async () => {
-		vi.useFakeTimers();
-		let resolveFirst;
-		globalThis.fetch = vi
-			.fn()
-			.mockImplementationOnce(() => new Promise(resolve => (resolveFirst = resolve)))
-			.mockResolvedValue(llmReply('{"proposals":[]}'));
-
-		// The quiet timer starts a background pass. The model is slow.
-		taskSuggest.observe(makeMessage({ id: 'm1', content: 'kita rapat jumat ya' }));
-		await vi.advanceTimersByTimeAsync(61_000);
-		expect(globalThis.fetch).toHaveBeenCalledTimes(1);
-		expect(channel.sendTyping).not.toHaveBeenCalled();
-
-		const mention = makeMessage({ id: 'm2', content: '<@bot-1> tolong cek', mentionBot: true });
-		taskSuggest.observe(mention);
-		expect(channel.sendTyping).toHaveBeenCalledTimes(1);
-		await vi.advanceTimersByTimeAsync(0);
-		const queued = channel.sendTyping.mock.calls.length;
-		await vi.advanceTimersByTimeAsync(20_000);
-		expect(channel.sendTyping).toHaveBeenCalledTimes(queued + 2);
-
-		resolveFirst(llmReply('{"proposals":[]}'));
-		await vi.waitFor(() => expect(mention.reply).toHaveBeenCalledTimes(1));
-		expect(globalThis.fetch).toHaveBeenCalledTimes(2);
-
-		// Neither the queued indicator nor the mention's own pass keeps typing.
-		const calls = channel.sendTyping.mock.calls.length;
-		await vi.advanceTimersByTimeAsync(30_000);
-		expect(channel.sendTyping).toHaveBeenCalledTimes(calls);
-	});
-
-	it("treats a mention of the bot's own role as a mention, but not other roles", async () => {
-		vi.useFakeTimers();
-		globalThis.fetch = vi.fn().mockResolvedValue(llmReply('{"proposals":[]}'));
-
-		const withRole = (id, content, role) => {
-			const message = makeMessage({ id, content });
-			message.mentions.roles = new Map([[role.id, role]]);
-			return message;
-		};
-
-		taskSuggest.observe(withRole('m1', '<@&admins> rapat jumat', { id: 'admins', tags: null }));
-		await vi.advanceTimersByTimeAsync(0);
-		expect(globalThis.fetch).not.toHaveBeenCalled();
-		expect(channel.sendTyping).not.toHaveBeenCalled();
-
-		taskSuggest.observe(withRole('m2', '<@&bot-role> tolong cek', { id: 'bot-role', tags: { botId: BOT_ID } }));
-		await vi.advanceTimersByTimeAsync(0);
-		expect(globalThis.fetch).toHaveBeenCalledTimes(1);
-		expect(channel.sendTyping).toHaveBeenCalled();
-
+		// The retry sends the same message again rather than dropping it.
+		globalThis.fetch = vi.fn().mockResolvedValue(text(''));
+		await taskSuggest._analyze(channel.id);
 		const body = JSON.parse(globalThis.fetch.mock.calls[0][1].body);
-		expect(body.messages[1].content).toContain('<@bot-1> tolong cek');
-		expect(body.messages[0].content).toContain('You were mentioned directly as <@bot-1>');
+		expect(body.messages[1].content).toContain('id=m1');
+		expect(body.reasoning_effort).toBe('low');
+
+		vi.useRealTimers();
 	});
 
-	it('chats like the example: the first model message replies, the rest and the card follow unthreaded', async () => {
-		const deadline = DateTime.now().setZone('Asia/Jakarta').plus({ days: 1 }).set({ hour: 23, minute: 59 });
+	it('posts the chat first, then every card from one parallel tool turn', async () => {
+		const channel = makeChannel({ id: `multi-${n}` });
 		const order = [];
 		channel.send = vi.fn(payload => {
 			order.push(payload.embeds ? 'card' : payload.content);
 			return Promise.resolve({ id: `sent-${order.length}` });
 		});
-		globalThis.fetch = vi.fn().mockResolvedValue(
-			llmReply(
-				JSON.stringify({
-					proposals: [
-						{
-							title: 'ABC',
-							deadline: deadline.toFormat('yyyy-MM-dd HH:mm'),
-							source_message_id: 'm1',
-							confidence: 0.9
-						}
-					],
-					messages: ['wait', 'oke ini ya']
-				})
+		globalThis.fetch = vi
+			.fn()
+			.mockResolvedValueOnce(
+				toolCalls([
+					{
+						name: 'create_task_card',
+						args: { title: 'Cek LPJ hari ini', deadline: tomorrow, confidence: 0.9 }
+					},
+					{ name: 'create_task_card', args: { title: 'Cek LPJ besok', deadline: future, confidence: 0.9 } }
+				])
 			)
-		);
+			.mockResolvedValueOnce(text('wait\noke ini ya'));
+
 		const message = makeMessage({
+			channel,
 			id: 'm1',
-			content: 'brooooo <@bot-1> minta tolong buatin task ABC deadlinenya besok jam 12 malam',
+			content: '<@bot-1> ganti LPJ ke hari ini dan esok hari',
 			mentionBot: true
 		});
 		message.reply = vi.fn(payload => {
@@ -427,280 +460,225 @@ describe('taskSuggest direct mentions', () => {
 		});
 
 		taskSuggest.observe(message);
-		await vi.waitFor(() => expect(order).toHaveLength(3));
+		await vi.waitFor(() => expect(order).toHaveLength(4));
 
-		expect(order).toEqual(['reply:wait', 'oke ini ya', 'card']);
-		const prompt = JSON.parse(globalThis.fetch.mock.calls[0][1].body).messages[0].content;
-		expect(prompt).toContain('The first message is sent as a reply to them and must be a quick acknowledgment');
+		expect(order).toEqual(['reply:wait', 'oke ini ya', 'card', 'card']);
+		const rows = suggestions.recentHandled(channel.id);
+		expect(rows.filter(r => r.kind === 'create')).toHaveLength(2);
 	});
 
-	it('posts the card from the mention when the model points at an earlier message', async () => {
-		const deadline = DateTime.now().setZone('Asia/Jakarta').plus({ days: 5 }).toFormat('yyyy-MM-dd HH:mm');
-		globalThis.fetch = vi.fn().mockResolvedValue(
-			llmReply(
-				JSON.stringify({
-					proposals: [{ title: 'Day 3', deadline, source_message_id: 'old-msg', confidence: 0.9 }],
-					messages: ['oke', 'ini ya']
-				})
+	it('cancels the old task and creates the replacements in one pass', async () => {
+		const channel = makeChannel({ id: `resched-${n}` });
+		const taskRepository = await import('../../src/database/repositories/task.repository.js');
+		const deadline = DateTime.now().setZone(zone).plus({ days: 1 }).toUnixInteger();
+		taskRepository.createTask({
+			taskId: 'old-task',
+			title: 'Pengecekan LPJ',
+			description: 'cek berkas',
+			assignedTo: 'u1',
+			createdBy: 'u1',
+			deadline,
+			blockHeight: 1
+		});
+
+		globalThis.fetch = vi
+			.fn()
+			.mockResolvedValueOnce(
+				toolCalls([
+					{ name: 'cancel_task_card', args: { task_id: 'old-task', confidence: 0.9 } },
+					{
+						name: 'create_task_card',
+						args: { title: 'Pengecekan LPJ hari ini', deadline: tomorrow, confidence: 0.9 }
+					},
+					{
+						name: 'create_task_card',
+						args: { title: 'Pengumpulan LPJ besok', deadline: future, confidence: 0.9 }
+					}
+				])
 			)
-		);
-		taskSuggest.observe(
-			makeMessage({ id: 'm1', content: '<@bot-1> kartunya nggak muncul, bikin ulang', mentionBot: true })
-		);
-		await vi.waitFor(() => expect(channel.send.mock.calls.some(([p]) => p.embeds)).toBe(true));
+			.mockResolvedValueOnce(text('oke ini ya'));
+
+		const message = makeMessage({
+			channel,
+			id: 'm1',
+			content: '<@bot-1> cancel pengecekan dan pengumpulan LPJ, ganti hari ini dan esok',
+			mentionBot: true
+		});
+		taskSuggest.observe(message);
+		await vi.waitFor(() => expect(channel.send).toHaveBeenCalledTimes(3));
+
+		// The cancellation card is posted before the replacement cards.
+		const titles = channel.send.mock.calls.map(([payload]) => payload.embeds[0].toJSON().title);
+		expect(titles).toEqual(['Cancel this task?', 'Set a task reminder?', 'Set a task reminder?']);
+
+		// The model saw the real task, not only the open cards.
+		const prompt = JSON.parse(globalThis.fetch.mock.calls[0][1].body).messages[1].content;
+		expect(prompt).toContain('task_id=old-task "Pengecekan LPJ"');
+
+		const rows = suggestions.recentHandled(channel.id);
+		expect(rows.find(r => r.kind === 'cancel')).toMatchObject({
+			title: 'Pengecekan LPJ',
+			target_task_id: 'old-task'
+		});
 	});
 
-	it('says so when a promised card was dropped instead of leaving the chat lying', async () => {
-		globalThis.fetch = vi.fn().mockResolvedValue(
-			llmReply(
-				JSON.stringify({
-					proposals: [{ title: 'Day 3', source_message_id: 'm1', confidence: 0.2 }],
-					messages: ['sip', 'oke ini kartunya']
-				})
-			)
-		);
-		taskSuggest.observe(makeMessage({ id: 'm1', content: '<@bot-1> day 3 tanggal 21', mentionBot: true }));
-		await vi.waitFor(() =>
-			expect(channel.send.mock.calls.some(([p]) => p.content?.includes('gagal kubikin'))).toBe(true)
-		);
-		expect(channel.send.mock.calls.some(([p]) => p.embeds)).toBe(false);
-	});
+	it('does not claim a card was posted when a tool refused it', async () => {
+		const channel = makeChannel({ id: `refused-${n}` });
+		globalThis.fetch = vi
+			.fn()
+			.mockResolvedValueOnce(toolCall('create_task_card', { title: 'Day 3', deadline: future, confidence: 0.2 }))
+			.mockResolvedValueOnce(text('hmm kartunya nggak jadi, confidence-nya kurang'));
 
-	it('answers the mention and logs the raw reply when the model reply is not JSON', async () => {
-		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-		globalThis.fetch = vi.fn().mockResolvedValue(llmReply('sorry, I cannot help'));
-		const message = makeMessage({ id: 'm1', content: '<@bot-1> cek dong', mentionBot: true });
+		const message = makeMessage({ channel, id: 'm1', content: '<@bot-1> day 3', mentionBot: true });
 		taskSuggest.observe(message);
 		await vi.waitFor(() => expect(message.reply).toHaveBeenCalledTimes(1));
-		expect(message.reply.mock.calls[0][0].content).toContain('kacau formatnya');
-		expect(warn.mock.calls.flat().join(' ')).toContain('sorry, I cannot help');
-		warn.mockRestore();
+
+		expect(channel.send).not.toHaveBeenCalled();
+		// No bogus "card failed" message. The model explained itself.
+		expect(message.reply.mock.calls[0][0].content).toContain('nggak jadi');
 	});
 
-	it('tells the model its own earlier messages do not prove a card exists', () => {
-		const [system] = taskSuggest._buildPrompt({ context: [], fresh, people, proposedTitles: [] });
-		expect(system.content).toContain('Your own earlier messages in the context are NOT proof');
-		expect(system.content).toContain('em dash');
-		expect(system.content).toContain('Jangan pakai emoji');
+	it('names only the card that actually failed to post', async () => {
+		const channel = makeChannel({ id: `failpost-${n}` });
+		channel.send = vi
+			.fn()
+			.mockResolvedValueOnce({ id: 'card-1' })
+			.mockRejectedValueOnce(new Error('Missing Access'));
+		globalThis.fetch = vi
+			.fn()
+			.mockResolvedValueOnce(
+				toolCalls([
+					{ name: 'create_task_card', args: { title: 'Card satu', deadline: tomorrow, confidence: 0.9 } },
+					{ name: 'create_task_card', args: { title: 'Card dua', deadline: future, confidence: 0.9 } }
+				])
+			)
+			.mockResolvedValueOnce(text('oke ini ya'));
+
+		const message = makeMessage({ channel, id: 'm1', content: '<@bot-1> buatin dua task', mentionBot: true });
+		taskSuggest.observe(message);
+		await vi.waitFor(() => expect(message.reply).toHaveBeenCalledTimes(2));
+
+		const correction = message.reply.mock.calls[1][0].content;
+		expect(correction).toContain('"Card dua"');
+		expect(correction).not.toContain('"Card satu"');
+		expect(channel.send).toHaveBeenCalledTimes(2);
+		// The first card and its row stay.
+		expect(suggestions.recentHandled(channel.id).filter(r => r.kind === 'create')).toHaveLength(1);
+	});
+
+	it('needs more confidence for an unprompted card than for an answer to a mention', async () => {
+		const passive = makeChannel({ id: `passive-${n}` });
+		globalThis.fetch = vi
+			.fn()
+			.mockResolvedValueOnce(
+				toolCall('create_task_card', { title: 'Latihan', deadline: future, confidence: 0.8 })
+			)
+			.mockResolvedValueOnce(text(''));
+		taskSuggest.observe(makeMessage({ channel: passive, id: 'p1', content: 'siapp mass' }));
+		await taskSuggest._analyze(passive.id);
+		expect(passive.send).not.toHaveBeenCalled();
+
+		n++;
+		const asked = makeChannel({ id: `asked-${n}` });
+		globalThis.fetch = vi
+			.fn()
+			.mockResolvedValueOnce(
+				toolCall('create_task_card', { title: 'Latihan', deadline: future, confidence: 0.8 })
+			)
+			.mockResolvedValueOnce(text('oke'));
+		taskSuggest.observe(
+			makeMessage({
+				channel: asked,
+				id: 'a1',
+				content: '<@bot-1> ingetin aku minggu jam 12 siang',
+				mentionBot: true
+			})
+		);
+		await vi.waitFor(() => expect(asked.send).toHaveBeenCalledTimes(1));
+	});
+
+	it('answers the mention when the model call fails', async () => {
+		const channel = makeChannel({ id: `mentfail-${n}` });
+		globalThis.fetch = vi.fn().mockRejectedValue(Object.assign(new Error('aborted'), { name: 'TimeoutError' }));
+		const message = makeMessage({ channel, id: 'm1', content: '<@bot-1> check this', mentionBot: true });
+		taskSuggest.observe(message);
+
+		await vi.waitFor(() => expect(message.reply).toHaveBeenCalledTimes(1));
+		const error = message.reply.mock.calls[0][0].content;
+		expect(error).toContain('lagi nggak nyaut');
+		expect(error).toContain('within 300s');
+	});
+
+	it('runs a mention that arrives mid-pass right after the current pass', async () => {
+		const channel = makeChannel({ id: `midpass-${n}` });
+		let resolveFirst;
+		globalThis.fetch = vi
+			.fn()
+			.mockImplementationOnce(() => new Promise(resolve => (resolveFirst = resolve)))
+			.mockResolvedValueOnce(text('oke'));
+
+		const first = makeMessage({ channel, id: 'm1', content: '<@bot-1> look', mentionBot: true });
+		taskSuggest.observe(first);
+		const second = makeMessage({ channel, id: 'm2', content: '<@bot-1> and this', mentionBot: true });
+		taskSuggest.observe(second);
+		await vi.waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(1));
+
+		resolveFirst(text('oke'));
+		await vi.waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(2));
+		const body = JSON.parse(globalThis.fetch.mock.calls[1][1].body);
+		expect(body.messages[1].content).toContain('id=m2');
+		await vi.waitFor(() => expect(second.reply).toHaveBeenCalledTimes(1));
+	});
+
+	it("treats a mention of the bot's own role as a mention, but not other roles", async () => {
+		const channel = makeChannel({ id: `role-${n}` });
+		globalThis.fetch = vi.fn().mockResolvedValue(text(''));
+
+		const withRole = (id, content, role) => {
+			const message = makeMessage({ channel, id, content });
+			message.mentions.roles = new Map([[role.id, role]]);
+			return message;
+		};
+
+		taskSuggest.observe(withRole('m1', '<@&admins> rapat jumat', { id: 'admins', tags: null }));
+		expect(globalThis.fetch).not.toHaveBeenCalled();
+
+		taskSuggest.observe(withRole('m2', '<@&bot-role> tolong cek', { id: 'bot-role', tags: { botId: BOT_ID } }));
+		await vi.waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(1));
+		const body = JSON.parse(globalThis.fetch.mock.calls[0][1].body);
+		expect(body.messages[1].content).toContain('<@bot-1> tolong cek');
+		expect(body.messages[0].content).toContain('You were mentioned directly as <@bot-1>');
+	});
+
+	it('answers the mention and logs the raw reply when the model returns no text and no cards', async () => {
+		const channel = makeChannel({ id: `empty-${n}` });
+		globalThis.fetch = vi.fn().mockResolvedValue(text(''));
+		const message = makeMessage({ channel, id: 'm1', content: '<@bot-1> cek dong', mentionBot: true });
+		taskSuggest.observe(message);
+		await vi.waitFor(() => expect(message.reply).toHaveBeenCalledTimes(1));
+		expect(message.reply.mock.calls[0][0].content).toContain('nggak nemu keputusan baru');
 	});
 });
 
-describe('banned punctuation', () => {
+describe('banned punctuation and chat splitting', () => {
 	it('replaces em and en dashes in chat, titles and descriptions', async () => {
 		const taskSuggest = await import('../../src/services/taskSuggest.js');
 		expect(taskSuggest._plain('kartunya ilang — nanti aku ingetin')).toBe('kartunya ilang, nanti aku ingetin');
 		expect(taskSuggest._plain('jam 9–10 pagi')).toBe('jam 9-10 pagi');
 		expect(taskSuggest._plain('oke—')).toBe('oke');
-		expect(taskSuggest._chatMessages({ messages: ['a — b'] })).toEqual(['a, b']);
-		const [p] = taskSuggest._normalizeProposals(
-			{ proposals: [{ title: 'Sidang — Day 3', description: 'lanjut – day 2', source_message_id: '111' }] },
-			{ fresh, people, proposedSources: new Set() }
-		);
-		expect(p.title).toBe('Sidang, Day 3');
-		expect(p.description).toBe('lanjut, day 2');
+		expect(taskSuggest._chatMessages('a — b\nc')).toEqual(['a, b', 'c']);
 	});
 
-	it('removes emojis from chat messages, titles and descriptions', async () => {
+	it('removes emojis and splits one message per line', async () => {
 		const taskSuggest = await import('../../src/services/taskSuggest.js');
-		expect(taskSuggest._chatMessages({ messages: ['oke 🚀 ini ya'] })).toEqual(['oke ini ya']);
-		const [p] = taskSuggest._normalizeProposals(
-			{ proposals: [{ title: 'Sidang ✅ Day 3', description: 'lanjut 🎉 day 2', source_message_id: '111' }] },
-			{ fresh, people, proposedSources: new Set() }
-		);
-		expect(p.title).toBe('Sidang Day 3');
-		expect(p.description).toBe('lanjut day 2');
-	});
-});
-
-describe('taskSuggest corrections to open suggestions', () => {
-	const originalEnv = { ...process.env };
-	const originalFetch = globalThis.fetch;
-	const BOT_ID = 'bot-1';
-	const zone = 'Asia/Jakarta';
-	let taskSuggest;
-	let repo;
-	let constants;
-	let n = 0;
-
-	beforeEach(async () => {
-		vi.resetModules();
-		process.env.TASK_SUGGESTIONS_ENABLED = 'true';
-		process.env.OPENAI_API_KEY = 'sk-test';
-		process.env.OPENAI_MODEL = 'test-model';
-		taskSuggest = await import('../../src/services/taskSuggest.js');
-		repo = await import('../../src/database/repositories/taskSuggestion.repository.js');
-		constants = (await import('../../src/lib/constants/config.js')).default;
-		taskSuggest._reset();
-		n++;
-	});
-
-	afterEach(() => {
-		taskSuggest._reset();
-		process.env = { ...originalEnv };
-		globalThis.fetch = originalFetch;
-	});
-
-	it('reads channel history after a restart and moves the open card to Friday', async () => {
-		const sunday = DateTime.now()
-			.setZone(zone)
-			.plus({ weeks: 1 })
-			.set({ weekday: 7, hour: 23, minute: 59, second: 0, millisecond: 0 });
-		const friday = sunday.minus({ days: 2 });
-		const channelId = `fix-chan-${n}`;
-
-		// The 1:15 message and the card posted for it, from before the restart.
-		const original = {
-			id: 'h1',
-			content: 'jangan lupa inaff minggu depan mabarctf jadi harus dicek ctf mana yang bagus',
-			author: { id: 'u1', bot: false, username: 'hanz' },
-			member: { displayName: 'Hanz' },
-			embeds: [],
-			createdTimestamp: Date.now() - 20 * 60_000
-		};
-		repo.createSuggestion({
-			id: `sug-${n}`,
-			channelId,
-			sourceMessageId: 'h1',
-			title: 'Cek CTF mana yang bagus untuk mabar CTF minggu depan',
-			description: null,
-			assigneeId: 'u1',
-			deadline: sunday.toUnixInteger()
-		});
-		repo.setCardMessage(`sug-${n}`, 'card-1');
-
-		const card = { edit: vi.fn().mockResolvedValue({}) };
-		const channel = {
-			id: channelId,
-			guildId: 'g1',
-			parentId: constants.GOVERNANCE_CATEGORIES[0],
-			sendTyping: vi.fn().mockResolvedValue(undefined),
-			send: vi.fn(),
-			messages: {
-				fetch: vi.fn(arg => {
-					if (typeof arg === 'object') {
-						return Promise.resolve(new Map([['h1', original]]));
-					}
-					return Promise.resolve(arg === 'card-1' ? card : null);
-				})
-			}
-		};
-		const correction = {
-			id: 'm2',
-			channelId,
-			channel,
-			guild: {},
-			client: { user: { id: BOT_ID } },
-			author: { id: 'u1', bot: false, username: 'hanz' },
-			member: { displayName: 'Hanz' },
-			mentions: { users: new Map([[BOT_ID, { id: BOT_ID, bot: true }]]), members: new Map() },
-			content:
-				'jangan di hari minggunya karena mabarctf tuh start hari sabtu. paling jadwalin hari jumat aja biar bagus bro <@bot-1>',
-			createdTimestamp: Date.now(),
-			reply: vi.fn().mockResolvedValue({})
-		};
-		channel.messages.fetch.mockImplementation(arg => {
-			if (typeof arg === 'object') {
-				return Promise.resolve(new Map([['h1', original]]));
-			}
-			if (arg === 'card-1') {
-				return Promise.resolve(card);
-			}
-			return Promise.resolve(arg === 'm2' ? correction : null);
-		});
-
-		globalThis.fetch = vi.fn().mockResolvedValue({
-			ok: true,
-			json: () =>
-				Promise.resolve({
-					choices: [
-						{
-							message: {
-								content: JSON.stringify({
-									proposals: [],
-									updates: [
-										{
-											suggestion_id: `sug-${n}`,
-											deadline: friday.toFormat('yyyy-MM-dd HH:mm'),
-											source_message_id: 'm2'
-										}
-									]
-								})
-							}
-						}
-					]
-				})
-		});
-
-		taskSuggest.observe(correction);
-		await vi.waitFor(() => expect(correction.reply).toHaveBeenCalledTimes(1));
-
-		// The model saw the original message and the open card.
-		const prompt = JSON.parse(globalThis.fetch.mock.calls[0][1].body).messages[1].content;
-		expect(prompt).toContain('id=h1');
-		expect(prompt).toContain('jangan lupa inaff minggu depan');
-		expect(prompt).toContain(`suggestion_id=sug-${n}`);
-		expect(prompt).toContain(sunday.toFormat('yyyy-MM-dd HH:mm cccc'));
-
-		// The card was edited in place and the stored deadline moved to Friday.
-		expect(repo.getSuggestion(`sug-${n}`).deadline).toBe(friday.toUnixInteger());
-		const edited = card.edit.mock.calls[0][0].embeds[0].toJSON();
-		expect(edited.fields.find(f => f.name === 'Deadline').value).toContain(`<t:${friday.toUnixInteger()}:F>`);
-
-		const reply = correction.reply.mock.calls[0][0].content;
-		expect(reply).toContain('Updated the suggestion');
-		expect(reply).toContain(`deadline → <t:${friday.toUnixInteger()}:F>`);
-		expect(reply).toContain('https://discord.com/channels/g1/');
-		expect(channel.send).not.toHaveBeenCalled();
-	});
-
-	it('drops updates for unknown suggestions, invalid values and no-op changes', () => {
-		const deadline = DateTime.now().setZone(zone).plus({ days: 3 }).set({ second: 0, millisecond: 0 });
-		const open = [
-			{ id: 's1', title: 'Book venue', description: null, assignee_id: 'u1', deadline: deadline.toUnixInteger() }
-		];
-		const people = new Map([
-			['u1', 'Alice'],
-			['u2', 'Budi']
+		expect(taskSuggest._chatMessages('oke 🚀 ini ya')).toEqual(['oke ini ya']);
+		expect(taskSuggest._chatMessages('wait\noke ini ya\n\ncardnya nyusul')).toEqual([
+			'wait',
+			'oke ini ya',
+			'cardnya nyusul'
 		]);
-		const fresh = [{ id: 'm1', authorId: 'u1', content: 'x', createdAt: Date.now() }];
-		const normalize = updates => taskSuggest._normalizeUpdates({ updates }, { fresh, people, open });
-
-		expect(normalize([{ suggestion_id: 'nope', title: 'X' }])).toEqual([]);
-		expect(
-			normalize([{ suggestion_id: 's1', title: 'Book venue', deadline: deadline.toFormat('yyyy-MM-dd HH:mm') }])
-		).toEqual([]);
-		expect(normalize([{ suggestion_id: 's1', assignee_id: 'stranger', deadline: 'friday' }])).toEqual([]);
-		expect(normalize([{ suggestion_id: 's1', assignee_id: 'u2', source_message_id: 'unknown' }])).toEqual([
-			{ id: 's1', changes: { assigneeId: 'u2' }, sourceMessageId: 'm1' }
-		]);
-	});
-
-	it('only lists open suggestions and only updates them while open', async () => {
-		const channelId = `open-chan-${n}`;
-		repo.createSuggestion({
-			id: `a-${n}`,
-			channelId,
-			sourceMessageId: 'x1',
-			title: 'A',
-			assigneeId: 'u1',
-			deadline: null
-		});
-		repo.createSuggestion({
-			id: `b-${n}`,
-			channelId,
-			sourceMessageId: 'x2',
-			title: 'B',
-			assigneeId: 'u1',
-			deadline: null
-		});
-		repo.finishSuggestion(`b-${n}`, { status: 'dismissed', handledBy: 'u1' });
-
-		expect(repo.listOpenSuggestions(channelId).map(r => r.id)).toEqual([`a-${n}`]);
-		expect(repo.updateSuggestion(`b-${n}`, { title: 'B2' })).toBeNull();
-		expect(repo.updateSuggestion(`a-${n}`, { title: 'A2', deadline: 123 })).toMatchObject({
-			title: 'A2',
-			deadline: 123
-		});
+		expect(taskSuggest._chatMessages('')).toEqual([]);
+		expect(taskSuggest._chatMessages('{"proposals":[]}')).toEqual([]);
 	});
 });
 
@@ -714,11 +692,7 @@ describe('task suggestion persistence', () => {
 		taskSuggest = await import('../../src/services/taskSuggest.js');
 		repo = await import('../../src/database/repositories/taskSuggestion.repository.js');
 		n++;
-		channel = {
-			id: `chan-${n}`,
-			messages: { fetch: vi.fn().mockResolvedValue(null) },
-			send: vi.fn().mockResolvedValue({ id: `card-${n}` })
-		};
+		channel = makeChannel({ id: `persist-${n}`, send: vi.fn().mockResolvedValue({ id: `card-${n}` }) });
 	});
 
 	const found = (overrides = {}) => ({
@@ -730,14 +704,16 @@ describe('task suggestion persistence', () => {
 		...overrides
 	});
 
-	const postedId = () => channel.send.mock.calls[0][0].components[0].toJSON().components[0].custom_id.split(':')[1];
+	const postedId = index =>
+		channel.send.mock.calls[index][0].components[0].toJSON().components[0].custom_id.split(':')[1];
 
 	it('stores the suggestion and its card, with no expiry', async () => {
 		expect(await taskSuggest._postProposal(channel, found())).toBe(true);
-		const id = postedId();
+		const id = postedId(0);
 
 		const row = repo.getSuggestion(id);
 		expect(row.status).toBe('open');
+		expect(row.kind).toBe('create');
 		expect(row.card_message_id).toBe(`card-${n}`);
 
 		// A week later (or after a restart) the card is still actionable.
@@ -747,23 +723,49 @@ describe('task suggestion persistence', () => {
 		vi.useRealTimers();
 	});
 
-	it('never suggests the same source message twice', async () => {
+	it('stores several cards from one source message', async () => {
 		expect(await taskSuggest._postProposal(channel, found())).toBe(true);
-		expect(await taskSuggest._postProposal(channel, found({ title: 'Again' }))).toBe(false);
-		expect(channel.send).toHaveBeenCalledTimes(1);
-		expect(repo.suggestedSourceIds(channel.id, [`src-${n}`, 'other'])).toEqual(new Set([`src-${n}`]));
-		expect(repo.recentTitles(channel.id)).toEqual(['Kirim proposal sponsor']);
+		expect(await taskSuggest._postProposal(channel, found({ title: 'Kirim proposal sponsor besok' }))).toBe(true);
+		expect(channel.send).toHaveBeenCalledTimes(2);
+		expect(repo.recentTitles(channel.id)).toEqual(['Kirim proposal sponsor', 'Kirim proposal sponsor besok']);
+	});
+
+	it('finds a duplicate only while the card is still open', async () => {
+		expect(await taskSuggest._postProposal(channel, found())).toBe(true);
+		const id = postedId(0);
+		const deadline = found().deadline;
+
+		expect(
+			repo.findSuggestionByTitle({
+				channelId: channel.id,
+				kind: 'create',
+				targetTaskId: null,
+				title: 'kirim PROPOSAL sponsor',
+				deadline
+			})
+		).toMatchObject({ id });
+
+		repo.finishSuggestion(id, { status: 'dismissed', handledBy: 'u1' });
+		expect(
+			repo.findSuggestionByTitle({
+				channelId: channel.id,
+				kind: 'create',
+				targetTaskId: null,
+				title: 'Kirim proposal sponsor',
+				deadline
+			})
+		).toBeUndefined();
 	});
 
 	it('drops the row when the card cannot be posted, letting a later pass suggest it', async () => {
 		channel.send.mockRejectedValue(new Error('Missing Access'));
 		await expect(taskSuggest._postProposal(channel, found())).rejects.toThrow('Missing Access');
-		expect(repo.suggestedSourceIds(channel.id, [`src-${n}`]).size).toBe(0);
+		expect(repo.recentTitles(channel.id)).toEqual([]);
 	});
 
 	it('lets only one click claim a suggestion, and frees it again after release or a stale lease', async () => {
 		await taskSuggest._postProposal(channel, found());
-		const id = postedId();
+		const id = postedId(0);
 
 		expect(taskSuggest.claimProposal(id)).not.toBeNull();
 		expect(taskSuggest.claimProposal(id)).toBeNull();
@@ -779,9 +781,9 @@ describe('task suggestion persistence', () => {
 		vi.useRealTimers();
 	});
 
-	it('closes created and dismissed suggestions with a message saying who handled them', async () => {
+	it('closes created, cancelled, kept and dismissed suggestions with who handled them', async () => {
 		await taskSuggest._postProposal(channel, found());
-		const created = postedId();
+		const created = postedId(0);
 		taskSuggest.claimProposal(created);
 		taskSuggest.finishProposal(created, { status: 'created', handledBy: 'u9', taskId: 'task-1' });
 		expect(taskSuggest.claimProposal(created)).toBeNull();
@@ -789,10 +791,22 @@ describe('task suggestion persistence', () => {
 
 		channel.send.mockClear();
 		await taskSuggest._postProposal(channel, found({ sourceMessageId: `src-${n}-b` }));
-		const dismissed = postedId();
-		taskSuggest.finishProposal(dismissed, { status: 'dismissed', handledBy: 'u8' });
+		const cancelled = postedId(0);
+		taskSuggest.finishProposal(cancelled, { status: 'cancelled', handledBy: 'u8', taskId: 'task-2' });
+		expect(taskSuggest.unavailableMessage(cancelled)).toContain('already cancelled this task');
+
+		channel.send.mockClear();
+		await taskSuggest._postProposal(channel, found({ sourceMessageId: `src-${n}-c` }));
+		const kept = postedId(0);
+		taskSuggest.finishProposal(kept, { status: 'kept', handledBy: 'u7' });
+		expect(taskSuggest.unavailableMessage(kept)).toBe('<@u7> kept this task.');
+
+		channel.send.mockClear();
+		await taskSuggest._postProposal(channel, found({ sourceMessageId: `src-${n}-d` }));
+		const dismissed = postedId(0);
+		taskSuggest.finishProposal(dismissed, { status: 'dismissed', handledBy: 'u6' });
 		expect(taskSuggest.getProposal(dismissed)).toBeNull();
-		expect(taskSuggest.unavailableMessage(dismissed)).toContain('dismissed by <@u8>');
+		expect(taskSuggest.unavailableMessage(dismissed)).toContain('dismissed by <@u6>');
 
 		expect(taskSuggest.unavailableMessage('unknown-id')).toContain('could not be found');
 	});
@@ -803,7 +817,6 @@ describe('actor memory', () => {
 	const originalFetch = globalThis.fetch;
 	let taskSuggest;
 	let memory;
-	let constants;
 	let n = 0;
 
 	beforeEach(async () => {
@@ -813,7 +826,6 @@ describe('actor memory', () => {
 		process.env.OPENAI_MODEL = 'test-model';
 		taskSuggest = await import('../../src/services/taskSuggest.js');
 		memory = await import('../../src/database/repositories/actorMemory.repository.js');
-		constants = (await import('../../src/lib/constants/config.js')).default;
 		taskSuggest._reset();
 		n++;
 	});
@@ -823,8 +835,6 @@ describe('actor memory', () => {
 		process.env = { ...originalEnv };
 		globalThis.fetch = originalFetch;
 	});
-
-	const profilesOf = (...ids) => memory.getProfiles(ids);
 
 	it('stores language and notes per user, newest kept within the cap', () => {
 		const user = `mem-user-${n}`;
@@ -845,7 +855,7 @@ describe('actor memory', () => {
 		expect(memory.removeNote(user, notes[0].id)).toBe('note 0');
 
 		memory.clearUser(user);
-		expect(profilesOf(user).get(user)).toEqual({ language: null, notes: [] });
+		expect(memory.getProfiles([user]).get(user)).toEqual({ language: null, notes: [] });
 	});
 
 	it('tells the model to write in Indonesian by default and shows what it remembers', () => {
@@ -853,112 +863,75 @@ describe('actor memory', () => {
 			['u1', { language: null, notes: [{ id: 7, note: 'Prefers reminders at 20:00' }] }],
 			['u2', { language: 'English', notes: [] }]
 		]);
-		const [system, user] = taskSuggest._buildPrompt({ context: [], fresh, people, proposedTitles: [], profiles });
+		const [system, user] = taskSuggest._buildPrompt({
+			context: [],
+			fresh,
+			people,
+			proposedTitles: [],
+			profiles
+		});
 		expect(system.content).toContain('in Indonesian (Bahasa Indonesia) by default');
-		expect(system.content).toContain('"memories"');
+		expect(system.content).toContain('remember_person');
 		expect(user.content).toContain(
 			'- Alice (u1). language=default (Indonesian). Notes [7] Prefers reminders at 20:00'
 		);
 		expect(user.content).toContain('- Budi (u2). language=English. Notes none');
 	});
 
-	it('only accepts memory changes from new messages about known people', () => {
-		const profiles = new Map([
-			['u1', { language: null, notes: [{ id: 3, note: 'Works evenings' }] }],
-			['u2', { language: null, notes: [] }]
-		]);
-		const changes = taskSuggest._normalizeMemories(
-			{
-				memories: [
-					{ user_id: 'u1', forget: 3, remember: 'Works mornings', source_message_id: '111' },
-					{ user_id: 'u2', remember: 'Handles the sponsor proposal', source_message_id: '111' },
-					// Someone else cannot change Budi's language.
-					{ user_id: 'u2', language: 'English', source_message_id: '111' },
-					{ user_id: 'u2', language: 'English', source_message_id: '222' },
-					{ user_id: 'stranger', remember: 'x', source_message_id: '111' },
-					{ user_id: 'u1', remember: 'x', source_message_id: '999' },
-					{ user_id: 'u1', remember: 'works evenings', forget: 42, source_message_id: '111' }
-				]
-			},
-			{ fresh, people, profiles }
-		);
-		expect(changes).toEqual([
-			{
-				userId: 'u1',
-				authorId: 'u1',
-				sourceMessageId: '111',
-				forget: { id: 3, note: 'Works evenings' },
-				remember: 'Works mornings'
-			},
-			{ userId: 'u2', authorId: 'u1', sourceMessageId: '111', remember: 'Handles the sponsor proposal' },
-			{ userId: 'u2', authorId: 'u2', sourceMessageId: '222', language: 'English' }
-		]);
-	});
-
-	it('learns from a mention, reacts, and answers with the model-written reply', async () => {
+	it('saves queued memory changes and reacts on the source message', async () => {
 		const user = `learner-${n}`;
 		const source = { react: vi.fn().mockResolvedValue(undefined) };
-		const channel = {
-			id: `mem-chan-${n}`,
-			parentId: constants.GOVERNANCE_CATEGORIES[0],
-			sendTyping: vi.fn().mockResolvedValue(undefined),
-			messages: { fetch: vi.fn(arg => Promise.resolve(typeof arg === 'string' ? source : new Map())) },
-			send: vi.fn().mockResolvedValue({})
-		};
-		const message = {
-			id: `msg-${n}`,
-			channelId: channel.id,
-			channel,
-			guild: {},
-			client: { user: { id: 'bot-1' } },
-			author: { id: user, bot: false, username: 'hanz' },
-			member: { displayName: 'Hanz' },
-			mentions: { users: new Map([['bot-1', { id: 'bot-1', bot: true }]]), members: new Map() },
-			content: '<@bot-1> ingat ya, aku biasanya baru bisa malam, dan pakai bahasa inggris aja ke aku',
-			createdTimestamp: Date.now(),
-			reply: vi.fn().mockResolvedValue({})
-		};
-		globalThis.fetch = vi.fn().mockResolvedValue({
-			ok: true,
-			json: () =>
-				Promise.resolve({
-					choices: [
-						{
-							message: {
-								content: JSON.stringify({
-									proposals: [],
-									updates: [],
-									memories: [
-										{
-											user_id: user,
-											remember: 'Usually only available in the evening',
-											language: 'English',
-											source_message_id: message.id
-										}
-									],
-									messages: [
-										"Got it, I'll remember you're usually free in the evening and use English with you."
-									]
-								})
-							}
-						}
-					]
-				})
-		});
+		const channel = makeChannel({ id: `mem-${n}`, fetch: id => Promise.resolve(id === 'm1' ? source : null) });
 
-		taskSuggest.observe(message);
-		await vi.waitFor(() => expect(message.reply).toHaveBeenCalledTimes(1));
+		const saved = await taskSuggest._applyMemories(channel, [
+			{
+				userId: user,
+				authorId: user,
+				sourceMessageId: 'm1',
+				remember: 'Usually only available in the evening',
+				language: 'English'
+			}
+		]);
 
-		expect(message.reply.mock.calls[0][0].content).toBe(
-			"Got it, I'll remember you're usually free in the evening and use English with you."
-		);
+		expect(saved).toBe(1);
 		expect(source.react).toHaveBeenCalledWith('🧠');
 		expect(memory.getLanguage(user)).toBe('English');
 		expect(memory.listNotes(user).map(x => x.note)).toEqual(['Usually only available in the evening']);
+	});
 
-		// A mention asks the model to write the reply itself.
-		const prompt = JSON.parse(globalThis.fetch.mock.calls[0][1].body).messages[0].content;
-		expect(prompt).toContain('Also add "messages"');
+	it('learns from a mention through the remember_person tool', async () => {
+		const user = `mention-learner-${n}`;
+		const source = { react: vi.fn().mockResolvedValue(undefined) };
+		const channel = makeChannel({
+			id: `mem-mention-${n}`,
+			fetch: id => Promise.resolve(id === 'm1' ? source : null)
+		});
+		globalThis.fetch = vi
+			.fn()
+			.mockResolvedValueOnce(
+				toolCall('remember_person', {
+					user_id: user,
+					remember: 'Usually only available in the evening',
+					language: 'English'
+				})
+			)
+			.mockResolvedValueOnce(text("got it, I'll remember that"));
+
+		const message = makeMessage({
+			channel,
+			id: 'm1',
+			authorId: user,
+			content: '<@bot-1> ingat ya, aku biasanya baru bisa malam, dan pakai bahasa inggris aja',
+			mentionBot: true
+		});
+		message.member = { displayName: 'Hanz' };
+		taskSuggest.observe(message);
+		await vi.waitFor(() => expect(message.reply).toHaveBeenCalledTimes(1));
+
+		expect(message.reply.mock.calls[0][0].content).toBe("got it, I'll remember that");
+		expect(source.react).toHaveBeenCalledWith('🧠');
+		expect(memory.getLanguage(user)).toBe('English');
+		expect(memory.listNotes(user).map(x => x.note)).toEqual(['Usually only available in the evening']);
 	});
 });
 
@@ -979,10 +952,7 @@ describe('lib/llm/openai', () => {
 	});
 
 	it('posts to {base}/chat/completions with the key, model and JSON mode', async () => {
-		globalThis.fetch = vi.fn().mockResolvedValue({
-			ok: true,
-			json: () => Promise.resolve({ choices: [{ message: { content: '{"proposals":[]}' } }] })
-		});
+		globalThis.fetch = vi.fn().mockResolvedValue(text('{"proposals":[]}'));
 		const { chatCompletion } = await import('../../src/lib/llm/openai.js');
 
 		const reply = await chatCompletion({ messages: [{ role: 'user', content: 'hi' }], json: true });
@@ -999,10 +969,7 @@ describe('lib/llm/openai', () => {
 	});
 
 	it('sends reasoning_effort only when one is given', async () => {
-		globalThis.fetch = vi.fn().mockResolvedValue({
-			ok: true,
-			json: () => Promise.resolve({ choices: [{ message: { content: '{}' } }] })
-		});
+		globalThis.fetch = vi.fn().mockResolvedValue(text('{}'));
 		const { chatCompletion } = await import('../../src/lib/llm/openai.js');
 
 		await chatCompletion({ messages: [], reasoningEffort: 'low' });
@@ -1043,10 +1010,7 @@ describe('lib/llm/openai', () => {
 
 	it('waits 5 minutes by default so reasoning models can finish, and honours OPENAI_TIMEOUT_MS', async () => {
 		const timeout = vi.spyOn(AbortSignal, 'timeout');
-		globalThis.fetch = vi.fn().mockResolvedValue({
-			ok: true,
-			json: () => Promise.resolve({ choices: [{ message: { content: '{}' } }] })
-		});
+		globalThis.fetch = vi.fn().mockResolvedValue(text('{}'));
 		const { chatCompletion } = await import('../../src/lib/llm/openai.js');
 
 		await chatCompletion({ messages: [] });
@@ -1073,13 +1037,7 @@ describe('deleted messages', () => {
 	let taskSuggest;
 	let suggestions;
 	let memory;
-	let constants;
 	let n = 0;
-
-	const llmReply = content => ({
-		ok: true,
-		json: () => Promise.resolve({ choices: [{ message: { content } }] })
-	});
 
 	beforeEach(async () => {
 		vi.resetModules();
@@ -1089,7 +1047,6 @@ describe('deleted messages', () => {
 		taskSuggest = await import('../../src/services/taskSuggest.js');
 		suggestions = await import('../../src/database/repositories/taskSuggestion.repository.js');
 		memory = await import('../../src/database/repositories/actorMemory.repository.js');
-		constants = (await import('../../src/lib/constants/config.js')).default;
 		taskSuggest._reset();
 		n++;
 	});
@@ -1100,33 +1057,13 @@ describe('deleted messages', () => {
 		globalThis.fetch = originalFetch;
 	});
 
-	const makeChannel = fetch => ({
-		id: `del-chan-${n}`,
-		parentId: constants.GOVERNANCE_CATEGORIES[0],
-		sendTyping: vi.fn().mockResolvedValue(undefined),
-		messages: { fetch },
-		send: vi.fn()
-	});
-	const makeMessage = (channel, id, content) => ({
-		id,
-		channelId: channel.id,
-		channel,
-		guild: {},
-		client: { user: { id: 'bot-1' } },
-		author: { id: 'u1', bot: false, username: 'alice' },
-		member: { displayName: 'Alice' },
-		mentions: { users: new Map(), members: new Map() },
-		content,
-		createdTimestamp: Date.now(),
-		reply: vi.fn().mockResolvedValue({})
-	});
 	const promptOf = call => JSON.parse(call[1].body).messages[1].content;
 
 	it('never sends a deleted buffered message to the model', async () => {
-		const channel = makeChannel(vi.fn().mockResolvedValue(new Map()));
-		globalThis.fetch = vi.fn().mockResolvedValue(llmReply('{"proposals":[]}'));
-		taskSuggest.observe(makeMessage(channel, `a-${n}`, 'pesan yang nanti dihapus'));
-		taskSuggest.observe(makeMessage(channel, `b-${n}`, 'pesan yang tetap ada'));
+		const channel = makeChannel({ id: `del-${n}`, fetch: () => Promise.resolve(new Map()) });
+		globalThis.fetch = vi.fn().mockResolvedValue(text(''));
+		taskSuggest.observe(makeMessage({ channel, id: `a-${n}`, content: 'pesan yang nanti dihapus' }));
+		taskSuggest.observe(makeMessage({ channel, id: `b-${n}`, content: 'pesan yang tetap ada' }));
 
 		taskSuggest.forgetMessage(channel.id, `a-${n}`);
 		await taskSuggest._analyze(channel.id);
@@ -1170,7 +1107,7 @@ describe('deleted messages', () => {
 	});
 
 	it('drops open suggestions whose card was deleted while the bot was offline', async () => {
-		const channelId = `del-chan-${n}`;
+		const channelId = `del-offline-${n}`;
 		for (const id of ['gone', 'kept', 'flaky']) {
 			suggestions.createSuggestion({
 				id: `${id}-${n}`,
@@ -1182,8 +1119,9 @@ describe('deleted messages', () => {
 			});
 			suggestions.setCardMessage(`${id}-${n}`, `card-${id}-${n}`);
 		}
-		const channel = makeChannel(
-			vi.fn(arg => {
+		const channel = makeChannel({
+			id: channelId,
+			fetch: arg => {
 				if (arg === `card-gone-${n}`) {
 					return Promise.reject(Object.assign(new Error('Unknown Message'), { code: 10008 }));
 				}
@@ -1191,11 +1129,11 @@ describe('deleted messages', () => {
 					return Promise.reject(new Error('socket hang up'));
 				}
 				return Promise.resolve(typeof arg === 'string' ? { id: arg } : new Map());
-			})
-		);
-		globalThis.fetch = vi.fn().mockResolvedValue(llmReply('{"proposals":[]}'));
+			}
+		});
+		globalThis.fetch = vi.fn().mockResolvedValue(text(''));
 
-		taskSuggest.observe(makeMessage(channel, `m-${n}`, 'ada update?'));
+		taskSuggest.observe(makeMessage({ channel, id: `m-${n}`, content: 'ada update?' }));
 		await taskSuggest._analyze(channel.id);
 
 		const prompt = promptOf(globalThis.fetch.mock.calls[0]);
@@ -1219,13 +1157,7 @@ describe('what counts as a task', () => {
 	const originalFetch = globalThis.fetch;
 	let taskSuggest;
 	let suggestions;
-	let constants;
 	let n = 0;
-
-	const llmReply = content => ({
-		ok: true,
-		json: () => Promise.resolve({ choices: [{ message: { content } }] })
-	});
 
 	beforeEach(async () => {
 		vi.resetModules();
@@ -1234,7 +1166,6 @@ describe('what counts as a task', () => {
 		process.env.OPENAI_MODEL = 'test-model';
 		taskSuggest = await import('../../src/services/taskSuggest.js');
 		suggestions = await import('../../src/database/repositories/taskSuggestion.repository.js');
-		constants = (await import('../../src/lib/constants/config.js')).default;
 		taskSuggest._reset();
 		n++;
 	});
@@ -1244,44 +1175,6 @@ describe('what counts as a task', () => {
 		process.env = { ...originalEnv };
 		globalThis.fetch = originalFetch;
 	});
-
-	const setup = () => {
-		const channel = {
-			id: `kind-chan-${n}`,
-			parentId: constants.GOVERNANCE_CATEGORIES[0],
-			sendTyping: vi.fn().mockResolvedValue(undefined),
-			messages: { fetch: vi.fn(arg => Promise.resolve(typeof arg === 'object' ? new Map() : null)) },
-			send: vi.fn().mockResolvedValue({ id: `card-${n}` })
-		};
-		const message = (id, content, mentionBot = false) => ({
-			id,
-			channelId: channel.id,
-			channel,
-			guild: {},
-			client: { user: { id: 'bot-1' } },
-			author: { id: 'u1', bot: false, username: 'hanz' },
-			member: { displayName: 'Hanz' },
-			mentions: {
-				users: new Map(mentionBot ? [['bot-1', { id: 'bot-1', bot: true }]] : []),
-				members: new Map()
-			},
-			content,
-			createdTimestamp: Date.now(),
-			reply: vi.fn().mockResolvedValue({})
-		});
-		return { channel, message };
-	};
-	const proposal = (sourceId, confidence) =>
-		JSON.stringify({
-			proposals: [
-				{
-					title: 'Latihan personal finance',
-					deadline: future,
-					source_message_id: sourceId,
-					confidence
-				}
-			]
-		});
 
 	it('tells the model that assignments to members are not admin tasks, with the counter-example', () => {
 		const [system, user] = taskSuggest._buildPrompt({
@@ -1301,7 +1194,7 @@ describe('what counts as a task', () => {
 	});
 
 	it('shows the model which cards were dismissed and which became tasks', async () => {
-		const { channel, message } = setup();
+		const channel = makeChannel({ id: `kind-${n}` });
 		for (const [id, status] of [
 			[`kind-made-${n}`, 'created'],
 			[`kind-nope-${n}`, 'dismissed'],
@@ -1319,33 +1212,18 @@ describe('what counts as a task', () => {
 				suggestions.finishSuggestion(id, { status, handledBy: 'u1' });
 			}
 		}
-		globalThis.fetch = vi.fn().mockResolvedValue(llmReply('{"proposals":[]}'));
+		globalThis.fetch = vi.fn().mockResolvedValue(text(''));
 
-		taskSuggest.observe(message(`m-${n}`, 'oke lanjut'));
+		taskSuggest.observe(makeMessage({ channel, id: `m-${n}`, content: 'oke lanjut' }));
 		await taskSuggest._analyze(channel.id);
 
 		const prompt = JSON.parse(globalThis.fetch.mock.calls[0][1].body).messages[1].content;
 		expect(prompt).toContain('Already suggested and handled. "Title created"');
 		expect(prompt).toContain('Dismissed by the team, who did not want these tracked. "Title dismissed"');
 	});
-
-	it('needs more confidence for an unprompted card than for an answer to a mention', async () => {
-		const passive = setup();
-		globalThis.fetch = vi.fn().mockResolvedValue(llmReply(proposal(`p-${n}`, 0.8)));
-		taskSuggest.observe(passive.message(`p-${n}`, 'siapp mass'));
-		await taskSuggest._analyze(passive.channel.id);
-		expect(passive.channel.send).not.toHaveBeenCalled();
-
-		n++;
-		const asked = setup();
-		globalThis.fetch = vi.fn().mockResolvedValue(llmReply(proposal(`a-${n}`, 0.8)));
-		taskSuggest.observe(asked.message(`a-${n}`, '<@bot-1> ingetin aku minggu jam 12 siang', true));
-		await vi.waitFor(() => expect(asked.channel.send).toHaveBeenCalledTimes(1));
-		expect(asked.channel.send.mock.calls[0][0].embeds).toHaveLength(1);
-	});
 });
 
-describe('dismissing a suggestion', () => {
+describe('suggestion card actions', () => {
 	let suggestions;
 	let Listener;
 	let n = 0;
@@ -1354,6 +1232,29 @@ describe('dismissing a suggestion', () => {
 		suggestions = await import('../../src/database/repositories/taskSuggestion.repository.js');
 		({ TaskSuggestInteractionListener: Listener } = await import('../../src/listeners/taskSuggestInteraction.js'));
 		n++;
+	});
+
+	const interaction = ({ message = {}, ...rest } = {}) => ({
+		user: { id: 'u9', username: 'hanz' },
+		member: { displayName: 'Hanz' },
+		message: { delete: vi.fn().mockResolvedValue(undefined), ...message },
+		reply: vi.fn().mockResolvedValue(undefined),
+		followUp: vi.fn().mockResolvedValue(undefined),
+		deferUpdate: vi.fn().mockResolvedValue(undefined),
+		editReply: vi.fn().mockResolvedValue(undefined),
+		update: vi.fn().mockResolvedValue(undefined),
+		...rest
+	});
+
+	const listener = (executeCancel = vi.fn().mockResolvedValue({ content: 'Task **X** has been cancelled' })) => ({
+		_denied: async () => false,
+		container: {
+			logger: { warn: vi.fn() },
+			stores: { get: () => ({ get: () => ({ _executeCancel: executeCancel }) }) }
+		}
+	});
+
+	it('dismisses a create card and keeps the dismissal on record', async () => {
 		suggestions.createSuggestion({
 			id: `dis-${n}`,
 			channelId: 'dis-chan',
@@ -1363,45 +1264,129 @@ describe('dismissing a suggestion', () => {
 			deadline: null
 		});
 		suggestions.setCardMessage(`dis-${n}`, `dis-card-${n}`);
-	});
 
-	const run = interaction =>
-		Listener.prototype._dismiss.call(
-			{ _denied: async () => false, container: { logger: { warn: vi.fn() } } },
-			interaction,
-			`dis-${n}`
-		);
-	const makeInteraction = deleteCard => ({
-		user: { id: 'u9', username: 'hanz' },
-		member: { displayName: 'Hanz' },
-		message: { delete: deleteCard },
-		deferUpdate: vi.fn().mockResolvedValue(undefined),
-		editReply: vi.fn().mockResolvedValue(undefined),
-		update: vi.fn()
-	});
+		const i = interaction();
+		await Listener.prototype._dismiss.call(listener(), i, `dis-${n}`);
 
-	it('deletes the card and keeps the dismissal on record', async () => {
-		const interaction = makeInteraction(vi.fn().mockResolvedValue(undefined));
-		await run(interaction);
-
-		expect(interaction.message.delete).toHaveBeenCalledTimes(1);
-		expect(interaction.editReply).not.toHaveBeenCalled();
-		expect(interaction.update).not.toHaveBeenCalled();
+		expect(i.message.delete).toHaveBeenCalledTimes(1);
+		expect(i.editReply).not.toHaveBeenCalled();
 		expect(suggestions.getSuggestion(`dis-${n}`)).toMatchObject({ status: 'dismissed', handled_by: 'u9' });
 	});
 
 	it('falls back to marking the card dismissed when it cannot be deleted', async () => {
-		const interaction = makeInteraction(vi.fn().mockRejectedValue(new Error('Missing Permissions')));
-		await run(interaction);
+		suggestions.createSuggestion({
+			id: `dis2-${n}`,
+			channelId: 'dis-chan',
+			sourceMessageId: `dis-src2-${n}`,
+			title: 'Latihan personal finance',
+			assigneeId: 'u1',
+			deadline: null
+		});
+		suggestions.setCardMessage(`dis2-${n}`, `dis-card2-${n}`);
 
-		const embed = interaction.editReply.mock.calls[0][0].embeds[0].toJSON();
+		const i = interaction({ message: { delete: vi.fn().mockRejectedValue(new Error('Missing Permissions')) } });
+		await Listener.prototype._dismiss.call(listener(), i, `dis2-${n}`);
+
+		const embed = i.editReply.mock.calls[0][0].embeds[0].toJSON();
 		expect(embed.title).toBe('Suggestion dismissed');
-		expect(interaction.editReply.mock.calls[0][0].components).toEqual([]);
+		expect(i.editReply.mock.calls[0][0].components).toEqual([]);
+	});
+
+	it('cancels the target task through /task cancel and closes the card', async () => {
+		createPendingTask(`cancel-task-${n}`);
+		suggestions.createSuggestion({
+			id: `cancel-${n}`,
+			channelId: 'cancel-chan',
+			sourceMessageId: `cancel-src-${n}`,
+			title: 'Pengecekan LPJ',
+			assigneeId: 'u1',
+			deadline: DateTime.now().setZone(zone).plus({ days: 1 }).toUnixInteger(),
+			kind: 'cancel',
+			targetTaskId: `cancel-task-${n}`
+		});
+		suggestions.setCardMessage(`cancel-${n}`, `cancel-card-${n}`);
+
+		const executeCancel = vi.fn().mockResolvedValue({ content: 'Task **Pengecekan LPJ** has been cancelled' });
+		const i = interaction();
+		await Listener.prototype._cancelTask.call(listener(executeCancel), i, `cancel-${n}`);
+
+		expect(executeCancel).toHaveBeenCalledTimes(1);
+		expect(executeCancel.mock.calls[0][0]).toMatchObject({ task_id: `cancel-task-${n}` });
+		expect(i.editReply.mock.calls[0][0].content).toContain('has been cancelled');
+		expect(suggestions.getSuggestion(`cancel-${n}`)).toMatchObject({
+			status: 'cancelled',
+			handled_by: 'u9',
+			task_id: `cancel-task-${n}`
+		});
+	});
+
+	it('releases the card when the cancellation failed', async () => {
+		createPendingTask(`cancel-fail-${n}`);
+		suggestions.createSuggestion({
+			id: `cancelfail-${n}`,
+			channelId: 'cancel-chan',
+			sourceMessageId: `cancelfail-src-${n}`,
+			title: 'Pengecekan LPJ',
+			assigneeId: 'u1',
+			deadline: DateTime.now().setZone(zone).plus({ days: 1 }).toUnixInteger(),
+			kind: 'cancel',
+			targetTaskId: `cancel-fail-${n}`
+		});
+
+		const i = interaction();
+		await Listener.prototype._cancelTask.call(
+			listener(vi.fn().mockResolvedValue('Could not cancel task. No cancellation was recorded.')),
+			i,
+			`cancelfail-${n}`
+		);
+
+		expect(i.followUp.mock.calls[0][0].content).toContain('Could not cancel');
+		expect(suggestions.getSuggestion(`cancelfail-${n}`).status).toBe('open');
+	});
+
+	it('keeps the task and closes the card', async () => {
+		createPendingTask(`keep-task-${n}`);
+		suggestions.createSuggestion({
+			id: `keep-${n}`,
+			channelId: 'keep-chan',
+			sourceMessageId: `keep-src-${n}`,
+			title: 'Pengecekan LPJ',
+			assigneeId: 'u1',
+			deadline: DateTime.now().setZone(zone).plus({ days: 1 }).toUnixInteger(),
+			kind: 'cancel',
+			targetTaskId: `keep-task-${n}`
+		});
+
+		const i = interaction();
+		await Listener.prototype._keep.call(listener(), i, `keep-${n}`);
+
+		expect(i.update.mock.calls[0][0].content).toContain('Kept **Pengecekan LPJ**');
+		expect(suggestions.getSuggestion(`keep-${n}`)).toMatchObject({ status: 'kept', handled_by: 'u9' });
+	});
+
+	it('does not create a task from a cancellation card', async () => {
+		suggestions.createSuggestion({
+			id: `wrongkind-${n}`,
+			channelId: 'kind-chan',
+			sourceMessageId: `wrongkind-src-${n}`,
+			title: 'Pengecekan LPJ',
+			assigneeId: 'u1',
+			deadline: DateTime.now().setZone(zone).plus({ days: 1 }).toUnixInteger(),
+			kind: 'cancel',
+			targetTaskId: `wrongkind-task-${n}`
+		});
+
+		const i = interaction();
+		await Listener.prototype._create.call(listener(), i, `wrongkind-${n}`);
+
+		expect(i.reply.mock.calls[0][0].content).toContain('not a task creation card');
+		expect(suggestions.getSuggestion(`wrongkind-${n}`).status).toBe('open');
 	});
 });
 
 describe('task suggestion wiring (source level)', () => {
 	const listener = readFileSync(join(root, 'src/listeners/taskSuggestInteraction.js'), 'utf8');
+	const interactionCreate = readFileSync(join(root, 'src/listeners/interactionCreate.js'), 'utf8');
 	const messageCreate = readFileSync(join(root, 'src/listeners/messageCreate.js'), 'utf8');
 
 	it('creates suggested tasks through the same path as /task add', () => {
@@ -1410,9 +1395,20 @@ describe('task suggestion wiring (source level)', () => {
 		expect(listener).not.toContain('createTaskWithReminders');
 	});
 
+	it('cancels suggested tasks through the same path as /task cancel', () => {
+		expect(listener).toContain('taskCommand._executeCancel');
+	});
+
+	it('parses custom ids on the colon, not per character', () => {
+		expect(listener).toContain("interaction.customId.split(':')");
+		expect(interactionCreate).toContain("interaction.customId.split(':')");
+		expect(listener).not.toContain("interaction.customId.split('')");
+		expect(interactionCreate).not.toContain("interaction.customId.split('')");
+	});
+
 	it('claims a proposal before acting on it and checks permissions on every action', () => {
 		expect(listener.match(/claimProposal\(/g).length).toBeGreaterThanOrEqual(3);
-		expect(listener.match(/await this\._denied\(interaction\)/g)).toHaveLength(4);
+		expect(listener.match(/await this\._denied\(interaction\)/g)).toHaveLength(6);
 	});
 
 	it('feeds every non-bot message to the suggestion service', () => {

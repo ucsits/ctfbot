@@ -11,6 +11,7 @@ const {
 const { randomUUID } = require('crypto');
 const { DateTime } = require('luxon');
 const taskSuggest = require('../services/taskSuggest');
+const taskRepository = require('../database/repositories/task.repository');
 const { parseLocalDateToUTC } = require('../lib/utils');
 const { checkPermissionReply } = require('../lib/middleware/ensurePermission');
 const constants = require('../lib/constants/config');
@@ -23,7 +24,11 @@ const { SUGGEST_IDS, TIMEZONE } = taskSuggest;
  *   tsug_create:<id>   create the task as suggested
  *   tsug_edit:<id>     open a pre-filled modal (tsug_modal:<id>) that creates on submit
  *   tsug_dismiss:<id>  close the suggestion without creating anything
- * Tasks are written through TaskCommand.createTaskRecord, the same path as /task add.
+ *   tsug_cancel:<id>   cancel the existing task a cancellation card targets
+ *   tsug_keep:<id>     keep the existing task and close the cancellation card
+ * Tasks are written through TaskCommand.createTaskRecord, the same path as
+ * /task add, and cancellations through TaskCommand._executeCancel, the same
+ * path as /task cancel.
  */
 class TaskSuggestInteractionListener extends Listener {
 	constructor(context, options) {
@@ -39,7 +44,7 @@ class TaskSuggestInteractionListener extends Listener {
 			return;
 		}
 
-		const [namespace, proposalId] = interaction.customId.split('');
+		const [namespace, proposalId] = interaction.customId.split(':');
 		if (!proposalId) {
 			return;
 		}
@@ -54,6 +59,12 @@ class TaskSuggestInteractionListener extends Listener {
 				}
 				if (namespace === SUGGEST_IDS.dismiss) {
 					return await this._dismiss(interaction, proposalId);
+				}
+				if (namespace === SUGGEST_IDS.cancel) {
+					return await this._cancelTask(interaction, proposalId);
+				}
+				if (namespace === SUGGEST_IDS.keep) {
+					return await this._keep(interaction, proposalId);
 				}
 			} else if (namespace === SUGGEST_IDS.modal) {
 				return await this._submitModal(interaction, proposalId);
@@ -89,6 +100,13 @@ class TaskSuggestInteractionListener extends Listener {
 		if (!proposal) {
 			return this._unavailable(interaction, proposalId);
 		}
+		if (proposal.kind !== 'create') {
+			taskSuggest.releaseProposal(proposalId);
+			return interaction.reply({
+				content: 'This card is not a task creation card.',
+				ephemeral: true
+			});
+		}
 		if (!proposal.deadline || proposal.deadline <= Math.floor(Date.now() / 1000)) {
 			taskSuggest.releaseProposal(proposalId);
 			return interaction.reply({
@@ -114,6 +132,12 @@ class TaskSuggestInteractionListener extends Listener {
 		const proposal = taskSuggest.getProposal(proposalId);
 		if (!proposal) {
 			return this._unavailable(interaction, proposalId);
+		}
+		if (proposal.kind !== 'create') {
+			return interaction.reply({
+				content: 'This card is not a task creation card.',
+				ephemeral: true
+			});
 		}
 
 		const titleInput = new TextInputBuilder()
@@ -173,6 +197,13 @@ class TaskSuggestInteractionListener extends Listener {
 		const proposal = taskSuggest.claimProposal(proposalId);
 		if (!proposal) {
 			return this._unavailable(interaction, proposalId);
+		}
+		if (proposal.kind !== 'create') {
+			taskSuggest.releaseProposal(proposalId);
+			return interaction.reply({
+				content: 'This card is not a task creation card.',
+				ephemeral: true
+			});
 		}
 
 		const title = interaction.fields.getTextInputValue('title')?.trim();
@@ -239,6 +270,82 @@ class TaskSuggestInteractionListener extends Listener {
 	}
 
 	/**
+	 * Cancel the task a cancellation card targets, through the same path as
+	 * /task cancel. The card is only closed once the transition succeeded.
+	 */
+	async _cancelTask(interaction, proposalId) {
+		if (await this._denied(interaction)) {
+			return;
+		}
+
+		const proposal = taskSuggest.claimProposal(proposalId);
+		if (!proposal) {
+			return this._unavailable(interaction, proposalId);
+		}
+		if (proposal.kind !== 'cancel' || !proposal.targetTaskId) {
+			taskSuggest.releaseProposal(proposalId);
+			return interaction.reply({
+				content: 'This card is not a cancellation card.',
+				ephemeral: true
+			});
+		}
+
+		const task = taskRepository.getTask(proposal.targetTaskId);
+		if (!task || task.status !== 'pending' || task.cancelled) {
+			// Nothing left to cancel. Close the card instead of leaving it open.
+			taskSuggest.finishProposal(proposalId, {
+				status: 'cancelled',
+				handledBy: interaction.user.id,
+				taskId: proposal.targetTaskId
+			});
+			return interaction.update({
+				content: 'This task was already done or cancelled.',
+				embeds: [],
+				components: []
+			});
+		}
+
+		await interaction.deferUpdate();
+		const taskCommand = this.container.stores.get('commands').get('task');
+		const result = await taskCommand._executeCancel(task, interaction);
+
+		if (typeof result !== 'object') {
+			taskSuggest.releaseProposal(proposalId);
+			return interaction.followUp({ content: result, ephemeral: true });
+		}
+
+		taskSuggest.finishProposal(proposalId, {
+			status: 'cancelled',
+			handledBy: interaction.user.id,
+			taskId: task.task_id
+		});
+		return interaction.editReply({ content: result.content, embeds: [], components: [] });
+	}
+
+	/** Keep the task and close the cancellation card without recording anything. */
+	async _keep(interaction, proposalId) {
+		if (await this._denied(interaction)) {
+			return;
+		}
+
+		const proposal = taskSuggest.claimProposal(proposalId);
+		if (!proposal) {
+			return this._unavailable(interaction, proposalId);
+		}
+		taskSuggest.finishProposal(proposalId, {
+			status: 'kept',
+			handledBy: interaction.user.id,
+			taskId: proposal.targetTaskId
+		});
+
+		return interaction.update({
+			content: `Kept **${proposal.title}**. Nothing was cancelled.`,
+			embeds: [],
+			components: []
+		});
+	}
+
+	/**
 	 * Write the task and replace the suggestion card with the result. The
 	 * interaction must already be deferred with deferUpdate.
 	 */
@@ -283,8 +390,7 @@ class TaskSuggestInteractionListener extends Listener {
 			if (error.message?.includes('Blockchain')) {
 				taskSuggest.releaseProposal(proposal.id);
 				return interaction.followUp({
-					content:
-						'Could not anchor the task on the blockchain. No task was created. You can try again.',
+					content: 'Could not anchor the task on the blockchain. No task was created. You can try again.',
 					ephemeral: true
 				});
 			}
