@@ -23,6 +23,20 @@ const { logger } = require('../logger');
 const llmLog = logger.child('LLM');
 
 /**
+ * Character count of a message content, whether it is a plain string or an
+ * array of text and image parts. Image bytes are not counted.
+ */
+function _contentChars(content) {
+	if (typeof content === 'string') {
+		return content.length;
+	}
+	if (Array.isArray(content)) {
+		return content.reduce((n, part) => n + (typeof part?.text === 'string' ? part.text.length : 0), 0);
+	}
+	return 0;
+}
+
+/**
  * One chat completion request, returning the raw assistant message so callers
  * can read `tool_calls` as well as `content`.
  *
@@ -51,7 +65,7 @@ async function _request({ messages, json = false, tools, toolChoice, temperature
 
 	const url = `${config.llm.baseUrl}/chat/completions`;
 	const timeoutMs = config.llm.timeoutMs;
-	const promptChars = messages.reduce((n, m) => n + (m.content?.length ?? 0), 0);
+	const promptChars = messages.reduce((n, m) => n + _contentChars(m.content), 0);
 	llmLog.debug(
 		`Chat completion request with model=${config.llm.model} messages=${messages.length} chars=${promptChars} json=${json} tools=${tools?.length ?? 0} effort=${reasoningEffort ?? 'default'}`
 	);
@@ -83,7 +97,13 @@ async function _request({ messages, json = false, tools, toolChoice, temperature
 	if (!res.ok) {
 		const errBody = await res.text().catch(() => '');
 		llmLog.error(`Chat completion failed (${res.status}) after ${elapsedMs}ms ${errBody.slice(0, 500)}`);
-		throw new Error(`Chat completion failed (${res.status})`);
+		// Keep the status and a slice of the body on the error. A caller can then
+		// tell a rejected image part from a rejected tool schema and degrade
+		// instead of failing the whole pass.
+		const error = new Error(`Chat completion failed (${res.status})`);
+		error.status = res.status;
+		error.body = errBody.slice(0, 500);
+		throw error;
 	}
 
 	const data = await res.json();

@@ -182,6 +182,28 @@ const config = {
 		get toolsEnabled() {
 			return process.env.LLM_TOOLS_ENABLED !== 'false';
 		},
+		/**
+		 * Images and GIF frames. On by default because a poster or a screenshot
+		 * usually carries the answer, and a text-only reply about it reads as
+		 * clueless. A provider without vision degrades to text on its own.
+		 */
+		vision: {
+			get enabled() {
+				return process.env.CHAT_VISION_ENABLED !== 'false';
+			},
+			/** Image parts per pass. One GIF spends up to four of them. */
+			get maxImages() {
+				return envInt('CHAT_VISION_MAX_IMAGES', 6);
+			},
+			/** Images are downscaled to this width before they are sent. */
+			get maxWidth() {
+				return envInt('CHAT_VISION_MAX_WIDTH', 1024);
+			},
+			/** Attachments larger than this are skipped instead of downloaded. */
+			get maxBytes() {
+				return envInt('CHAT_VISION_MAX_BYTES', 8 * 1024 * 1024);
+			}
+		},
 		search: {
 			get apiKey() {
 				return process.env.SERPBASE_API_KEY || '';

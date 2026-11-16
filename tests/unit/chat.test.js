@@ -3,6 +3,7 @@ import { readFileSync, mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import Database from 'better-sqlite3';
+import sharp from 'sharp';
 
 const root = join(import.meta.dirname, '../..');
 
@@ -33,6 +34,7 @@ afterAll(async () => {
 let chat;
 let chatState;
 let channelMemory;
+let media;
 
 beforeEach(async () => {
 	vi.resetModules();
@@ -47,10 +49,13 @@ beforeEach(async () => {
 	delete process.env.CHAT_GUILD_MAX_PER_DAY;
 	delete process.env.CHAT_SPARK_PROBABILITY;
 	delete process.env.CHAT_COOLDOWN_MS;
+	delete process.env.CHAT_VISION_ENABLED;
 
 	chat = await import('../../src/services/chat.js');
 	chatState = await import('../../src/database/repositories/chatState.repository.js');
 	channelMemory = await import('../../src/database/repositories/channelMemory.repository.js');
+	media = await import('../../src/lib/media/index.js');
+	media._reset();
 	chatState._reset();
 	channelMemory._reset();
 	chat._reset();
@@ -123,6 +128,11 @@ describe('chat._signal', () => {
 		const result = chat._signal([message({ content: 'wkwk iya bener' }), message({ id: 'm2', content: 'sip' })]);
 		expect(result.signal).toBeNull();
 		expect(result.busy).toBe(false);
+	});
+
+	it('treats a picture or a link card as a signal on its own', () => {
+		expect(chat._signal([message({ content: '', hasVisuals: true })]).signal).toBe('image');
+		expect(chat._signal([message({ content: 'ini poster' })]).signal).toBeNull();
 	});
 
 	it('marks a channel busy only when enough different people talked recently', () => {
@@ -273,6 +283,65 @@ describe('chat prompt', () => {
 		});
 		expect(system.content).toContain('baru disebut langsung');
 	});
+
+	it('tells the model that frames of one GIF are the same animation', () => {
+		const [system] = chat._buildPrompt({
+			channel: { id: 'c1', name: 'general' },
+			messages: [message()],
+			notes: [],
+			profiles: new Map(),
+			recentSaid: [],
+			trigger: null,
+			people: new Map()
+		});
+		expect(system.content).toContain('animasi yang sama');
+		expect(system.content).toContain('[embed]');
+	});
+
+	it('leaves the user turn as a string when there are no pictures', () => {
+		const [, user] = chat._buildPrompt({
+			channel: { id: 'c1', name: 'general' },
+			messages: [message()],
+			notes: [],
+			profiles: new Map(),
+			recentSaid: [],
+			trigger: null,
+			people: new Map()
+		});
+		expect(typeof user.content).toBe('string');
+	});
+
+	it('attaches pictures as parts, each labelled with its message and GIF frame', () => {
+		const [, user] = chat._buildPrompt({
+			channel: { id: 'c1', name: 'general' },
+			messages: [message({ content: 'ini posternya', hasVisuals: true })],
+			notes: [],
+			profiles: new Map(),
+			recentSaid: [],
+			trigger: null,
+			people: new Map([['u1', 'Alice']]),
+			imageParts: [
+				{
+					messageId: 'm1',
+					label: 'GIF "x.gif" frame 1/18 (0% durasi)',
+					dataUrl: 'data:image/jpeg;base64,AAA'
+				},
+				{
+					messageId: 'm1',
+					label: 'GIF "x.gif" frame 5/18 (24% durasi)',
+					dataUrl: 'data:image/jpeg;base64,BBB'
+				}
+			]
+		});
+
+		expect(Array.isArray(user.content)).toBe(true);
+		expect(user.content[0]).toEqual({ type: 'text', text: expect.stringContaining('ini posternya') });
+		expect(user.content[1].text).toContain('Gambar 1 dari 2');
+		expect(user.content[1].text).toContain('frame 1/18');
+		expect(user.content[2]).toEqual({ type: 'image_url', image_url: { url: 'data:image/jpeg;base64,AAA' } });
+		expect(user.content[3].text).toContain('frame 5/18');
+		expect(user.content[4]).toEqual({ type: 'image_url', image_url: { url: 'data:image/jpeg;base64,BBB' } });
+	});
 });
 
 describe('chat.observe', () => {
@@ -307,6 +376,23 @@ describe('chat.observe', () => {
 		await vi.waitFor(() => expect(msg.reply).toHaveBeenCalled());
 		expect(msg.reply.mock.calls[0][0].content).toBe('oke ini ya');
 		expect(msg.reply.mock.calls[0][0].allowedMentions).toEqual({ parse: [], repliedUser: false });
+	});
+
+	it('answers a mention that is only a picture', async () => {
+		const png = await pngBytes();
+		const channel = makeChannel();
+		globalThis.fetch = vi.fn((url, init) =>
+			String(url).startsWith('https://cdn.test')
+				? Promise.resolve(imageResponse(png))
+				: Promise.resolve(llmText('poster riset FPGA ya'))
+		);
+		const msg = makeMessage(channel, { content: '' });
+		msg.attachments = new Map([['a1', attachment(png)]]);
+
+		chat.observe(msg);
+
+		await vi.waitFor(() => expect(msg.reply).toHaveBeenCalled());
+		expect(msg.reply.mock.calls[0][0].content).toBe('poster riset FPGA ya');
 	});
 
 	it('leaves a mention in a governance channel to the task service', async () => {
@@ -414,5 +500,109 @@ describe('chat._runPass', () => {
 		expect(searches).toEqual(['padding oracle']);
 		expect(channel.send).toHaveBeenCalledTimes(1);
 		expect(channel.send.mock.calls[0][0].content).toContain('https://example.com/po');
+	});
+});
+
+/** A 4x4 PNG, enough for sharp to decode without a fixture file. */
+async function pngBytes() {
+	return sharp({ create: { width: 4, height: 4, channels: 4, background: { r: 10, g: 20, b: 30, alpha: 1 } } })
+		.png()
+		.toBuffer();
+}
+
+const imageResponse = bytes => ({
+	ok: true,
+	headers: { get: () => String(bytes.length) },
+	arrayBuffer: () => Promise.resolve(bytes)
+});
+
+const attachment = (bytes, overrides = {}) => ({
+	id: 'a1',
+	name: 'poster.png',
+	contentType: 'image/png',
+	size: bytes.length,
+	url: 'https://cdn.test/poster.png',
+	...overrides
+});
+
+describe('chat vision', () => {
+	it('sends an attachment to the model as an image part', async () => {
+		const png = await pngBytes();
+		const channel = makeChannel();
+		const modelBodies = [];
+		globalThis.fetch = vi.fn((url, init) => {
+			if (String(url).startsWith('https://cdn.test')) {
+				return Promise.resolve(imageResponse(png));
+			}
+			modelBodies.push(JSON.parse(init.body));
+			return Promise.resolve(llmText('poster riset FPGA ya, batasnya 30 juni'));
+		});
+
+		const msg = message({
+			content: 'ikut survey ini ya\n[gambar "poster.png", 1080x1350]',
+			createdAt: Date.now(),
+			hasVisuals: true,
+			attachments: [attachment(png)]
+		});
+		await chat._runPass(stateWith([msg], channel), { reason: 'signal: image' });
+
+		expect(channel.send).toHaveBeenCalledTimes(1);
+		const parts = modelBodies[0].messages[1].content;
+		expect(Array.isArray(parts)).toBe(true);
+		expect(parts[0].text).toContain('[gambar "poster.png"');
+		expect(parts[1].text).toContain('dari pesan id=m1');
+		expect(parts[2].type).toBe('image_url');
+		expect(parts[2].image_url.url).toMatch(/^data:image\/jpeg;base64,/);
+	});
+
+	it('retries without images when the provider cannot see them', async () => {
+		const png = await pngBytes();
+		const channel = makeChannel();
+		const modelBodies = [];
+		globalThis.fetch = vi.fn((url, init) => {
+			if (String(url).startsWith('https://cdn.test')) {
+				return Promise.resolve(imageResponse(png));
+			}
+			modelBodies.push(JSON.parse(init.body));
+			if (modelBodies.length === 1) {
+				return Promise.resolve({
+					ok: false,
+					status: 400,
+					text: () => Promise.resolve('{"error":{"message":"model does not support image input"}}')
+				});
+			}
+			return Promise.resolve(llmText('poster riset FPGA ya'));
+		});
+
+		const msg = message({ content: 'ini poster', hasVisuals: true, attachments: [attachment(png)] });
+		await chat._runPass(stateWith([msg], channel), { reason: 'signal: image' });
+
+		expect(modelBodies).toHaveLength(2);
+		expect(Array.isArray(modelBodies[0].messages[1].content)).toBe(true);
+		expect(typeof modelBodies[1].messages[1].content).toBe('string');
+		expect(channel.send).toHaveBeenCalledTimes(1);
+	});
+
+	it('keeps the message when its picture cannot be downloaded', async () => {
+		const channel = makeChannel();
+		const modelBodies = [];
+		globalThis.fetch = vi.fn((url, init) => {
+			if (String(url).startsWith('https://cdn.test')) {
+				return Promise.resolve({ ok: false, status: 404, text: () => Promise.resolve('gone') });
+			}
+			modelBodies.push(JSON.parse(init.body));
+			return Promise.resolve(llmText('posternya nggak kebuka, coba kirim ulang'));
+		});
+
+		const msg = message({
+			content: 'ini poster',
+			hasVisuals: true,
+			attachments: [attachment(Buffer.alloc(0))]
+		});
+		await chat._runPass(stateWith([msg], channel), { reason: 'signal: image' });
+
+		expect(typeof modelBodies[0].messages[1].content).toBe('string');
+		expect(modelBodies[0].messages[1].content).toContain('ini poster');
+		expect(channel.send).toHaveBeenCalledTimes(1);
 	});
 });

@@ -666,6 +666,37 @@ tool actually returned. Identical queries are cached for a day and charged
 against a daily credit cap. A model that likes a phrase cannot drain the
 account.
 
+### Pictures, GIFs and link previews
+
+`src/lib/media` puts more than text in front of the model.
+
+- **Images are read, not guessed.** An image attachment is downloaded from the
+  Discord CDN, downscaled to `CHAT_VISION_MAX_WIDTH` and sent as an image part.
+  A message that is only a picture is buffered and counts as a signal on its
+  own, so a poster with no question still gets looked at.
+- **A GIF is four frames.** It is sampled at the first frame, 25%, 50% and the
+  last one. Each sample is labelled with its place in the animation, and the
+  prompt says those frames are one animation over time, not four pictures.
+- **A link preview is text.** Embeds are rendered as `[embed]` lines under the
+  message with the title, description, fields and URLs, so a Google Docs card
+  or a news preview is in context. The prompt marks them as third party data,
+  not something a member wrote.
+- **Embed and thumbnail pictures are never downloaded.** Their URLs point at
+  arbitrary hosts, so fetching them is a tracking pixel and SSRF vector, and
+  their text is already in the transcript.
+- **Everything is bounded.** Attachment size, image width, image parts per pass
+  and the download timeout. A download that fails costs the picture, not the
+  reply. The same attachment is downloaded once and cached.
+- **A text-only provider still works.** If the provider rejects image parts,
+  the service detects it once and retries the pass without pictures.
+
+```env
+CHAT_VISION_ENABLED=true        # false keeps the model text only
+CHAT_VISION_MAX_IMAGES=6        # image parts per pass, a GIF spends up to 4
+CHAT_VISION_MAX_WIDTH=1024
+CHAT_VISION_MAX_BYTES=8388608   # skip larger attachments
+```
+
 ### Setup
 
 ```env
