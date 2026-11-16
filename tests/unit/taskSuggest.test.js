@@ -329,6 +329,38 @@ describe('taskSuggest._createToolkit', () => {
 		build({ trigger: { id: '222', client: { user: { id: BOT_ID } } } });
 		expect(await toolkit.dispatch('stay_silent', { reason: 'nothing' })).toContain('you were mentioned');
 	});
+
+	it('queues a server note once and refuses links and duplicates', async () => {
+		build({ globalNotes: [{ id: 1, kind: 'fact', note: 'Server ini milik UKM Cyber Security ITS' }] });
+
+		expect(
+			await toolkit.dispatch('remember_server', { note: 'Server ini milik UKM Cyber Security ITS' })
+		).toContain('Already remembered');
+		expect(queue.serverNotes).toHaveLength(0);
+
+		expect(await toolkit.dispatch('remember_server', { note: 'lihat https://contoh.test' })).toContain('not saved');
+
+		expect(await toolkit.dispatch('remember_server', { note: 'Divisi riset dipimpin Rani' })).toContain(
+			'saved to server memory'
+		);
+		expect(queue.serverNotes).toEqual([
+			{ note: 'Divisi riset dipimpin Rani', authorId: 'u2', sourceMessageId: '222' }
+		]);
+
+		expect(await toolkit.dispatch('remember_server', { note: 'Divisi riset dipimpin Rani' })).toContain(
+			'Already remembered'
+		);
+		expect(queue.serverNotes).toHaveLength(1);
+	});
+
+	it('caps server notes per pass', async () => {
+		build();
+		for (let i = 0; i < 2; i++) {
+			expect(await toolkit.dispatch('remember_server', { note: `fakta nomor ${i}` })).toContain('saved');
+		}
+		expect(await toolkit.dispatch('remember_server', { note: 'fakta nomor 3' })).toContain('At most');
+		expect(queue.serverNotes).toHaveLength(2);
+	});
 });
 
 describe('taskSuggest._buildPrompt', () => {
@@ -657,7 +689,25 @@ describe('taskSuggest._analyze', () => {
 		const message = makeMessage({ channel, id: 'm1', content: '<@bot-1> cek dong', mentionBot: true });
 		taskSuggest.observe(message);
 		await vi.waitFor(() => expect(message.reply).toHaveBeenCalledTimes(1));
-		expect(message.reply.mock.calls[0][0].content).toContain('nggak nemu keputusan baru');
+		expect(message.reply.mock.calls[0][0].content).toBe('ooo okay');
+	});
+
+	it('does not tell a mention that it found no new decisions to record', async () => {
+		const channel = makeChannel({ id: `plain-${n}` });
+		globalThis.fetch = vi.fn().mockResolvedValue(text('ooo okay'));
+		const message = makeMessage({
+			channel,
+			id: 'm1',
+			content: '<@bot-1> kita kan dari UKM Cyber Security ITS',
+			mentionBot: true
+		});
+		taskSuggest.observe(message);
+		await vi.waitFor(() => expect(message.reply).toHaveBeenCalledTimes(1));
+
+		const content = message.reply.mock.calls[0][0].content;
+		expect(content).toBe('ooo okay');
+		expect(content).not.toMatch(/nggak nemu|nggak ada yang perlu dicatat|cek tugas/i);
+		expect(channel.send).not.toHaveBeenCalled();
 	});
 });
 
@@ -879,6 +929,35 @@ describe('actor memory', () => {
 		expect(user.content).toContain('- Budi (u2). language=English. Notes none');
 	});
 
+	it('treats the server notes as known and tells the model to save new ones', () => {
+		const [system, user] = taskSuggest._buildPrompt({
+			context: [],
+			fresh,
+			people,
+			proposedTitles: [],
+			globalNotes: [{ id: 4, kind: 'fact', note: 'Server ini milik UKM Cyber Security ITS' }]
+		});
+		expect(user.content).toContain('What you remember about this server and organisation');
+		expect(user.content).toContain('- [fact] Server ini milik UKM Cyber Security ITS');
+		expect(system.content).toContain('remember_server');
+		expect(system.content).toContain('Never ask a person to repeat something you already have');
+	});
+
+	it('answers a mention like a person instead of reporting a task scan', () => {
+		const [system] = taskSuggest._buildPrompt({
+			context: [],
+			fresh,
+			people,
+			proposedTitles: [],
+			botId: BOT_ID
+		});
+		expect(system.content).toContain(`You were mentioned directly as <@${BOT_ID}>`);
+		expect(system.content).not.toContain('Someone is asking you to look for tasks now');
+		expect(system.content).not.toContain('or why there was nothing to do');
+		expect(system.content).toContain('Never narrate your process');
+		expect(system.content).toContain('ooo okay');
+	});
+
 	it('saves queued memory changes and reacts on the source message', async () => {
 		const user = `learner-${n}`;
 		const source = { react: vi.fn().mockResolvedValue(undefined) };
@@ -898,6 +977,55 @@ describe('actor memory', () => {
 		expect(source.react).toHaveBeenCalledWith('🧠');
 		expect(memory.getLanguage(user)).toBe('English');
 		expect(memory.listNotes(user).map(x => x.note)).toEqual(['Usually only available in the evening']);
+	});
+
+	it('saves server notes once and reacts on the source message', async () => {
+		const globalMemory = await import('../../src/database/repositories/globalMemory.repository.js');
+		const source = { react: vi.fn().mockResolvedValue(undefined) };
+		const channel = makeChannel({ id: `server-${n}`, fetch: id => Promise.resolve(id === 'm1' ? source : null) });
+
+		const saved = await taskSuggest._applyServerNotes(channel, [
+			{ note: 'Server ini milik UKM Cyber Security ITS', authorId: 'u1', sourceMessageId: 'm1' }
+		]);
+
+		expect(saved).toBe(1);
+		expect(source.react).toHaveBeenCalledWith('🧠');
+		expect(globalMemory.listNotes().map(x => x.note)).toContain('Server ini milik UKM Cyber Security ITS');
+
+		// The same note twice is not stored again.
+		expect(
+			await taskSuggest._applyServerNotes(channel, [
+				{ note: 'Server ini milik UKM Cyber Security ITS', authorId: 'u1', sourceMessageId: 'm1' }
+			])
+		).toBe(0);
+	});
+
+	it('learns the organisation from a mention through remember_server', async () => {
+		const globalMemory = await import('../../src/database/repositories/globalMemory.repository.js');
+		const source = { react: vi.fn().mockResolvedValue(undefined) };
+		const channel = makeChannel({
+			id: `server-mention-${n}`,
+			fetch: id => Promise.resolve(id === 'm1' ? source : null)
+		});
+		globalThis.fetch = vi
+			.fn()
+			.mockResolvedValueOnce(toolCall('remember_server', { note: 'Kegiatan rutinnya tiap sabtu pagi' }))
+			.mockResolvedValueOnce(text('ooo okay'));
+
+		const message = makeMessage({
+			channel,
+			id: 'm1',
+			content: '<@bot-1> kita kan dari UKM Cyber Security ITS, rutinnya sabtu pagi',
+			mentionBot: true
+		});
+		taskSuggest.observe(message);
+		await vi.waitFor(() => expect(message.reply).toHaveBeenCalledTimes(1));
+
+		expect(message.reply.mock.calls[0][0].content).toBe('ooo okay');
+		expect(source.react).toHaveBeenCalledWith('🧠');
+		expect(globalMemory.listNotes().map(x => x.note)).toContain('Kegiatan rutinnya tiap sabtu pagi');
+		// No card, and no "nothing to note" announcement.
+		expect(channel.send).not.toHaveBeenCalled();
 	});
 
 	it('learns from a mention through the remember_person tool', async () => {

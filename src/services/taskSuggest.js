@@ -80,6 +80,9 @@ const PASSIVE_MIN_CONFIDENCE = 0.85;
 const MAX_MEMORY_CHANGES_PER_PASS = 5;
 const MAX_NOTE_CHARS = 200;
 const MAX_LANGUAGE_CHARS = 30;
+// Server-wide facts. A single conversation should not rewrite the whole
+// organisation at once, so a pass queues only a couple.
+const MAX_SERVER_NOTES_PER_PASS = 2;
 // The model answers a mention with a few short chat messages, sent one by one.
 const MAX_CHAT_MESSAGES = 3;
 const MAX_CHAT_CHARS = 1000;
@@ -110,6 +113,7 @@ const TOOL_NAMES = {
 	cancelCard: 'cancel_task_card',
 	updateCard: 'update_task_card',
 	remember: 'remember_person',
+	rememberServer: 'remember_server',
 	silent: 'stay_silent'
 };
 
@@ -227,6 +231,25 @@ const TOOL_SCHEMAS = [
 					source_message_id: { type: 'string', description: 'Id of the NEW message it came from.' }
 				},
 				required: ['user_id']
+			}
+		}
+	},
+	{
+		type: 'function',
+		function: {
+			name: TOOL_NAMES.rememberServer,
+			description:
+				'Save a lasting fact about the organisation or this server, the kind of thing a new member would need to be told once. Examples: which unit this server belongs to, what a channel is for, house rules, recurring events, who leads what. Use it when a NEW message states something that will still be true next month. Never save one-off task details, chatter, secrets, credentials or sensitive personal data.',
+			parameters: {
+				type: 'object',
+				properties: {
+					note: { type: 'string', description: 'Short note in the third person, max 300 characters.' },
+					source_message_id: {
+						type: 'string',
+						description: 'Id of the NEW message where this was stated. Omit to use the current one.'
+					}
+				},
+				required: ['note']
 			}
 		}
 	},
@@ -463,6 +486,11 @@ function _taskLine(task, people) {
 	return `- task_id=${task.task_id} "${task.title}" assigned=${who} (${task.assigned_to}) deadline=${deadline.toFormat('yyyy-MM-dd HH:mm cccc')}${overdue}`;
 }
 
+/** Start of the local day, for the per-member server memory limit. */
+function _startOfLocalDay() {
+	return DateTime.now().setZone(TIMEZONE).startOf('day').toUnixInteger();
+}
+
 /**
  * Build the tool dispatcher for one pass.
  *
@@ -479,12 +507,25 @@ function _taskLine(task, people) {
  * @param {Array<object>} params.open - open suggestions
  * @param {Array<object>} params.pending - pending tasks of the participants
  * @param {Array<object>} params.fresh - messages this pass is analysing
+ * @param {Array<object>} params.globalNotes - what the server already knows
  * @param {import('discord.js').Message|null} params.trigger
  * @param {number} params.minConfidence
  * @param {object} params.queue - mutated by the tools
  * @returns {{ schemas: Array<object>, dispatch: (name: string, args: object) => Promise<string|object> }}
  */
-function _createToolkit({ channelId, channel, people, profiles, open, pending, fresh, trigger, minConfidence, queue }) {
+function _createToolkit({
+	channelId,
+	channel,
+	people,
+	profiles,
+	open,
+	pending,
+	fresh,
+	globalNotes = [],
+	trigger,
+	minConfidence,
+	queue
+}) {
 	const freshById = new Map(fresh.map(m => [String(m.id), m]));
 	const fallbackSourceId = trigger?.id ?? fresh[fresh.length - 1]?.id ?? null;
 	const openById = new Map(open.map(r => [String(r.id), r]));
@@ -739,6 +780,48 @@ function _createToolkit({ channelId, channel, people, profiles, open, pending, f
 				return `remembered for ${people.get(userId)}`;
 			}
 
+			case TOOL_NAMES.rememberServer: {
+				queue.serverNotes ??= [];
+				const note = _plain(String(args.note ?? '').replace(/\s+/g, ' ')).slice(
+					0,
+					globalMemoryRepository.MAX_NOTE_CHARS
+				);
+				if (!note) {
+					return 'not saved. The note was empty';
+				}
+				const src = sourceOf(args.source_message_id);
+				if (!src) {
+					return `not saved. source_message_id ${args.source_message_id} is not a NEW message`;
+				}
+				// The repository also refuses links, mentions and anything that
+				// looks like a credential or a prompt injection.
+				const prepared = globalMemoryRepository.prepare(note);
+				if (!prepared.ok) {
+					return `not saved. ${prepared.reason}`;
+				}
+				const lower = prepared.note.toLowerCase();
+				if (
+					globalNotes.some(n => n.note.toLowerCase() === lower) ||
+					queue.serverNotes.some(n => n.note.toLowerCase() === lower)
+				) {
+					return 'not saved. Already remembered';
+				}
+				const limits = config.chat.globalMemory;
+				if (globalMemoryRepository.countByUserSince(src.authorId, _startOfLocalDay()) >= limits.perDay) {
+					return `not saved. ${people.get(src.authorId) ?? 'That member'} already taught the server ${limits.perDay} notes today`;
+				}
+				if (queue.serverNotes.length >= MAX_SERVER_NOTES_PER_PASS) {
+					return `not saved. At most ${MAX_SERVER_NOTES_PER_PASS} server notes per pass`;
+				}
+
+				queue.serverNotes.push({
+					note: prepared.note,
+					authorId: src.authorId,
+					sourceMessageId: src.id
+				});
+				return 'saved to server memory';
+			}
+
 			case TOOL_NAMES.silent:
 				if (trigger) {
 					return 'you were mentioned, answer the person instead of staying silent';
@@ -796,7 +879,7 @@ async function _analyze(channelId, { trigger = null } = {}) {
 	if (fresh.length === 0) {
 		suggestLog.debug(`Nothing new to analyse in ${_where(state.channel, channelId)}`);
 		if (trigger) {
-			await _replyTo(trigger, 'hmm belum ada chat baru buat aku cek nih');
+			await _replyTo(trigger, 'ooo okay');
 		}
 		return;
 	}
@@ -827,7 +910,7 @@ async function _analyze(channelId, { trigger = null } = {}) {
 			`Prompt input for ${where} ${context.length} context message(s), ${open.length} open suggestion(s) [${open.map(r => `"${_clip(r.title, 40)}"`).join(', ')}], ${handled.length} handled, ${pending.length} pending task(s), ${state.people.size} participant(s), ${profiles.size ?? 0} profile(s)`
 		);
 
-		const queue = { creates: [], cancels: [], updates: [], memories: [] };
+		const queue = { creates: [], cancels: [], updates: [], memories: [], serverNotes: [] };
 		const toolkit = _createToolkit({
 			channelId,
 			channel: state.channel,
@@ -836,6 +919,7 @@ async function _analyze(channelId, { trigger = null } = {}) {
 			open,
 			pending,
 			fresh,
+			globalNotes,
 			trigger,
 			minConfidence: trigger ? MIN_CONFIDENCE : PASSIVE_MIN_CONFIDENCE,
 			queue
@@ -942,8 +1026,17 @@ async function _analyze(channelId, { trigger = null } = {}) {
 		}
 
 		const learned = await _applyMemories(state.channel, queue.memories);
-		const summary = `Pass in ${where} done in ${Date.now() - passStartedAt}ms (${trigger ? `mention ${trigger.id}` : 'passive'}). Queued ${queue.creates.length} create(s), ${queue.cancels.length} cancel(s), ${queue.updates.length} update(s), ${queue.memories.length} memory change(s) and ${chat.length} chat message(s). Posted ${posted.create} create card(s), ${posted.cancel} cancel card(s), updated ${updated}, saved ${learned}, failed ${failed.length}`;
-		if (trigger || posted.create > 0 || posted.cancel > 0 || updated > 0 || learned > 0 || failed.length > 0) {
+		const serverLearned = await _applyServerNotes(state.channel, queue.serverNotes);
+		const summary = `Pass in ${where} done in ${Date.now() - passStartedAt}ms (${trigger ? `mention ${trigger.id}` : 'passive'}). Queued ${queue.creates.length} create(s), ${queue.cancels.length} cancel(s), ${queue.updates.length} update(s), ${queue.memories.length} memory change(s), ${queue.serverNotes.length} server note(s) and ${chat.length} chat message(s). Posted ${posted.create} create card(s), ${posted.cancel} cancel card(s), updated ${updated}, saved ${learned}, learned ${serverLearned}, failed ${failed.length}`;
+		if (
+			trigger ||
+			posted.create > 0 ||
+			posted.cancel > 0 ||
+			updated > 0 ||
+			learned > 0 ||
+			serverLearned > 0 ||
+			failed.length > 0
+		) {
 			suggestLog.info(summary);
 		} else {
 			suggestLog.debug(summary);
@@ -966,11 +1059,8 @@ async function _analyze(channelId, { trigger = null } = {}) {
 		}
 
 		if (trigger && chat.length === 0 && failed.length === 0) {
-			if (posted.create === 0 && posted.cancel === 0 && updated === 0 && learned === 0) {
-				await _replyTo(
-					trigger,
-					'hmm aku nggak nemu keputusan baru atau perubahan buat saran yang masih kebuka nih'
-				);
+			if (posted.create === 0 && posted.cancel === 0 && updated === 0 && learned === 0 && serverLearned === 0) {
+				await _replyTo(trigger, 'ooo okay');
 			}
 		}
 	} finally {
@@ -1070,13 +1160,15 @@ function _buildPrompt({
 	};
 
 	const system = [
-		"You watch a Discord channel where an organisation's administrators coordinate.",
-		'You work through tools. Read the real tasks with list_pending_tasks, queue cards with create_task_card and cancel_task_card, edit an open card with update_task_card, and remember people with remember_person. You cannot create or cancel anything yourself. A card is an offer that only takes effect when someone clicks it.',
+		"You are a member of a Discord server where an organisation's administrators hang out. You are not a task bot and not a tool with a chat window. You talk about anything anyone brings up, the way a friend in the group chat would. Watching for tasks is one small thing you can do, not who you are.",
+		'You work through tools. Read the real tasks with list_pending_tasks, queue cards with create_task_card and cancel_task_card, edit an open card with update_task_card, remember people with remember_person, and remember the organisation itself with remember_server. You cannot create or cancel anything yourself. A card is an offer that only takes effect when someone clicks it.',
 		'Find tasks in the NEW messages that deserve a tracked task with a reminder. A task here is follow-up work the administrators themselves have to do, with an owner among them.',
 		'Propose a task only when (1) someone asks you or the team to remind them or to make a task ("ingetin aku ...", "buatin task ...", "remind us to ..."), or (2) the administrators agree that one of them will do a specific thing later ("oke aku yang kirim proposal sponsor jumat").',
 		'Do NOT propose assignments, homework, exercises or instructions an administrator gives to members or participants, even with a deadline and even when members reply "siap" (that is the members\' work, not an admin task). Also do not propose announcements, event info, rules and open invitations ("yang mau ikut reply MAU"), acknowledgments and reactions on their own ("siap", "oke", emoji), open questions, ideas still being debated, things already done, jokes, or actions finished within the next hour.',
 		'Example: an admin posts "Latihan kecil untuk @A dan @B, download aplikasi ini, catat pengeluaran sepekan, hari Minggu kirim laporan PDF ke channel ini" and @A replies "siap mas" → nothing. Later the admin writes "ingatkan saya hari Minggu jam 12 siang untuk menagih laporan peserta" → a task for that admin.',
 		'When unsure, propose nothing. A missed task costs little because people can mention you, but a wrong card is noise. Suggestions the team dismissed show what they do not want tracked. Do not propose those or similar things again.',
+		'Most conversations are not about tasks. A question about the server, a plan, a joke, a complaint, a decision already made, or someone thinking out loud is just conversation. Join it, answer it, or let it pass. Never turn a normal message into a task hunt.',
+		'Never announce your own process. Do not say you were checking for tasks, do not say there was nothing to note, and do not report on your queue. Nobody asked for a status update, and "nggak ada yang perlu dicatat dari chat ini" is exactly the kind of line that makes you sound like a bot.',
 		'One NEW message can ask for several separate tasks. Call create_task_card once for each of them, in the same turn. For example "ganti LPJ ke hari ini dan esok" means two cards with different deadlines, not one. Never merge two deadlines into one task.',
 		'When a NEW message drops, replaces or reschedules a task, call cancel_task_card for the old task first. Then call create_task_card for any replacement, so both cards are posted together. A task that already exists is in the PENDING tasks list. If a task is listed here it exists. Never propose a new card for work that is already a pending task, and never say a task is missing when it is listed there.',
 		'Earlier messages are context. Use them to understand what the NEW messages refer to, but only act on what the NEW messages say. Do not repeat anything listed as already suggested.',
@@ -1090,6 +1182,7 @@ function _buildPrompt({
 		'Judul tugas tetap singkat dan jelas, misalnya "Kirim proposal sponsor". Kalau seseorang minta bahasa lain, tetap santai kayak temen di bahasa itu.',
 		'You remember participants between conversations. Use what you remember to pick assignees and deadlines the way each person prefers.',
 		'Use remember_person for lasting facts or preferences a NEW message states about its author or a teammate that will help with later tasks, such as role or responsibilities, usual availability, preferred reminder time, how they want to be addressed. Do not save one-off task details, anything already remembered, secrets or credentials, or sensitive personal data. When a NEW message says a remembered note is no longer true, forget it by note id and remember the corrected one. Set language only when a person asks you to use a language with them.',
+		'Use remember_server for what a newcomer would need to be told once about this place: which unit or organisation this server belongs to, what a channel is for, house rules, recurring events, who leads what. When someone states one of those in passing, save it quietly with remember_server and do not comment on it. Never ask a person to repeat something you already have in the server notes below.',
 		'Be honest about cards. A card exists only if it is listed under OPEN suggestions or "Already suggested and handled" below, or if a tool returned "queued" in this pass. Your own earlier messages in the context are NOT proof. A card you promised there may never have been posted. Never say a card is coming, or that a task is recorded ("udah kecatat"), unless a tool queued it now or it is in those lists. When someone says a card is missing and it is not in those lists, believe them and queue it again, taking the details from the earlier messages.',
 		'Never answer with JSON. The tools carry the structured data. Your text is only chat.',
 		'Resolve relative dates ("besok", "next Friday", "end of the month") against the current local time. When only a day is given, use the time the assignee prefers if you remember one, otherwise 23:59 that day. "Jam 12 malam" on a day means the end of that day, and 23:59 is the right time. If no time frame is mentioned at all, omit the deadline; the card then needs Edit & create.',
@@ -1107,11 +1200,17 @@ function _buildPrompt({
 	}
 	if (botId) {
 		system.push(
-			`You were mentioned directly as <@${botId}>. Someone is asking you to look for tasks now. Treat an explicit request such as "remind us to X by Y" as a decision. Use the mentioning message as source_message_id when the request is made there. Reply with plain chat text, one short message per line, at most three lines, like texting a friend. The first line is sent as a reply to them and must be a quick acknowledgment of a few words that fits what they said, like "wait" or "oke bentar" for a request, a short reaction like "ohh itu" or "hmm" for a question. Put the actual answer in the next line(s). Any card is posted right after your messages, so a card needs only something short like "oke ini ya". Say what you queued, changed or remembered, or why there was nothing to do, and answer questions about what you remember from the memory list. For example, "brooooo @bot minta tolong buatin task ABC deadlinenya besok jam 12 malam" → call create_task_card, then reply "wait" and "oke ini ya". "<@bot> deadline inaff kapan sih?" → reply "hmm bentar" and "jumat jam 23:59, masih aman kok".`
+			`You were mentioned directly as <@${botId}>. Someone is talking to you, not filing a request. Answer them like a friend in the group chat: usually one short message, at most three lines, in plain chat text.`,
+			'A quick acknowledgment like "wait" or "oke bentar" is only worth sending when you actually have to check something first. A plain question or a remark needs a real answer, not a receipt.',
+			'Never narrate your process. Do not say you were checking for tasks, do not say there was nothing to note, and do not report what you queued unless a card was actually posted. If the message is just conversation, reply to the conversation and stop.',
+			'Queue a card only when the person asks for a reminder or a task, or the admins clearly decided one. A question about this server, about what you remember, or about anything else is ordinary chat. Answer it. Use the mentioning message as source_message_id when a request is made there.',
+			'When someone tells you a lasting fact about the organisation, like where you all work or what a channel is for, save it with remember_server and just answer normally. Do not thank them for the information and do not repeat it back as a record.',
+			'Any card is posted right after your messages, so a card needs only something short like "oke ini ya".',
+			'Example 1, a request: "brooooo @bot minta tolong buatin task ABC deadlinenya besok jam 12 malam" → call create_task_card, then reply "oke ini ya". Example 2, a question: "<@bot> deadline inaff kapan sih?" → reply "jumat jam 23:59, masih aman kok". Example 3, just chatting: "<@bot> kita kan dari UKM Cyber Security ITS" → call remember_server, then reply "ooo okay".'
 		);
 	} else {
 		system.push(
-			'You were not mentioned. Do not write chat text. Only queue cards, update cards or remember people. If nothing in the NEW messages deserves a card, call stay_silent.'
+			'You were not mentioned. Do not write chat text. Only queue cards, update cards, remember people or save server notes. If nothing in the NEW messages deserves a card, call stay_silent.'
 		);
 	}
 	const systemText = system.join('\n');
@@ -1128,6 +1227,7 @@ function _buildPrompt({
 			`- suggestion_id=${r.id} kind=${r.kind ?? 'create'} title="${r.title}" assignee=${people.get(r.assignee_id) ?? 'unknown'} (${r.assignee_id}) deadline=${r.deadline ? localTime(r.deadline) : 'none'} from message id=${r.source_message_id}${r.description ? ` details="${r.description}"` : ''}`
 	);
 	const pendingLines = pending.map(t => _taskLine(t, people));
+	const serverNoteLines = globalNotes.map(n => `- [${n.kind}] ${n.note}`);
 	const user = [
 		`Current local time is ${local.toFormat('yyyy-MM-dd HH:mm cccc')} (${TIMEZONE})`,
 		'',
@@ -1136,6 +1236,9 @@ function _buildPrompt({
 		'',
 		'What you remember about participants',
 		memoryLines.join('\n'),
+		'',
+		'What you remember about this server and organisation (remember_server). Treat these as known. Do not ask about them again.',
+		serverNoteLines.length ? serverNoteLines.join('\n') : '(none)',
 		'',
 		'PENDING tasks of the people here (real tasks, already created). If a task is listed here it exists.',
 		pendingLines.length ? pendingLines.join('\n') : '(none)',
@@ -1187,6 +1290,38 @@ async function _applyMemories(channel, changes) {
 		await message?.react(MEMORY_REACTION).catch(() => {});
 	}
 	return changes.length;
+}
+
+/**
+ * Store what the bot learned about the organisation itself. These notes apply
+ * to every channel, which is how it stops asking where it works every time.
+ *
+ * @returns {Promise<number>} number of notes saved
+ */
+async function _applyServerNotes(channel, notes = []) {
+	const { max } = config.chat.globalMemory;
+	const sources = new Set();
+	let saved = 0;
+	for (const n of notes) {
+		const { id, reason } = globalMemoryRepository.addNote(n.note, {
+			kind: 'fact',
+			addedBy: n.authorId,
+			sourceMessageId: n.sourceMessageId,
+			max
+		});
+		if (id) {
+			saved++;
+			sources.add(n.sourceMessageId);
+			suggestLog.debug(`Server memory from message ${n.sourceMessageId}: "${_clip(n.note, 200)}"`);
+		} else {
+			suggestLog.debug(`Server memory refused from message ${n.sourceMessageId}: ${reason}`);
+		}
+	}
+	for (const id of sources) {
+		const message = await channel.messages.fetch(id).catch(() => null);
+		await message?.react(MEMORY_REACTION).catch(() => {});
+	}
+	return saved;
 }
 
 /**
@@ -1525,6 +1660,7 @@ module.exports = {
 	_buildPrompt,
 	_createToolkit,
 	_applyMemories,
+	_applyServerNotes,
 	_applyUpdate,
 	_loadContext,
 	_postProposal,

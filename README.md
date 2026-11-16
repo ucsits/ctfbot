@@ -543,6 +543,10 @@ The bot can watch governance channels (the `GOVERNANCE_CATEGORIES` where
 reply with a suggestion card offering to create a task with reminders. It can
 also offer to cancel a task the conversation just dropped or rescheduled.
 
+This service is a member of the server first and a task spotter second. It
+answers people like a friend in the group chat about anything, and only turns
+a message into a card when the message actually asks for one.
+
 - Messages are buffered per channel. After 60 seconds of quiet (and at most
   once every 2 minutes per channel) the new messages are sent to an
   [OI]-compatible model, along with the channel's last 20 messages read
@@ -551,9 +555,9 @@ also offer to cancel a task the conversation just dropped or rescheduled.
   in the conversation.
 - The model works through tools, not a one-shot JSON reply. It can call
   `list_pending_tasks`, `create_task_card`, `cancel_task_card`,
-  `update_task_card`, `remember_person` and (on unprompted passes)
-  `stay_silent`. Tools only validate and queue. The service posts the chat
-  first and the cards after, so a failed pass never leaves a half-written
+  `update_task_card`, `remember_person`, `remember_server` and (on unprompted
+  passes) `stay_silent`. Tools only validate and queue. The service posts the
+  chat first and the cards after, so a failed pass never leaves a half-written
   conversation. Parallel tool calls in one model turn all land.
 - One message can produce several cards. "Ganti LPJ ke hari ini dan esok"
   becomes two create cards with different deadlines, and a reschedule can
@@ -564,6 +568,12 @@ also offer to cancel a task the conversation just dropped or rescheduled.
 - Mentioning the bot (`@ctfbot remind us to ...`) skips the wait. It analyses
   right away, shows "typing..." until the model answers, and always replies,
   even when it finds nothing or the model call fails.
+- A mention is treated as someone talking to it, not as a request to scan for
+  tasks. A normal question or remark gets a normal answer, usually one short
+  message, and nothing else. The bot never narrates its own process, never
+  says it found nothing to record, and never reports on its queue. When there
+  is genuinely nothing to say, it replies with a short "ooo okay" rather than
+  a status report.
 - Requests ask for `reasoning_effort: "low"`, which [OI] and DeepSeek both
   read. Decision spotting does not need deep reasoning.
 - Only admin follow-up work becomes a card. That means an explicit "ingetin aku
@@ -594,6 +604,14 @@ also offer to cancel a task the conversation just dropped or rescheduled.
   preference (migration 027) and the bot reacts with a brain emoji on that
   message. Later passes see these notes. Assignees and deadlines then follow
   each person's preferences.
+- The bot also remembers the organisation itself, in the shared global layer.
+  `remember_server` stores what a newcomer would need to be told once: which
+  unit the server belongs to ("kita kan dari UKM Cyber Security ITS"), what a
+  channel is for, house rules, recurring events, who leads what. Those notes
+  apply to every channel, are shown in the prompt as known facts, and the bot
+  is told never to ask for them again. It saves them quietly, without
+  announcing that it learned something. A pass queues at most two, and the
+  per-member daily cap from `CHAT_GLOBAL_MEMORY_PER_DAY` still applies.
 - The model writes in Indonesian by default (set in its system prompt) for
   card titles, descriptions, notes and its answer to a mention. A person
   with a saved language gets that language instead.
@@ -614,10 +632,11 @@ also offer to cancel a task the conversation just dropped or rescheduled.
   so chat messages, card titles, descriptions and memory notes stay plain
   text. Reaction controls (👍, 👎, 🔇, 🧠) are not affected.
 - When mentioned, the bot shows "typing..." while the model thinks, then
-  sends one to three short chat messages, one per line. The first is a quick
-  acknowledgment that fits the message ("wait" for a request, "hmm" for a
-  question) sent as a reply. The rest and any cards follow as plain channel
-  messages, e.g. "wait", "oke ini ya", then the card.
+  sends one to three short chat messages, one per line. The first is sent as a
+  reply to the mention. An acknowledgment like "wait" only appears when it
+  actually has to check something; otherwise the first line is the answer
+  itself. Any cards follow as plain channel messages, e.g. "oke ini ya", then
+  the card.
 - If a queued card fails to post, the bot names it instead of pretending it
   arrived. A duplicate is refused at tool time, with a link to the existing
   card, so the model can point at it rather than say the card is missing.
