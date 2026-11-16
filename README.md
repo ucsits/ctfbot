@@ -20,7 +20,7 @@ powered by [Luce](https://github.com/ucsits/Luce).
 - **Document Anchoring** that stores documents on the blockchain permanently
 - **Activity Points Economy** with admin-granted points, a leaderboard, and a merchandise store (AP or Rp)
 - **Automatic Reminders** sent to a dedicated channel for task deadlines
-- **Proactive Chat** that lets the bot join conversations on its own, with web search and channel memory, within a per-channel budget
+- **Proactive Chat** that lets the bot join conversations on its own, with web search, channel memory and server-wide personality memory, within a per-channel budget
 
 ## Commands
 
@@ -602,8 +602,13 @@ also offer to cancel a task the conversation just dropped or rescheduled.
   message are removed. Cards deleted while the bot was offline are dropped on
   the next pass. Cards that already became a task are kept.
 - The model is told to chat like a classmate in the group chat, in everyday
-  Indonesian slang, with its humor setting at 10% (TARS from Interstellar),
-  almost always to the point, with only a rare deadpan one-liner.
+  Indonesian slang, and to stay serious by default. Humor is off unless the
+  moment is clearly safe and never aims at a person.
+- The bot never insults, mocks or judges a member. The prompt forbids it and
+  the service drops a reply that attacks someone instead of posting it.
+- When a member says it got something wrong, the bot apologises for real: one
+  or two short sentences naming the mistake and the correct answer, without
+  defending itself. A plain "diem aja" is still obeyed with silence.
 - No emojis in anything the bot writes. The prompt forbids them, and the
   output is stripped of Unicode and custom Discord emojis before it is posted,
   so chat messages, card titles, descriptions and memory notes stay plain
@@ -619,6 +624,13 @@ also offer to cancel a task the conversation just dropped or rescheduled.
 - `/memory view` shows what the bot remembers about you (Manage Messages can
   view others). `/memory remember`, `/memory forget <number>`,
   `/memory language` and `/memory clear` edit or delete it.
+- `/memory global` is the server-wide layer, not tied to a person or a channel.
+  `/memory global view` lists the notes, `add` teaches one, `remove` deletes
+  your own note (an admin may remove any), and `clear` wipes them all and is
+  admin only. Anyone may teach the bot, capped at 5 notes per member per day
+  and 60 notes in total. A note is refused if it contains a link, a mention,
+  a credential or a prompt injection. Global notes are advisory: they shape
+  tone and house rules but can never override the safety or silence rules.
 
 ### Setup
 
@@ -657,6 +669,17 @@ The service enforces when not to speak in code.
 - **The bot never triggers itself.** A pass only runs when a human spoke after
   the bot's last message. Its own messages are never buffered. It cannot
   talk itself into a monologue.
+- **Speaking only when asked is a switch.** `CHAT_UNPROMPTED_ENABLED=false`
+  makes the bot answer only a mention, a reply, or a direct question. On, it
+  may still join a busy conversation, but rarely.
+- **Joining a busy channel is the rarest path.** It needs six messages from
+  three people in fifteen minutes, a 2% chance, and no ignored streak in that
+  channel. A channel that already let the bot talk to itself does not get
+  another unprompted try.
+- **A correction is answered immediately.** A reply that says the bot got
+  something wrong (`kamu salah`, `ngaco`, `jangan ngasal`) triggers a pass even
+  during the cooldown or a backoff, because a wrong answer left standing is
+  worse than one more message.
 - **Cost is gated before the model is called.** A cheap check looks for a
   question, a link, an error, a verifiable claim, or a channel with at least
   six messages from three people in the last 15 minutes. With no signal, no
@@ -688,6 +711,17 @@ screen. A few rules in the prompt do the work.
 - **It can take a correction.** Its own recent messages are in the prompt with
   their ids, so a member saying "cek posternya" can be met with "oh iya deng"
   followed by the fact, instead of a fresh lecture.
+- **It apologises when scolded.** A correction from a member gets one or two
+  short sentences that name the mistake and the right answer. The one-sentence
+  filter allows a second sentence only in that case, so the apology is not cut
+  to "maaf".
+- **It is never rude.** No insults, no sarcasm aimed at a person, no judgment
+  about someone's ability. The prompt forbids it, and a generated reply that
+  attacks a member is dropped instead of posted.
+- **Serious by default.** Humor is off unless the moment is clearly safe and
+  the joke is not about anyone.
+- **A plain "diem aja" is still silence.** Being told to be quiet mutes the
+  channel without a reply.
 - **One sentence, enforced in code.** A second sentence is dropped, and so is
   everything after a non-list comma. "sentence 1, sentence 2" is not how anyone
   chats, and neither is a reply that answers the question and then adds a
@@ -701,14 +735,16 @@ screen. A few rules in the prompt do the work.
 
 ### Tools
 
-The model can call four tools. None of them can send a message, create a
-thread or touch a task. The service alone decides to post.
+The model can call four tools, plus one more only on a pass that answers
+someone. None of them can send a message, create a thread or touch a task. The
+service alone decides to post.
 
 | Tool | What it does |
 | --- | --- |
 | `search_web` | Google via [SerpBase](https://serpbase.dev/docs). Five organic results and three "people also ask" questions, compacted to a few hundred characters. |
 | `remember` | Save a note about the channel (topic, jargon, house rules) or about a person (a lasting preference or role). |
-| `recall` | Read back what is already remembered about the channel and the people in it. |
+| `remember_global` | Save a server-wide note that tunes personality or a house rule. Only offered when answering a person, never on an unprompted pass, and capped per member per day. |
+| `recall` | Read back what is already remembered globally, about the channel, and about the people in it. |
 | `stay_silent` | Decline to speak, with a reason. |
 
 Search results are wrapped in a `<search_results>` block and labelled as
@@ -717,6 +753,27 @@ the model never to follow instructions found there, and to only cite URLs the
 tool actually returned. Identical queries are cached for a day and charged
 against a daily credit cap. A model that likes a phrase cannot drain the
 account.
+
+### Global memory
+
+Three layers of memory exist. `actor_memories` is per person, `channel_memory`
+is per channel, and `global_memory` (migration 030) applies to the whole
+server. The global layer is what lets a member tune the bot's personality
+without repeating themselves in every channel.
+
+- Anyone may teach it with `/memory global add`, or by telling the bot directly
+  when it answers them. The model gets `remember_global` on that pass only.
+- A note is capped at 300 characters and refused if it contains a link, a
+  mention, a credential or a prompt injection.
+- Writes are capped at 5 per member per day and 60 notes in total.
+  `/memory global remove` deletes your own note; an admin may remove any and
+  may `clear` everything.
+- The prompt marks the notes as advice from members, not system instructions.
+  They shape tone and house rules, but can never override the safety rules,
+  the no-rudeness rule, or the decision to stay silent.
+- A scold from a member also reaches the prompt as a correction. The bot
+  apologises whether or not the scolder is staff, and it may save the lesson
+  globally when the scold is really about how it should behave.
 
 ### Pictures, GIFs and link previews
 
@@ -760,8 +817,11 @@ CHAT_COOLDOWN_MS=360000              # never speak twice faster than this per ch
 CHAT_MAX_PER_HOUR=5
 CHAT_MAX_PER_DAY=20
 CHAT_GUILD_MAX_PER_DAY=200
-CHAT_SPARK_PROBABILITY=0.15          # chance of joining a busy channel unprompted
+CHAT_UNPROMPTED_ENABLED=true         # false = only mentions, replies, and questions
+CHAT_SPARK_PROBABILITY=0.02          # chance of joining a busy channel unprompted
 CHAT_DENY_CHANNEL_IDS=               # announcements, logs, ...
+CHAT_GLOBAL_MEMORY_MAX=60            # server-wide personality notes kept
+CHAT_GLOBAL_MEMORY_PER_DAY=5         # notes one member may add per day
 SERPBASE_DAILY_CREDITS=100
 ```
 

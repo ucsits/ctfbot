@@ -25,7 +25,8 @@ beforeAll(() => {
 		'023_add_task_transition_blocks.sql',
 		'026_add_task_suggestions.sql',
 		'027_add_actor_memory.sql',
-		'029_task_suggestions_tools.sql'
+		'029_task_suggestions_tools.sql',
+		'030_add_global_memory.sql'
 	]) {
 		db.exec(readFileSync(join(root, 'migrations', migration), 'utf8'));
 	}

@@ -164,12 +164,21 @@ const config = {
 			return envInt('CHAT_GUILD_MAX_PER_DAY', 200);
 		},
 		/**
-		 * Chance of speaking in a busy channel with no explicit trigger. Keeps
-		 * the bot from feeling mechanical without making it chatty.
+		 * Whether the bot may join a conversation nobody invited it to. Off means
+		 * it only answers a mention, a reply, or a direct question. Being asked
+		 * is the safe default, so an instance can be made cautious with one flag.
+		 */
+		get unpromptedEnabled() {
+			return process.env.CHAT_UNPROMPTED_ENABLED !== 'false';
+		},
+		/**
+		 * Chance of speaking in a busy channel with no explicit trigger. Kept
+		 * deliberately small: an unprompted remark that lands wrong is worse
+		 * than a quiet channel. Only used when unprompted talk is on.
 		 */
 		get sparkProbability() {
 			const raw = Number(process.env.CHAT_SPARK_PROBABILITY);
-			return Number.isFinite(raw) && raw >= 0 && raw <= 1 ? raw : 0.15;
+			return Number.isFinite(raw) && raw >= 0 && raw <= 1 ? raw : 0.02;
 		},
 		/** Channels the bot must never speak in (announcements, logs, ...). */
 		get denyChannelIds() {
@@ -202,6 +211,20 @@ const config = {
 			/** Attachments larger than this are skipped instead of downloaded. */
 			get maxBytes() {
 				return envInt('CHAT_VISION_MAX_BYTES', 8 * 1024 * 1024);
+			}
+		},
+		/**
+		 * Server-wide memory, the layer that tunes personality and house rules.
+		 * Anyone may teach it, so it is capped and rate limited.
+		 */
+		globalMemory: {
+			/** Total notes kept. Older ones are not dropped, new ones are refused. */
+			get max() {
+				return envInt('CHAT_GLOBAL_MEMORY_MAX', 60);
+			},
+			/** Notes one member may add per local day. */
+			get perDay() {
+				return envInt('CHAT_GLOBAL_MEMORY_PER_DAY', 5);
 			}
 		},
 		search: {

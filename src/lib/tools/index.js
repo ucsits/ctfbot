@@ -12,11 +12,13 @@
 const serpbase = require('./serpbase');
 const channelMemory = require('../../database/repositories/channelMemory.repository');
 const actorMemory = require('../../database/repositories/actorMemory.repository');
+const globalMemory = require('../../database/repositories/globalMemory.repository');
 const { stripEmoji } = require('../utils/emoji');
 
 const TOOL_NAMES = {
 	search: 'search_web',
 	remember: 'remember',
+	rememberGlobal: 'remember_global',
 	recall: 'recall',
 	silent: 'stay_silent'
 };
@@ -68,6 +70,27 @@ const SCHEMAS = [
 	{
 		type: 'function',
 		function: {
+			name: TOOL_NAMES.rememberGlobal,
+			description:
+				'Save something that applies to the whole server, every channel and every person. Use it only for a lasting personality preference or house rule that someone just taught you, such as how to apologise or what topics to avoid. Never save a one-off detail, a secret, a credential, a link, or something about one person (use remember for that).',
+			parameters: {
+				type: 'object',
+				properties: {
+					note: { type: 'string', description: 'Short note in the third person, max 300 characters.' },
+					kind: {
+						type: 'string',
+						enum: ['personality', 'rule', 'correction', 'fact'],
+						description:
+							'personality for tone, rule for a house rule, correction for a mistake not to repeat, fact for a lasting fact.'
+					}
+				},
+				required: ['note']
+			}
+		}
+	},
+	{
+		type: 'function',
+		function: {
 			name: TOOL_NAMES.recall,
 			description:
 				'Read what you already remember about this channel and the people in it. Use it when the conversation refers to something earlier you might have saved.',
@@ -104,9 +127,21 @@ const SCHEMAS = [
  * @param {Map<string, string>} [params.people] - Discord id → display name, for
  *   validating `about_user_id`
  * @param {(query: string, result: object) => void} [params.onSearch] - metrics hook
+ * @param {boolean} [params.allowGlobalMemory=false] - offer `remember_global`.
+ *   Only a pass that answers a human gets it, so an unprompted remark cannot
+ *   rewrite the server's personality on its own.
+ * @param {string|null} [params.actorId=null] - who the bot is talking to, stored
+ *   as the author of a global note and used for the per-member rate limit
  * @returns {{ schemas: Array<object>, dispatch: (name: string, args: object) => Promise<string|{content: string, stop: boolean}> }}
  */
-function createTools({ channelId, people = new Map(), onSearch }) {
+function createTools({ channelId, people = new Map(), onSearch, allowGlobalMemory = false, actorId = null }) {
+	/** Start of the local day, for the per-member global memory limit. */
+	function startOfLocalDay() {
+		const { DateTime } = require('luxon');
+		const { DEFAULT_TIMEZONE } = require('../constants/config');
+		return DateTime.now().setZone(DEFAULT_TIMEZONE).startOf('day').toUnixInteger();
+	}
+
 	async function dispatch(name, args = {}) {
 		switch (name) {
 			case TOOL_NAMES.search: {
@@ -136,6 +171,27 @@ function createTools({ channelId, people = new Map(), onSearch }) {
 				return id ? `saved channel note ${id}` : 'not saved. Already remembered';
 			}
 
+			case TOOL_NAMES.rememberGlobal: {
+				if (!allowGlobalMemory) {
+					return 'not saved. Global memory is only for a pass that answers someone';
+				}
+				if (!actorId) {
+					return 'not saved. Nobody to attribute the note to';
+				}
+				const { globalMemory: limits } = require('../../config').chat;
+				const used = globalMemory.countByUserSince(actorId, startOfLocalDay());
+				if (used >= limits.perDay) {
+					return `not saved. The daily limit of ${limits.perDay} global notes per person is reached`;
+				}
+				const note = stripEmoji(String(args.note ?? ''));
+				const { id, reason } = globalMemory.addNote(note, {
+					kind: args.kind,
+					addedBy: actorId,
+					max: limits.max
+				});
+				return id ? `saved global note ${id}` : `not saved. ${reason}`;
+			}
+
 			case TOOL_NAMES.recall: {
 				const query = String(args.query ?? '')
 					.toLowerCase()
@@ -152,7 +208,12 @@ function createTools({ channelId, people = new Map(), onSearch }) {
 						}
 					}
 				}
+				const globalNotes = globalMemory
+					.listNotes()
+					.filter(n => !query || n.note.toLowerCase().includes(query))
+					.map(n => `[${n.kind}] ${n.note}`);
 				const lines = [
+					`global notes ${globalNotes.length ? globalNotes.join(' | ') : '(none)'}`,
 					`channel notes ${notes.length ? notes.join(' | ') : '(none)'}`,
 					`people notes ${personNotes.length ? personNotes.join(' | ') : '(none)'}`
 				];
@@ -167,7 +228,8 @@ function createTools({ channelId, people = new Map(), onSearch }) {
 		}
 	}
 
-	return { schemas: SCHEMAS, dispatch };
+	const schemas = allowGlobalMemory ? SCHEMAS : SCHEMAS.filter(s => s.function.name !== TOOL_NAMES.rememberGlobal);
+	return { schemas, dispatch };
 }
 
 module.exports = {

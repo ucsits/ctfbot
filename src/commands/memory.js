@@ -1,13 +1,26 @@
 const { Command } = require('@sapphire/framework');
 const { EmbedBuilder, PermissionFlagsBits } = require('discord.js');
+const { DateTime } = require('luxon');
 const { getIdHints } = require('../lib/utils');
+const { DEFAULT_TIMEZONE } = require('../lib/constants/config');
 const memoryRepository = require('../database/repositories/actorMemory.repository');
+const globalMemoryRepository = require('../database/repositories/globalMemory.repository');
+const { isAdmin } = require('../lib/middleware/ensureAdmin');
+const config = require('../config');
+
+const GLOBAL_KINDS = ['personality', 'rule', 'correction', 'fact'];
+
+/** Unix second of the start of the local day, for the per-member note limit. */
+const startOfLocalDay = () => DateTime.now().setZone(DEFAULT_TIMEZONE).startOf('day').toUnixInteger();
 
 /**
  * View and edit what the bot remembers about you. Notes are learned from
  * governance conversations by src/services/taskSuggest.js and shown to the
  * model on later passes. The language preference overrides the Indonesian
  * default of the bot's model-written replies.
+ *
+ * The `global` subcommands edit server-wide memory instead. That layer tunes
+ * the bot's personality and house rules for every channel and every member.
  */
 class MemoryCommand extends Command {
 	constructor(context, options) {
@@ -67,7 +80,45 @@ class MemoryCommand extends Command {
 									.setRequired(false)
 							)
 					)
-					.addSubcommand(sub => sub.setName('clear').setDescription('Forget everything about yourself')),
+					.addSubcommand(sub => sub.setName('clear').setDescription('Forget everything about yourself'))
+					.addSubcommandGroup(group =>
+						group
+							.setName('global')
+							.setDescription('Server-wide notes that tune the bot for everyone')
+							.addSubcommand(sub => sub.setName('view').setDescription('Show the server-wide notes'))
+							.addSubcommand(sub =>
+								sub
+									.setName('add')
+									.setDescription('Teach the bot something that applies to the whole server')
+									.addStringOption(opt =>
+										opt
+											.setName('note')
+											.setDescription('e.g. "kalau ditegur, minta maaf dulu"')
+											.setMaxLength(300)
+											.setRequired(true)
+									)
+									.addStringOption(opt =>
+										opt
+											.setName('kind')
+											.setDescription('What the note is for (default: personality)')
+											.addChoices(...GLOBAL_KINDS.map(kind => ({ name: kind, value: kind })))
+									)
+							)
+							.addSubcommand(sub =>
+								sub
+									.setName('remove')
+									.setDescription('Remove a server-wide note (your own, or any as an admin)')
+									.addIntegerOption(opt =>
+										opt
+											.setName('id')
+											.setDescription('Note number from /memory global view')
+											.setRequired(true)
+									)
+							)
+							.addSubcommand(sub =>
+								sub.setName('clear').setDescription('Remove every server-wide note (admin only)')
+							)
+					),
 			{
 				idHints: getIdHints(this.name)
 			}
@@ -75,6 +126,9 @@ class MemoryCommand extends Command {
 	}
 
 	async chatInputRun(interaction) {
+		if (interaction.options.getSubcommandGroup(false) === 'global') {
+			return this._global(interaction);
+		}
 		const sub = interaction.options.getSubcommand();
 		const userId = interaction.user.id;
 		const reply = content => interaction.reply({ content, ephemeral: true, allowedMentions: { parse: [] } });
@@ -104,6 +158,79 @@ class MemoryCommand extends Command {
 		if (sub === 'clear') {
 			memoryRepository.clearUser(userId);
 			return reply('Everything the bot remembered about you has been deleted.');
+		}
+	}
+
+	/**
+	 * Server-wide memory. Anyone may teach it, because personality is a shared
+	 * thing. Writes are capped per member per day, and only an admin may wipe
+	 * everything.
+	 */
+	async _global(interaction) {
+		const sub = interaction.options.getSubcommand();
+		const userId = interaction.user.id;
+		const reply = content => interaction.reply({ content, ephemeral: true, allowedMentions: { parse: [] } });
+
+		if (sub === 'view') {
+			const notes = globalMemoryRepository.listNotes();
+			const embed = new EmbedBuilder()
+				.setColor(0x9b59b6)
+				.setTitle('Server-wide memory')
+				.setDescription(
+					notes.length
+						? notes
+								.map(
+									n => `**#${n.id}** [${n.kind}] ${n.note}${n.added_by ? ` (by ${n.added_by})` : ''}`
+								)
+								.join('\n')
+								.slice(0, 4000)
+						: 'Nothing yet. Teach it with /memory global add.'
+				)
+				.setFooter({
+					text: `${notes.length}/${config.chat.globalMemory.max} notes. Remove one with /memory global remove.`
+				});
+			return interaction.reply({ embeds: [embed], ephemeral: true });
+		}
+
+		if (sub === 'add') {
+			const note = interaction.options.getString('note', true);
+			const kind = interaction.options.getString('kind') ?? 'personality';
+			const limit = config.chat.globalMemory.perDay;
+			const used = globalMemoryRepository.countByUserSince(userId, startOfLocalDay());
+			if (used >= limit) {
+				return reply(`You already added ${limit} server-wide notes today. Try again tomorrow.`);
+			}
+			const { id, reason } = globalMemoryRepository.addNote(note, {
+				kind,
+				addedBy: userId,
+				max: config.chat.globalMemory.max
+			});
+			if (!id) {
+				return reply(`Not saved: ${reason}.`);
+			}
+			return reply(`Saved as server-wide note #${id}. It applies in every channel from the next message on.`);
+		}
+
+		if (sub === 'remove') {
+			const id = interaction.options.getInteger('id', true);
+			const note = globalMemoryRepository.getNote(id);
+			if (!note) {
+				return reply(`There is no server-wide note #${id}.`);
+			}
+			const admin = await isAdmin(userId);
+			if (note.added_by !== userId && !admin) {
+				return reply('You can only remove a server-wide note you added yourself. Ask an admin for the rest.');
+			}
+			globalMemoryRepository.removeNote(id);
+			return reply(`Removed server-wide note #${id}: ${note.note}`);
+		}
+
+		if (sub === 'clear') {
+			if (!(await isAdmin(userId))) {
+				return reply('Only a bot admin can clear server-wide memory.');
+			}
+			globalMemoryRepository.clear();
+			return reply('Every server-wide note has been removed.');
 		}
 	}
 

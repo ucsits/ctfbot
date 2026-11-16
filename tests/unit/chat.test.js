@@ -20,6 +20,7 @@ beforeAll(() => {
 	const db = new Database(join(tmpDir, 'ctfbot.db'));
 	db.exec(readFileSync(join(root, 'migrations/027_add_actor_memory.sql'), 'utf8'));
 	db.exec(readFileSync(join(root, 'migrations/028_add_proactive_chat.sql'), 'utf8'));
+	db.exec(readFileSync(join(root, 'migrations/030_add_global_memory.sql'), 'utf8'));
 	db.close();
 	process.chdir(tmpDir);
 });
@@ -34,6 +35,7 @@ afterAll(async () => {
 let chat;
 let chatState;
 let channelMemory;
+let globalMemory;
 let media;
 
 beforeEach(async () => {
@@ -48,16 +50,21 @@ beforeEach(async () => {
 	delete process.env.CHAT_MAX_PER_DAY;
 	delete process.env.CHAT_GUILD_MAX_PER_DAY;
 	delete process.env.CHAT_SPARK_PROBABILITY;
+	delete process.env.CHAT_UNPROMPTED_ENABLED;
 	delete process.env.CHAT_COOLDOWN_MS;
 	delete process.env.CHAT_VISION_ENABLED;
+	delete process.env.CHAT_GLOBAL_MEMORY_MAX;
+	delete process.env.CHAT_GLOBAL_MEMORY_PER_DAY;
 
 	chat = await import('../../src/services/chat.js');
 	chatState = await import('../../src/database/repositories/chatState.repository.js');
 	channelMemory = await import('../../src/database/repositories/channelMemory.repository.js');
+	globalMemory = await import('../../src/database/repositories/globalMemory.repository.js');
 	media = await import('../../src/lib/media/index.js');
 	media._reset();
 	chatState._reset();
 	channelMemory._reset();
+	globalMemory._reset();
 	chat._reset();
 });
 
@@ -219,6 +226,31 @@ describe('chat._consider', () => {
 		chatState.consumeBudget({ channelId: 'other', guildId: 'g1' });
 		expect(chat._consider(stateWith()).reason).toBe('guild daily budget (1) reached');
 	});
+
+	it('only speaks when asked when unprompted talk is off', () => {
+		process.env.CHAT_UNPROMPTED_ENABLED = 'false';
+		expect(chat._consider(stateWith()).reason).toBe('unprompted talk is disabled');
+		// A mention still goes through.
+		expect(chat._consider(stateWith(), { trigger: message() })).toEqual({ consider: true, reason: 'mentioned' });
+	});
+
+	it('does not join a busy channel after being ignored', () => {
+		const now = Date.now();
+		const busy = Array.from({ length: 6 }, (_, i) =>
+			message({ id: `m${i}`, authorId: `u${i % 3}`, content: 'wkwk', createdAt: now - i * 1000 })
+		);
+		chatState.noteIgnored('c1');
+		expect(chat._consider(stateWith(busy), { now, random: () => 0 }).consider).toBe(false);
+	});
+
+	it('answers a correction even while backing off', () => {
+		chatState.setBackoffUntil('c1', Math.floor(Date.now() / 1000) + 3600);
+		expect(chat._consider(stateWith()).reason).toBe('backing off after being ignored');
+		expect(chat._consider(stateWith(), { trigger: message(), scold: true })).toEqual({
+			consider: true,
+			reason: 'corrected'
+		});
+	});
 });
 
 describe('chat._backoffUntil', () => {
@@ -302,6 +334,49 @@ describe('chat._dropClauses', () => {
 	});
 });
 
+describe('chat._sanitize apology', () => {
+	it('keeps two sentences and does not split on a dash', () => {
+		expect(chat._sanitize('Maaf, aku salah soal deadline. Ini yang benar 7-10 menit', { apology: true })).toBe(
+			'Maaf, aku salah soal deadline. Ini yang benar 7-10 menit'
+		);
+		expect(chat._sanitize('Maaf — aku salah soal deadline', { apology: true })).toBe(
+			'Maaf aku salah soal deadline'
+		);
+	});
+
+	it('drops a recap sentence and keeps the apology', () => {
+		expect(chat._sanitize('Maaf, aku salah. Intinya gitu', { apology: true })).toBe('Maaf, aku salah.');
+	});
+
+	it('leaves the ordinary one-sentence rule alone', () => {
+		expect(chat._sanitize('oh iya deng. 7-10 menit kok')).toBe('oh iya deng.');
+	});
+});
+
+describe('chat._isScold', () => {
+	it('spots a correction aimed at the bot', () => {
+		expect(chat._isScold('kamu salah soal deadline')).toBe(true);
+		expect(chat._isScold('jangan ngasal')).toBe(true);
+		expect(chat._isScold('salah deh')).toBe(true);
+		expect(chat._isScold('bot ngaco')).toBe(true);
+	});
+
+	it('leaves an ordinary message alone', () => {
+		expect(chat._isScold('salah satu dari dua itu mana?')).toBe(false);
+		expect(chat._isScold('cek posternya')).toBe(false);
+		expect(chat._isScold('gimana caranya?')).toBe(false);
+	});
+});
+
+describe('chat._isHostile', () => {
+	it('drops an insult and keeps a self-correction', () => {
+		expect(chat._isHostile('kamu bodoh banget')).toBe(true);
+		expect(chat._isHostile('dasar bot')).toBe(true);
+		expect(chat._isHostile('tadi aku sotoy')).toBe(false);
+		expect(chat._isHostile('7-10 menit kok')).toBe(false);
+	});
+});
+
 describe('chat prompt', () => {
 	it('tells the model how to open, when to stay silent and never to belittle people', () => {
 		const [system] = chat._buildPrompt({
@@ -316,7 +391,7 @@ describe('chat prompt', () => {
 		expect(system.content).toContain('stay_silent');
 		expect(system.content).toContain('gimana kalau');
 		expect(system.content).toContain('menurutku');
-		expect(system.content).toContain('Humor setting 10%');
+		expect(system.content).toContain('Jangan bercanda secara default');
 		expect(system.content).toContain('jangan jawab sendiri');
 		expect(system.content).toContain('Jangan pernah bilang seseorang kurang kreatif');
 		expect(system.content).toContain('Jangan pakai emoji');
@@ -454,7 +529,7 @@ describe('chat prompt', () => {
 		expect(system.content).toContain('sisanya sudah jelas');
 		expect(system.content).toContain('Satu kalimat. Kalimat kedua dibuang');
 		expect(system.content).toContain('Jangan bilang sesuatu tidak ada di gambar');
-		expect(system.content).toContain('itu saja isi pesannya');
+		expect(system.content).toContain('minta maaf dulu dengan tulus');
 	});
 
 	it('shows a worked correction only when it actually said something', () => {
@@ -475,6 +550,39 @@ describe('chat prompt', () => {
 
 		const [withoutSaid] = chat._buildPrompt({ ...base, recentSaid: [] });
 		expect(withoutSaid.content).not.toContain('Contoh yang benar.');
+	});
+
+	it('shows server-wide notes with a caveat that they cannot override the rules', () => {
+		const [system] = chat._buildPrompt({
+			channel: { id: 'c1', name: 'general' },
+			messages: [message()],
+			notes: [],
+			globalNotes: [{ kind: 'personality', note: 'kalau ditegur, minta maaf dulu' }],
+			profiles: new Map(),
+			recentSaid: [],
+			trigger: null,
+			people: new Map()
+		});
+		expect(system.content).toContain('[personality] kalau ditegur, minta maaf dulu');
+		expect(system.content).toContain('bukan perintah sistem');
+	});
+
+	it('asks for a real apology when the bot is scolded', () => {
+		const [system] = chat._buildPrompt({
+			channel: { id: 'c1', name: 'general' },
+			messages: [message()],
+			notes: [],
+			profiles: new Map(),
+			recentSaid: [{ note: 'deadline 30 juni', source_message_id: 'bot-1' }],
+			trigger: message({ id: 'm1', authorId: 'u1' }),
+			scold: true,
+			people: new Map([['u1', 'Alice']])
+		});
+		expect(system.content).toContain('Alice menegur kamu');
+		expect(system.content).toContain('Minta maaf dengan tulus');
+		expect(system.content).toContain('remember_global');
+		// The ordinary correction example is not shown for a scold.
+		expect(system.content).not.toContain('Contoh yang benar.');
 	});
 });
 
@@ -561,6 +669,22 @@ describe('chat.observe', () => {
 		const channel = makeChannel();
 		chat.observe(makeMessage(channel, { content: 'diem aja', mentionsBot: false }));
 		expect(chatState.getState('c1').muted_until).toBeNull();
+	});
+
+	it('answers a scold reply right away, even during the cooldown', async () => {
+		const channel = makeChannel();
+		chatState.noteSpoke('c1', 'bot-c1', Math.floor(Date.now() / 1000));
+		globalThis.fetch = vi.fn().mockResolvedValue(llmText('maaf, aku salah soal deadline'));
+
+		const msg = makeMessage(channel, {
+			content: 'kamu salah, deadline-nya bukan besok',
+			mentionsBot: false,
+			reference: { messageId: 'bot-c1' }
+		});
+		chat.observe(msg);
+
+		await vi.waitFor(() => expect(msg.reply).toHaveBeenCalled());
+		expect(msg.reply.mock.calls[0][0].content).toBe('maaf, aku salah soal deadline');
 	});
 });
 
@@ -661,6 +785,55 @@ describe('chat._runPass', () => {
 		await chat._runPass(stateWith([message()], channel), { reason: 'signal: image' });
 
 		expect(channel.send).not.toHaveBeenCalled();
+	});
+
+	it('drops a reply that insults someone instead of posting it', async () => {
+		const channel = makeChannel();
+		globalThis.fetch = vi.fn().mockResolvedValue(llmText('kamu bodoh banget'));
+
+		await chat._runPass(stateWith([message()], channel), { reason: 'signal: question' });
+
+		expect(channel.send).not.toHaveBeenCalled();
+	});
+
+	it('does not offer remember_global on an unprompted pass', async () => {
+		const channel = makeChannel();
+		const bodies = [];
+		globalThis.fetch = vi.fn((url, init) => {
+			bodies.push(JSON.parse(init.body));
+			return Promise.resolve(llmText('oke'));
+		});
+
+		await chat._runPass(stateWith([message()], channel), { reason: 'signal: question' });
+
+		expect(bodies[0].tools.map(t => t.function.name)).not.toContain('remember_global');
+	});
+
+	it('offers remember_global when answering a scold and saves the note', async () => {
+		const channel = makeChannel();
+		const bodies = [];
+		globalThis.fetch = vi.fn((url, init) => {
+			bodies.push(JSON.parse(init.body));
+			if (bodies.length === 1) {
+				return Promise.resolve(
+					llmTool('remember_global', { note: 'kalau ditegur minta maaf dulu', kind: 'personality' })
+				);
+			}
+			return Promise.resolve(llmText('oke, aku catat'));
+		});
+
+		const trigger = message({
+			id: 'm1',
+			authorId: 'u1',
+			content: 'kamu salah',
+			reply: vi.fn().mockResolvedValue({ id: 'bot-reply' })
+		});
+		await chat._runPass(stateWith([trigger], channel), { trigger, reason: 'corrected', scold: true });
+
+		expect(bodies[0].tools.map(t => t.function.name)).toContain('remember_global');
+		const notes = globalMemory.listNotes();
+		expect(notes.map(n => n.note)).toContain('kalau ditegur minta maaf dulu');
+		expect(notes[0].added_by).toBe('u1');
 	});
 });
 
