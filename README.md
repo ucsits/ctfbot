@@ -688,13 +688,16 @@ screen. A few rules in the prompt do the work.
 - **It can take a correction.** Its own recent messages are in the prompt with
   their ids, so a member saying "cek posternya" can be met with "oh iya deng"
   followed by the fact, instead of a fresh lecture.
-- **One clause per sentence.** "sentence 1, sentence 2" is not how anyone
-  chats, so a non-list comma is filtered in code, not just asked for in the
-  prompt. The text up to the first such comma is kept and the rest is dropped,
-  which is why the model's only way to keep both thoughts is to use a period.
-  A list ("elektro, komputer, elektronika"), a decimal ("1,5 menit") and a URL
-  are left alone. A reply that is nothing but filler after filtering is not
-  posted at all.
+- **One sentence, enforced in code.** A second sentence is dropped, and so is
+  everything after a non-list comma. "sentence 1, sentence 2" is not how anyone
+  chats, and neither is a reply that answers the question and then adds a
+  thought nobody asked for ("oh iya deng. di poster nggak ada daftar prodi").
+  Only the first surviving sentence is posted, so the model has to lead with the
+  part that matters. A list ("elektro, komputer, elektronika"), a decimal
+  ("1,5 menit") and a URL are left alone. A reply that is nothing but filler
+  after filtering is not posted at all.
+- **No absence claims.** It does not report what a picture does not contain.
+  Nobody asked.
 
 ### Tools
 

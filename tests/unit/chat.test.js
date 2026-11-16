@@ -237,7 +237,8 @@ describe('chat._backoffUntil', () => {
 
 describe('chat._sanitize', () => {
 	it('removes em dashes, @everyone and surrounding quotes', () => {
-		expect(chat._sanitize('"eh — coba ini @everyone"')).toBe('eh. coba ini everyone');
+		expect(chat._sanitize('"eh — coba ini @everyone"')).toBe('eh.');
+		expect(chat._sanitize('"coba ini @everyone"')).toBe('coba ini everyone');
 	});
 
 	it('removes emojis', () => {
@@ -279,8 +280,15 @@ describe('chat._sanitize', () => {
 		expect(chat._sanitize('di posternya 7-10 menit. sisanya sudah jelas')).toBe('di posternya 7-10 menit.');
 	});
 
-	it('keeps two short sentences apart when the model uses periods', () => {
-		expect(chat._sanitize('oh iya deng. 7-10 menit kok')).toBe('oh iya deng. 7-10 menit kok');
+	it('posts only the first sentence, because a second one is nobody asked for it', () => {
+		expect(chat._sanitize('oh iya deng. di poster nggak ada daftar prodi')).toBe('oh iya deng.');
+		expect(chat._sanitize('di posternya 7-10 menit. oh iya deng')).toBe('di posternya 7-10 menit.');
+		expect(chat._sanitize('oh iya deng. 7-10 menit kok. sisanya jelas')).toBe('oh iya deng.');
+		expect(chat._sanitize('deadline 30 Juni\nisinya 7-10 menit')).toBe('deadline 30 Juni');
+	});
+
+	it('falls through a recap opener to the sentence that actually says something', () => {
+		expect(chat._sanitize('intinya gitu. di posternya 7-10 menit')).toBe('di posternya 7-10 menit');
 	});
 });
 
@@ -444,7 +452,9 @@ describe('chat prompt', () => {
 		expect(system.content).toContain('Kamu bukan panitia');
 		expect(system.content).toContain('bisa batal isi');
 		expect(system.content).toContain('sisanya sudah jelas');
-		expect(system.content).toContain('Satu kalimat kalau cukup, maksimal dua');
+		expect(system.content).toContain('Satu kalimat. Kalimat kedua dibuang');
+		expect(system.content).toContain('Jangan bilang sesuatu tidak ada di gambar');
+		expect(system.content).toContain('itu saja isi pesannya');
 	});
 
 	it('shows a worked correction only when it actually said something', () => {
@@ -616,7 +626,9 @@ describe('chat._runPass', () => {
 			if (searches.length === 0) {
 				return Promise.resolve(llmTool('search_web', { query: 'padding oracle' }));
 			}
-			return Promise.resolve(llmText('eh ini mirip padding oracle. coba cek https://example.com/po'));
+			// The link has to be in the first clause, because everything after a
+			// clause comma is dropped.
+			return Promise.resolve(llmText('coba cek https://example.com/po, ini mirip padding oracle'));
 		});
 
 		await chat._runPass(stateWith([message()], channel), { reason: 'signal: question' });
