@@ -528,6 +528,16 @@ Daily digests run after 04:00 Asia/Jakarta. Weekly digests run Monday after
 and task reports use Asia/Jakarta calendar boundaries, and empty results are
 explicitly reported.
 
+An **overdue digest** runs every day at 10:00 Asia/Jakarta. It lists every task
+whose deadline has passed and that is still pending. It repeats every day for as
+long as the task stays overdue, and a task drops out of the digest as soon as it
+is marked done or cancelled. Each listed task carries its own **Done** button, so
+the assignee (or anyone who can manage messages) can complete it without leaving
+the channel. The button is removed from the digest once the task is done; the
+other tasks keep theirs. A digest message carries at most 25 buttons, so a large
+overdue list is split across several messages. Days with no overdue tasks stay
+silent.
+
 **Flow**
 1. `/task add` → creates blockchain block + DB row + reminder schedule
 2. Reminder service polls `task_reminders` table every 30s

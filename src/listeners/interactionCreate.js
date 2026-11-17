@@ -6,7 +6,7 @@ const luce = require('../lib/luce');
 const { STORE_IDS } = require('../commands/store');
 const storeLayout = require('../lib/store');
 const { TASK_DONE_IDS, TASK_CANCEL_IDS } = require('../commands/task');
-const { REMINDER_IDS } = require('../services/reminder');
+const { REMINDER_IDS, OVERDUE_IDS } = require('../services/reminder');
 const taskRepository = require('../database/repositories/task.repository');
 
 // Cache gallery posters per item slug so repeated buys don't re-compose.
@@ -46,6 +46,13 @@ class StoreInteractionListener extends Listener {
 		//   remind_done:<taskId>
 		if (interaction.customId.startsWith(`${REMINDER_IDS.done}:`)) {
 			return this._handleReminderDone(interaction);
+		}
+
+		// "Mark done" button on an overdue digest. One button per task, and only
+		// the pressed button is removed so the rest of the digest stays usable.
+		//   overdue_done:<taskId>
+		if (interaction.customId.startsWith(`${OVERDUE_IDS.done}:`)) {
+			return this._handleOverdueDone(interaction);
 		}
 
 		// Task confirmation buttons for /task done and /task cancel.
@@ -281,6 +288,97 @@ class StoreInteractionListener extends Listener {
 		}
 
 		return interaction.editReply({ content: result.content, embeds: [embed], components: [] }).catch(() => {});
+	}
+
+	/**
+	 * "Mark done" on an overdue digest.
+	 *
+	 * Unlike a per-task reminder message, a digest carries one button per task,
+	 * so only the pressed button is removed. Every other task on the digest
+	 * keeps its button and can still be completed from that same message.
+	 *
+	 * The assignee, or anyone who can manage messages, may press it. It runs the
+	 * same transition as /task done: blockchain anchoring, reminder removal and
+	 * Google Calendar sync.
+	 */
+	async _handleOverdueDone(interaction) {
+		const taskId = interaction.customId.split(':')[1];
+		if (!taskId) {
+			return;
+		}
+
+		let task;
+		try {
+			task = taskRepository.getTask(taskId);
+		} catch (error) {
+			this.container.logger.error('Overdue done failed to load task', error);
+			return interaction.reply({ content: 'Failed to load the task.', ephemeral: true });
+		}
+		if (!task) {
+			return interaction.reply({ content: 'Task not found. It may have been removed.', ephemeral: true });
+		}
+
+		const canManage = Boolean(interaction.member?.permissions?.has?.(PermissionFlagsBits.ManageMessages));
+		if (interaction.user.id !== task.assigned_to && !canManage) {
+			return interaction.reply({
+				content:
+					'Only the person this task is assigned to, or someone who can manage messages, can mark it done.',
+				ephemeral: true
+			});
+		}
+
+		// Drop just this button from the digest, keeping the other tasks' buttons.
+		const remainingComponents = this._componentsWithout(interaction, interaction.customId);
+
+		if (task.status === 'done' || task.cancelled) {
+			return interaction.update({
+				content: interaction.message.content || null,
+				embeds: interaction.message.embeds,
+				components: remainingComponents
+			});
+		}
+
+		const taskCommand = this.container.stores.get('commands').get('task');
+		if (!taskCommand) {
+			return interaction.reply({ content: 'Task command is not loaded.', ephemeral: true });
+		}
+
+		// The chain append can outlast Discord's 3s acknowledgement window.
+		await interaction.deferUpdate();
+		const result = await taskCommand._executeDone(task, interaction);
+		if (typeof result !== 'object') {
+			// Nothing was recorded. Keep every button so the user can retry.
+			return interaction.followUp({ content: result, ephemeral: true });
+		}
+
+		return interaction
+			.editReply({
+				content:
+					`${interaction.message.content || ''}\n✅ **${task.title}** marked as done by ${interaction.user}`.trim(),
+				embeds: interaction.message.embeds,
+				components: remainingComponents
+			})
+			.catch(() => {});
+	}
+
+	/**
+	 * Rebuild the message's component rows without the pressed button.
+	 *
+	 * @param {import('discord.js').ButtonInteraction} interaction
+	 * @param {string} customId - customId of the button to drop
+	 * @returns {Array<object>} Component rows ready to send, empty rows removed
+	 */
+	_componentsWithout(interaction, customId) {
+		const rows = interaction.message.components || [];
+		return rows
+			.map(row => {
+				const json = typeof row.toJSON === 'function' ? row.toJSON() : row;
+				return {
+					...json,
+					components: (json.components || []).filter(component => component.custom_id !== customId)
+				};
+			})
+			.filter(row => row.components.length > 0);
 	}
 
 	/**

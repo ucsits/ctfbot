@@ -3,8 +3,10 @@
  * Background poller that checks for unsent task reminders and sends
  * them to the configured Discord channel.
  *
- * Also handles the weekly task digest (every Monday ≥5AM Asia/Jakarta)
- * and the daily task digest (every day ≥4AM Asia/Jakarta).
+ * Also handles the weekly task digest (every Monday ≥5AM Asia/Jakarta),
+ * the daily task digest (every day ≥4AM Asia/Jakarta) and the overdue task
+ * digest (every day ≥10AM Asia/Jakarta, repeating until the task is done or
+ * cancelled).
  *
  * @module services/reminder
  */
@@ -21,6 +23,16 @@ const { computePeriodRange } = require('../lib/utils/date');
 const REMINDER_IDS = {
 	done: 'remind_done'
 };
+
+// Custom id namespace for the per-task buttons on an overdue digest. The format
+// is <namespace>:<taskId>. Handled by src/listeners/interactionCreate.js.
+const OVERDUE_IDS = {
+	done: 'overdue_done'
+};
+
+// Discord allows at most 5 action rows of 5 buttons per message, so a digest
+// message can carry at most 25 "Mark done" buttons.
+const MAX_BUTTONS_PER_MESSAGE = 25;
 
 let intervalHandle = null;
 let clientRef = null;
@@ -78,10 +90,39 @@ async function poll() {
 	try {
 		weeklyDigestSentThisCycle = await pollWeeklyDigest();
 		await pollDailyDigest();
+		await pollOverdueDigest();
 		await pollReminders();
 	} finally {
 		pollInProgress = false;
 	}
+}
+
+/**
+ * Build the "Mark done" buttons for one overdue digest message. There is one
+ * button per task so the assignee can complete a task straight from the
+ * digest. Discord allows at most 5 rows of 5 buttons, so the list is capped.
+ *
+ * @param {Array<object>} tasks - Task rows carrying task_id and title
+ * @returns {ActionRowBuilder[]}
+ */
+function buildOverdueButtons(tasks) {
+	const rows = [];
+	const limited = tasks.slice(0, MAX_BUTTONS_PER_MESSAGE);
+	for (let i = 0; i < limited.length; i += 5) {
+		rows.push(
+			new ActionRowBuilder().addComponents(
+				limited
+					.slice(i, i + 5)
+					.map(t =>
+						new ButtonBuilder()
+							.setCustomId(`${OVERDUE_IDS.done}:${t.task_id}`)
+							.setLabel(`Done: ${t.title}`.slice(0, 80))
+							.setStyle(ButtonStyle.Success)
+					)
+			)
+		);
+	}
+	return rows;
 }
 
 // ──────────────────────────────────────────────
@@ -252,8 +293,25 @@ function _estimateMentionsLength(tasks) {
  * @param {string} opts.footer
  * @param {string} opts.mentionLabel
  * @param {Array<{heading: string, tasks: Array<object>}>} opts.sections
+ * @param {number} [opts.maxTasksPerMessage] - Cap on tasks per message, so a
+ *   message never carries more tasks than it has buttons for
+ * @param {(tasks: Array<object>) => Array<import('discord.js').ActionRowBuilder>} [opts.buildButtons]
+ *   - Optional per-message component rows, built from the tasks in that message
  */
-async function _sendDigest(channel, { title, color, description, footer, mentionLabel, digestKey, sections }) {
+async function _sendDigest(
+	channel,
+	{
+		title,
+		color,
+		description,
+		footer,
+		mentionLabel,
+		digestKey,
+		sections,
+		maxTasksPerMessage = Infinity,
+		buildButtons = null
+	}
+) {
 	// Flatten sections into field groups, labelling chunks when a section splits.
 	const fieldGroups = [];
 	for (const section of sections) {
@@ -269,10 +327,23 @@ async function _sendDigest(channel, { title, color, description, footer, mention
 		fieldGroups.push({ heading: 'Tasks', tasks: [] });
 	}
 
+	// A single field can hold more tasks than a message has button slots, so
+	// split any group that is still too large before packing.
+	const boundedGroups = [];
+	for (const fg of fieldGroups) {
+		if (fg.tasks.length <= maxTasksPerMessage) {
+			boundedGroups.push(fg);
+			continue;
+		}
+		for (let i = 0; i < fg.tasks.length; i += maxTasksPerMessage) {
+			boundedGroups.push({ heading: fg.heading, tasks: fg.tasks.slice(i, i + maxTasksPerMessage) });
+		}
+	}
+
 	// Pack field groups into messages, respecting Discord's per-message limits.
 	const messages = [];
 	let current = null;
-	for (const fg of fieldGroups) {
+	for (const fg of boundedGroups) {
 		const value = _formatTaskGroup(fg.tasks);
 		// Raw text length plus JSON syntax overhead per field ("name", "value",
 		// "inline" keys and quotes) so the serialized embed stays under Discord's
@@ -284,6 +355,7 @@ async function _sendDigest(channel, { title, color, description, footer, mention
 		const overflow =
 			!current ||
 			current.fields.length >= MAX_FIELDS_PER_EMBED ||
+			current.tasks.length + fg.tasks.length > maxTasksPerMessage ||
 			current.totalLen + fieldLen + messageOverhead > MAX_EMBED_TOTAL ||
 			current.mentionsLen + mentionsLen + 64 > MESSAGE_CONTENT_LIMIT;
 
@@ -318,11 +390,13 @@ async function _sendDigest(channel, { title, color, description, footer, mention
 		const mentions = _buildMentions(m.tasks);
 		const label = total > 1 ? `${mentionLabel} (part ${idx + 1}/${total})` : mentionLabel;
 		const content = _buildMentionContent(label, mentions);
+		const components = buildButtons ? buildButtons(m.tasks) : undefined;
 
 		await channel.send({
 			content,
-			allowedMentions: { users: _buildMentions(m.tasks).map(mention => mention.slice(2, -1)) },
-			embeds: [embed]
+			allowedMentions: { users: mentions.map(mention => mention.slice(2, -1)) },
+			embeds: [embed],
+			...(components && components.length > 0 ? { components } : {})
 		});
 		if (partKey) {
 			taskRepository.markDigestPartSent(partKey);
@@ -522,8 +596,83 @@ async function pollDailyDigest() {
 	return false;
 }
 
+// ──────────────────────────────────────────────
+//  Overdue task digest (every day ≥10AM JKT)
+// ──────────────────────────────────────────────
+
+/**
+ * Check if it's time for the overdue digest (≥10AM Asia/Jakarta) and send it
+ * once per day.
+ *
+ * Every pending task whose deadline has already passed is listed, every single
+ * day, until it is marked done or cancelled. Nothing is stored per task: the
+ * list is recomputed from the pending tasks and the "sent once per day"
+ * bookkeeping reuses task_digest_deliveries.
+ *
+ * Each task gets its own "Mark done" button so the assignee can complete it
+ * from the digest without leaving the channel.
+ *
+ * @param {import('discord.js').Client} [client] - Defaults to the started client
+ * @returns {Promise<boolean>} true when a digest was sent
+ */
+async function pollOverdueDigest(client = clientRef) {
+	if (!client) {
+		return false;
+	}
+
+	const nowJakarta = DateTime.now().setZone('Asia/Jakarta');
+
+	// Only send at/after 10:00 AM Jakarta time, once per day (Asia/Jakarta date)
+	const digestKey = `overdue:${nowJakarta.toISODate()}`;
+	if (nowJakarta.hour < 10 || taskRepository.hasDigestBeenSent(digestKey)) {
+		return false;
+	}
+
+	try {
+		const now = Math.floor(Date.now() / 1000);
+		// Pending, non-cancelled tasks whose deadline already passed.
+		const tasks = taskRepository.listPendingTasks({ deadlineBefore: now });
+
+		// Nothing overdue. Stay silent, but remember the day so the poller does
+		// not re-query on every cycle until midnight.
+		if (tasks.length === 0) {
+			taskRepository.markDigestSent(digestKey);
+			return false;
+		}
+
+		const channel = await client.channels.fetch(constants.REMINDER_CHANNEL_ID);
+		if (!channel?.isTextBased()) {
+			return false;
+		}
+
+		container.logger.info(`Sending overdue task digest (${nowJakarta.toISODate()})`);
+
+		await _sendDigest(channel, {
+			title: `Overdue Tasks - ${nowJakarta.toISODate()}`,
+			color: 0xe74c3c,
+			description:
+				'These tasks are past their deadline. They stay listed here every day until they are marked done or cancelled.',
+			footer: `Sent ${nowJakarta.toLocaleString(DateTime.DATE_HUGE)} at 10AM Jakarta time`,
+			mentionLabel: '**Overdue Tasks**',
+			digestKey,
+			maxTasksPerMessage: MAX_BUTTONS_PER_MESSAGE,
+			buildButtons: buildOverdueButtons,
+			sections: [{ heading: `Overdue (${tasks.length} tasks)`, tasks }]
+		});
+
+		taskRepository.markDigestSent(digestKey);
+		container.logger.info(`Overdue digest sent (${nowJakarta.toISODate()})`);
+		return true;
+	} catch (error) {
+		container.logger.error('Failed to send overdue digest', error);
+		return false;
+	}
+}
+
 module.exports = {
 	REMINDER_IDS,
+	OVERDUE_IDS,
+	MAX_BUTTONS_PER_MESSAGE,
 	startReminderService,
 	stopReminderService,
 	// Exported for testing
@@ -531,7 +680,9 @@ module.exports = {
 	pollReminders,
 	pollWeeklyDigest,
 	pollDailyDigest,
+	pollOverdueDigest,
 	buildReminderButtons,
+	buildOverdueButtons,
 	_sendDigest,
 	_groupTasksForFields,
 	_formatTaskGroup,

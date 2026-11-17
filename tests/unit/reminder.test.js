@@ -1,61 +1,48 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { createRequire } from 'module';
+
+// The service is CommonJS, so it `require`s its collaborators natively. Vitest
+// module mocks do not intercept those requires. Reach the same module instances
+// through createRequire and spy on them instead.
+const require = createRequire(import.meta.url);
+const taskRepository = require('../../src/database/repositories/task.repository.js');
+// Same instance the service requires, so assigning its logger is visible there.
+const { container } = require('@sapphire/framework');
 
 // Mock repository
-const mockClaimDueReminders = vi.fn();
-const mockMarkReminderSent = vi.fn();
-const mockReleaseReminder = vi.fn();
-const mockListPendingTasks = vi.fn();
-const mockHasDigestBeenSent = vi.fn();
-const mockMarkDigestSent = vi.fn();
-const mockClaimDigestPart = vi.fn();
-const mockMarkDigestPartSent = vi.fn();
-
-vi.mock('../../src/database/repositories/task.repository', () => ({
-	default: {
-		claimDueReminders: (...args) => mockClaimDueReminders(...args),
-		markReminderSent: (...args) => mockMarkReminderSent(...args),
-		releaseReminder: (...args) => mockReleaseReminder(...args),
-		listPendingTasks: (...args) => mockListPendingTasks(...args),
-		hasDigestBeenSent: (...args) => mockHasDigestBeenSent(...args),
-		markDigestSent: (...args) => mockMarkDigestSent(...args),
-		claimDigestPart: (...args) => mockClaimDigestPart(...args),
-		markDigestPartSent: (...args) => mockMarkDigestPartSent(...args)
-	}
-}));
-
-// Mock the container logger
-vi.mock('@sapphire/framework', () => ({
-	container: {
-		logger: {
-			info: vi.fn(),
-			error: vi.fn(),
-			warn: vi.fn()
-		}
-	}
-}));
-
-// Mock constants
-vi.mock('../../src/lib/constants/config', () => ({
-	default: {
-		REMINDER_CHANNEL_ID: '1524933314119467200'
-	}
-}));
-
-// Mock date utils
-vi.mock('../../src/lib/utils/date', () => ({
-	computePeriodRange: vi.fn(() => ({ start: 1000000000, end: 9999999999 }))
-}));
-
-import { container } from '@sapphire/framework';
-import taskRepository from '../../src/database/repositories/task.repository';
+let mockClaimDueReminders;
+let mockMarkReminderSent;
+let mockReleaseReminder;
+let mockListPendingTasks;
+let mockHasDigestBeenSent;
+let mockMarkDigestSent;
+let mockClaimDigestPart;
+let mockMarkDigestPartSent;
 
 describe('Reminder Service', () => {
 	let mod;
 
 	beforeEach(async () => {
 		vi.clearAllMocks();
+
+		mockClaimDueReminders = vi.spyOn(taskRepository, 'claimDueReminders').mockReturnValue([]);
+		mockMarkReminderSent = vi.spyOn(taskRepository, 'markReminderSent').mockReturnValue(undefined);
+		mockReleaseReminder = vi.spyOn(taskRepository, 'releaseReminder').mockReturnValue(undefined);
+		mockListPendingTasks = vi.spyOn(taskRepository, 'listPendingTasks').mockReturnValue([]);
+		mockHasDigestBeenSent = vi.spyOn(taskRepository, 'hasDigestBeenSent').mockReturnValue(false);
+		mockMarkDigestSent = vi.spyOn(taskRepository, 'markDigestSent').mockReturnValue(undefined);
+		mockClaimDigestPart = vi.spyOn(taskRepository, 'claimDigestPart').mockReturnValue(true);
+		mockMarkDigestPartSent = vi.spyOn(taskRepository, 'markDigestPartSent').mockReturnValue(undefined);
+
+		// The container has no logger until a client logs in.
+		container.logger = { info: vi.fn(), error: vi.fn(), warn: vi.fn() };
+
 		// Fresh import each test
 		mod = await import('../../src/services/reminder.js');
+	});
+
+	afterEach(() => {
+		vi.restoreAllMocks();
 	});
 
 	describe('_groupTasksForFields', () => {
@@ -281,6 +268,173 @@ describe('Reminder Service', () => {
 			expect(row.components[0].label).toBe('Mark done');
 			// ButtonStyle.Success
 			expect(row.components[0].style).toBe(3);
+		});
+	});
+
+	describe('buildOverdueButtons', () => {
+		function tasks(n) {
+			return Array.from({ length: n }, (_, i) => ({ task_id: `t${i}`, title: `Task ${i}` }));
+		}
+
+		it('adds one button per task, up to 5 per row', () => {
+			const rows = mod.buildOverdueButtons(tasks(3)).map(row => row.toJSON());
+			expect(rows).toHaveLength(1);
+			expect(rows[0].components).toHaveLength(3);
+			expect(rows[0].components[0].custom_id).toBe('overdue_done:t0');
+			expect(rows[0].components[0].label).toBe('Done: Task 0');
+			expect(rows[0].components[0].style).toBe(3);
+		});
+
+		it('uses at most 5 rows for 25 tasks', () => {
+			const rows = mod.buildOverdueButtons(tasks(25)).map(row => row.toJSON());
+			expect(rows).toHaveLength(5);
+			expect(rows.flatMap(row => row.components)).toHaveLength(25);
+		});
+
+		it('caps the button list at 25 tasks', () => {
+			const rows = mod.buildOverdueButtons(tasks(30)).map(row => row.toJSON());
+			expect(rows).toHaveLength(5);
+			expect(rows.flatMap(row => row.components)).toHaveLength(25);
+		});
+
+		it('truncates long titles to the 80 character label limit', () => {
+			const row = mod.buildOverdueButtons([{ task_id: 't1', title: 'x'.repeat(200) }])[0].toJSON();
+			expect(row.components[0].label.length).toBe(80);
+		});
+	});
+
+	describe('_sendDigest with per-task buttons', () => {
+		function makeChannel() {
+			return { send: vi.fn().mockResolvedValue({}), isTextBased: () => true };
+		}
+
+		it('never puts more tasks in a message than it has buttons for', async () => {
+			mockClaimDigestPart.mockReturnValue(true);
+			const channel = makeChannel();
+			const tasks = Array.from({ length: 60 }, (_, i) => ({
+				task_id: `task-${i}`,
+				title: `Task ${i} with a reasonably long title`,
+				assigned_to: String(i),
+				deadline: 2000000000 + i
+			}));
+
+			await mod._sendDigest(channel, {
+				title: 'Overdue Tasks',
+				color: 0xe74c3c,
+				description: 'Overdue',
+				footer: 'Sent today',
+				mentionLabel: '**Overdue Tasks**',
+				digestKey: 'overdue:2026-11-17',
+				maxTasksPerMessage: 25,
+				buildButtons: mod.buildOverdueButtons,
+				sections: [{ heading: 'Overdue (60 tasks)', tasks }]
+			});
+
+			expect(channel.send.mock.calls.length).toBeGreaterThan(1);
+
+			const seenIds = [];
+			for (const call of channel.send.mock.calls) {
+				const buttons = (call[0].components || []).flatMap(row =>
+					row.toJSON ? row.toJSON().components : row.components
+				);
+				expect(buttons.length).toBeLessThanOrEqual(25);
+				expect(buttons.length).toBeGreaterThan(0);
+				for (const button of buttons) {
+					seenIds.push(button.custom_id);
+				}
+			}
+			// Every task keeps exactly one button across the digest
+			expect(seenIds).toHaveLength(60);
+			expect(new Set(seenIds).size).toBe(60);
+		});
+
+		it('omits components when no button builder is supplied', async () => {
+			const channel = makeChannel();
+			await mod._sendDigest(channel, {
+				title: 'Daily Task Digest',
+				color: 0x3498db,
+				description: 'Daily',
+				footer: 'Sent today',
+				mentionLabel: '**Daily**',
+				sections: [{ heading: 'Today', tasks: [{ title: 'A', assigned_to: '1', deadline: 2000000000 }] }]
+			});
+			expect(channel.send.mock.calls[0][0].components).toBeUndefined();
+		});
+	});
+
+	describe('pollOverdueDigest', () => {
+		function makeClient() {
+			const channel = { send: vi.fn().mockResolvedValue({}), isTextBased: () => true };
+			return { channel, client: { channels: { fetch: vi.fn().mockResolvedValue(channel) } } };
+		}
+
+		afterEach(() => {
+			vi.useRealTimers();
+		});
+
+		it('returns false when the client is not started', async () => {
+			expect(await mod.pollOverdueDigest(null)).toBe(false);
+		});
+
+		it('does not send before 10AM Jakarta time', async () => {
+			vi.useFakeTimers();
+			// 09:59 Asia/Jakarta
+			vi.setSystemTime(new Date('2026-11-17T02:59:00Z'));
+			const { client } = makeClient();
+			expect(await mod.pollOverdueDigest(client)).toBe(false);
+			expect(mockListPendingTasks).not.toHaveBeenCalled();
+		});
+
+		it('sends the overdue digest with one button per task at 10AM Jakarta', async () => {
+			vi.useFakeTimers();
+			// 10:00 Asia/Jakarta
+			vi.setSystemTime(new Date('2026-11-17T03:00:00Z'));
+
+			mockHasDigestBeenSent.mockReturnValue(false);
+			mockClaimDigestPart.mockReturnValue(true);
+			mockListPendingTasks.mockReturnValue([
+				{ task_id: 'overdue-1', title: 'Late task', assigned_to: '42', deadline: 2000000000 }
+			]);
+
+			const { channel, client } = makeClient();
+			expect(await mod.pollOverdueDigest(client)).toBe(true);
+
+			// Only tasks whose deadline already passed are requested
+			expect(mockListPendingTasks).toHaveBeenCalledWith({
+				deadlineBefore: Math.floor(new Date('2026-11-17T03:00:00Z').getTime() / 1000)
+			});
+
+			expect(channel.send).toHaveBeenCalledTimes(1);
+			const payload = channel.send.mock.calls[0][0];
+			expect(payload.content).toContain('<@42>');
+			const buttons = payload.components.flatMap(row => row.toJSON().components);
+			expect(buttons).toHaveLength(1);
+			expect(buttons[0].custom_id).toBe('overdue_done:overdue-1');
+
+			// The day is recorded so a restart cannot resend it
+			expect(mockMarkDigestSent).toHaveBeenCalledWith('overdue:2026-11-17');
+		});
+
+		it('does not resend on a second poll the same day', async () => {
+			vi.useFakeTimers();
+			vi.setSystemTime(new Date('2026-11-17T03:00:00Z'));
+			mockHasDigestBeenSent.mockReturnValue(true);
+
+			const { channel, client } = makeClient();
+			expect(await mod.pollOverdueDigest(client)).toBe(false);
+			expect(channel.send).not.toHaveBeenCalled();
+		});
+
+		it('stays silent but marks the day when nothing is overdue', async () => {
+			vi.useFakeTimers();
+			vi.setSystemTime(new Date('2026-11-17T03:00:00Z'));
+			mockHasDigestBeenSent.mockReturnValue(false);
+			mockListPendingTasks.mockReturnValue([]);
+
+			const { channel, client } = makeClient();
+			expect(await mod.pollOverdueDigest(client)).toBe(false);
+			expect(channel.send).not.toHaveBeenCalled();
+			expect(mockMarkDigestSent).toHaveBeenCalledWith('overdue:2026-11-17');
 		});
 	});
 });
