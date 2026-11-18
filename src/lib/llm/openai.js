@@ -164,27 +164,34 @@ function parseJsonReply(reply) {
 }
 
 /**
- * Run a conversation until the model answers without calling a tool.
+ * Run a conversation until the model stops calling tools.
  *
  * `dispatch(name, args)` must return either a string (the tool result sent
- * back to the model) or `{ content, stop }`. A truthy `stop` ends the loop
- * immediately with `stopped: true` and no text, which is how the chat service
- * models a deliberate decision to stay silent.
+ * back to the model) or `{ content, stop, final?, silent? }`. A truthy `stop`
+ * ends the loop immediately. A `final` string is returned as the reply, which
+ * is how `say` models a message. `silent` or a stop without `final` means the
+ * model deliberately chose to say nothing.
+ *
+ * With `requireToolCall: true` plain assistant text is never accepted as a
+ * reply: a turn without a tool call is silence, and so is an exhausted loop.
+ * That makes the tool schema the only output channel.
  *
  * The loop is bounded twice, by `maxIterations` and by the provider timeout on
  * each request. When iterations run out, one final request is made without
- * tools so the caller still gets an answer instead of nothing.
+ * tools so the caller still gets an answer instead of nothing. In strict mode
+ * that request is skipped.
  *
  * @param {object} params
  * @param {Array<object>} params.messages
  * @param {Array<object>} params.tools - [OI]-style function tool schemas
- * @param {(name: string, args: object) => Promise<string|{content: string, stop?: boolean}>} params.dispatch
+ * @param {(name: string, args: object) => Promise<string|{content: string, stop?: boolean, final?: string, silent?: boolean}>} params.dispatch
  * @param {string} [params.toolChoice='auto']
  * @param {number} [params.maxIterations=4]
  * @param {number} [params.temperature=0]
  * @param {'low'|'medium'|'high'} [params.reasoningEffort]
+ * @param {boolean} [params.requireToolCall=false] - treat plain text as silence
  * @param {(name: string, args: object) => void} [params.onToolCall] - for logging
- * @returns {Promise<{ text: string, messages: Array<object>, toolCalls: Array<{name: string, args: object}>, stopped: boolean, exhausted: boolean }>}
+ * @returns {Promise<{ text: string, messages: Array<object>, toolCalls: Array<{name: string, args: object}>, stopped: boolean, exhausted: boolean, unclaimedText: string }>}
  */
 async function runWithTools({
 	messages,
@@ -194,6 +201,7 @@ async function runWithTools({
 	maxIterations = 4,
 	temperature = 0,
 	reasoningEffort,
+	requireToolCall = false,
 	onToolCall
 }) {
 	const convo = [...messages];
@@ -211,10 +219,25 @@ async function runWithTools({
 
 		const calls = Array.isArray(message.tool_calls) ? message.tool_calls : [];
 		if (calls.length === 0) {
-			return { text: message.content ?? '', messages: convo, toolCalls, stopped: false, exhausted: false };
+			const text = message.content ?? '';
+			if (requireToolCall) {
+				// The schema is the protocol. Text the model wrote outside a tool
+				// is reported so the caller can log it, never posted.
+				return {
+					text: '',
+					messages: convo,
+					toolCalls,
+					stopped: true,
+					exhausted: false,
+					unclaimedText: text
+				};
+			}
+			return { text, messages: convo, toolCalls, stopped: false, exhausted: false, unclaimedText: '' };
 		}
 
 		let stop = false;
+		let final = null;
+		let silent = false;
 		for (const call of calls) {
 			const name = call.function?.name ?? '';
 			const args = _parseArgs(call.function?.arguments);
@@ -231,18 +254,45 @@ async function runWithTools({
 			const content = typeof result === 'string' ? result : (result?.content ?? '');
 			if (typeof result === 'object' && result?.stop) {
 				stop = true;
+				// Silence wins if a turn somehow asks for both.
+				if (result.silent) {
+					silent = true;
+					final = null;
+				} else if (typeof result.final === 'string' && !silent) {
+					final = result.final;
+				}
 			}
 			convo.push({ role: 'tool', tool_call_id: call.id, content: String(content) });
 		}
 		if (stop) {
-			return { text: '', messages: convo, toolCalls, stopped: true, exhausted: false };
+			return {
+				text: final ?? '',
+				messages: convo,
+				toolCalls,
+				stopped: !final,
+				exhausted: false,
+				unclaimedText: ''
+			};
 		}
+	}
+
+	if (requireToolCall) {
+		// Out of iterations and nothing was said. Asking again without tools
+		// would reintroduce the text channel that strict mode exists to remove.
+		return { text: '', messages: convo, toolCalls, stopped: true, exhausted: true, unclaimedText: '' };
 	}
 
 	// Out of iterations. Ask once more with no tools. That still produces a reply.
 	const { message } = await _request({ messages: convo, temperature, reasoningEffort });
 	convo.push(message);
-	return { text: message.content ?? '', messages: convo, toolCalls, stopped: false, exhausted: true };
+	return {
+		text: message.content ?? '',
+		messages: convo,
+		toolCalls,
+		stopped: false,
+		exhausted: true,
+		unclaimedText: ''
+	};
 }
 
 /** Parse tool arguments, tolerating a provider that sends them as an object. */

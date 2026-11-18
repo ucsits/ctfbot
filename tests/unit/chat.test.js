@@ -56,6 +56,7 @@ beforeEach(async () => {
 	delete process.env.CHAT_DOCUMENTS_ENABLED;
 	delete process.env.CHAT_GLOBAL_MEMORY_MAX;
 	delete process.env.CHAT_GLOBAL_MEMORY_PER_DAY;
+	delete process.env.LLM_TOOLS_ENABLED;
 
 	chat = await import('../../src/services/chat.js');
 	chatState = await import('../../src/database/repositories/chatState.repository.js');
@@ -122,6 +123,9 @@ const llmTool = (name, args) => ({
 			]
 		})
 });
+
+/** A model reply that speaks through the `say` tool, which is the only way. */
+const llmSay = content => llmTool('say', { content });
 
 describe('chat._signal', () => {
 	it('spots a question, a link, a problem and a verifiable claim', () => {
@@ -378,6 +382,62 @@ describe('chat._isHostile', () => {
 	});
 });
 
+describe('chat._isToolNameOnly', () => {
+	it('catches a tool name written as a chat message', () => {
+		expect(chat._isToolNameOnly('stay_silent')).toBe(true);
+		expect(chat._isToolNameOnly(' "say" ')).toBe(true);
+		expect(chat._isToolNameOnly('search_web')).toBe(true);
+		expect(chat._isToolNameOnly('{"say":"stay_silent"}')).toBe(true);
+	});
+
+	it('leaves ordinary text alone', () => {
+		expect(chat._isToolNameOnly('halo semua')).toBe(false);
+		expect(chat._isToolNameOnly('coba panggil stay_silent dulu')).toBe(false);
+		expect(chat._isToolNameOnly('')).toBe(false);
+	});
+});
+
+describe('chat tools', () => {
+	it('offers say and turns it into the text to post', async () => {
+		const { createTools, TOOL_NAMES } = await import('../../src/lib/tools/index.js');
+		const toolkit = createTools({ channelId: 'c1' });
+		expect(toolkit.schemas.map(s => s.function.name)).toContain(TOOL_NAMES.say);
+		expect(await toolkit.dispatch('say', { content: '  halo   semua ' })).toEqual({
+			content: 'saying',
+			stop: true,
+			final: 'halo semua'
+		});
+	});
+
+	it('refuses an empty say so the model can retry', async () => {
+		const { createTools } = await import('../../src/lib/tools/index.js');
+		const toolkit = createTools({ channelId: 'c1' });
+		expect(await toolkit.dispatch('say', { content: '   ' })).toContain('not posted');
+	});
+
+	it('makes stay_silent a silent stop', async () => {
+		const { createTools } = await import('../../src/lib/tools/index.js');
+		const toolkit = createTools({ channelId: 'c1' });
+		expect(await toolkit.dispatch('stay_silent', { reason: 'dua orang ngobrol' })).toEqual({
+			content: 'staying silent',
+			stop: true,
+			silent: true
+		});
+	});
+});
+
+describe('chat.isEnabled', () => {
+	it('refuses to run when tool calling is turned off', () => {
+		process.env.LLM_TOOLS_ENABLED = 'false';
+		expect(chat.isEnabled()).toBe(false);
+	});
+
+	it('runs when tool calling is available', () => {
+		process.env.LLM_TOOLS_ENABLED = 'true';
+		expect(chat.isEnabled()).toBe(true);
+	});
+});
+
 describe('chat prompt', () => {
 	it('tells the model how to open, when to stay silent and never to belittle people', () => {
 		const [system] = chat._buildPrompt({
@@ -390,6 +450,8 @@ describe('chat prompt', () => {
 			people: new Map([['u1', 'Alice']])
 		});
 		expect(system.content).toContain('stay_silent');
+		expect(system.content).toContain('tool `say`');
+		expect(system.content).toContain('Teks di luar tool diabaikan');
 		expect(system.content).toContain('gimana kalau');
 		expect(system.content).toContain('menurutku');
 		expect(system.content).toContain('Jangan bercanda secara default');
@@ -612,7 +674,7 @@ describe('chat.observe', () => {
 	it('answers a mention right away in a normal channel', async () => {
 		const channel = makeChannel();
 		const msg = makeMessage(channel);
-		globalThis.fetch = vi.fn().mockResolvedValue(llmText('oke ini ya'));
+		globalThis.fetch = vi.fn().mockResolvedValue(llmSay('oke ini ya'));
 
 		chat.observe(msg);
 
@@ -627,7 +689,7 @@ describe('chat.observe', () => {
 		globalThis.fetch = vi.fn((url, init) =>
 			String(url).startsWith('https://cdn.test')
 				? Promise.resolve(imageResponse(png))
-				: Promise.resolve(llmText('poster riset FPGA ya'))
+				: Promise.resolve(llmSay('poster riset FPGA ya'))
 		);
 		const msg = makeMessage(channel, { content: '' });
 		msg.attachments = new Map([['a1', attachment(png)]]);
@@ -675,7 +737,7 @@ describe('chat.observe', () => {
 	it('answers a scold reply right away, even during the cooldown', async () => {
 		const channel = makeChannel();
 		chatState.noteSpoke('c1', 'bot-c1', Math.floor(Date.now() / 1000));
-		globalThis.fetch = vi.fn().mockResolvedValue(llmText('maaf, aku salah soal deadline'));
+		globalThis.fetch = vi.fn().mockResolvedValue(llmSay('maaf, aku salah soal deadline'));
 
 		const msg = makeMessage(channel, {
 			content: 'kamu salah, deadline-nya bukan besok',
@@ -692,7 +754,7 @@ describe('chat.observe', () => {
 describe('chat._runPass', () => {
 	it('posts the model text and records it as something it already said', async () => {
 		const channel = makeChannel();
-		globalThis.fetch = vi.fn().mockResolvedValue(llmText('menurutku coba baca ulang bagian padding-nya dulu'));
+		globalThis.fetch = vi.fn().mockResolvedValue(llmSay('menurutku coba baca ulang bagian padding-nya dulu'));
 
 		await chat._runPass(stateWith([message()], channel), { reason: 'signal: question' });
 
@@ -713,10 +775,40 @@ describe('chat._runPass', () => {
 		expect(chatState.getState('c1').last_spoke_at).toBeNull();
 	});
 
-	it('treats an empty reply as silence', async () => {
+	it('treats plain text outside a tool as silence', async () => {
 		const channel = makeChannel();
-		globalThis.fetch = vi.fn().mockResolvedValue(llmText('   '));
+		globalThis.fetch = vi.fn().mockResolvedValue(llmText('stay_silent'));
 		await chat._runPass(stateWith([message()], channel), { reason: 'signal: question' });
+		expect(channel.send).not.toHaveBeenCalled();
+	});
+
+	it('treats a JSON tool envelope written as text as silence', async () => {
+		const channel = makeChannel();
+		globalThis.fetch = vi.fn().mockResolvedValue(llmText('{"say":"stay_silent"}'));
+		await chat._runPass(stateWith([message()], channel), { reason: 'signal: question' });
+		expect(channel.send).not.toHaveBeenCalled();
+	});
+
+	it('does not fall back to plain replies when the provider rejects tool schemas', async () => {
+		const channel = makeChannel();
+		globalThis.fetch = vi.fn().mockResolvedValue({
+			ok: false,
+			status: 400,
+			text: () => Promise.resolve('{"error":{"message":"tools are not supported"}}')
+		});
+		await chat._runPass(stateWith([message()], channel), { reason: 'signal: question' });
+		expect(channel.send).not.toHaveBeenCalled();
+		expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+	});
+
+	it('stays silent when the tool loop runs out without a say', async () => {
+		const channel = makeChannel();
+		globalThis.fetch = vi
+			.fn()
+			.mockResolvedValue(llmTool('recall', { query: '' }));
+
+		await chat._runPass(stateWith([message()], channel), { reason: 'signal: question' });
+
 		expect(channel.send).not.toHaveBeenCalled();
 	});
 
@@ -753,7 +845,7 @@ describe('chat._runPass', () => {
 			}
 			// The link has to be in the first clause, because everything after a
 			// clause comma is dropped.
-			return Promise.resolve(llmText('coba cek https://example.com/po, ini mirip padding oracle'));
+			return Promise.resolve(llmSay('coba cek https://example.com/po, ini mirip padding oracle'));
 		});
 
 		await chat._runPass(stateWith([message()], channel), { reason: 'signal: question' });
@@ -768,7 +860,7 @@ describe('chat._runPass', () => {
 		globalThis.fetch = vi
 			.fn()
 			.mockResolvedValue(
-				llmText(
+				llmSay(
 					'Posternya bilang D3/D4 dan S1-S2 dari kampus manapun, sedangkan chatnya cuma elektro dan komputer. Sisanya sudah jelas.'
 				)
 			);
@@ -781,7 +873,7 @@ describe('chat._runPass', () => {
 
 	it('stays silent when the reply is nothing but filler after filtering', async () => {
 		const channel = makeChannel();
-		globalThis.fetch = vi.fn().mockResolvedValue(llmText('Sisanya sudah jelas, intinya gitu'));
+		globalThis.fetch = vi.fn().mockResolvedValue(llmSay('Sisanya sudah jelas, intinya gitu'));
 
 		await chat._runPass(stateWith([message()], channel), { reason: 'signal: image' });
 
@@ -790,7 +882,7 @@ describe('chat._runPass', () => {
 
 	it('drops a reply that insults someone instead of posting it', async () => {
 		const channel = makeChannel();
-		globalThis.fetch = vi.fn().mockResolvedValue(llmText('kamu bodoh banget'));
+		globalThis.fetch = vi.fn().mockResolvedValue(llmSay('kamu bodoh banget'));
 
 		await chat._runPass(stateWith([message()], channel), { reason: 'signal: question' });
 
@@ -802,7 +894,7 @@ describe('chat._runPass', () => {
 		const bodies = [];
 		globalThis.fetch = vi.fn((url, init) => {
 			bodies.push(JSON.parse(init.body));
-			return Promise.resolve(llmText('oke'));
+			return Promise.resolve(llmSay('oke'));
 		});
 
 		await chat._runPass(stateWith([message()], channel), { reason: 'signal: question' });
@@ -820,7 +912,7 @@ describe('chat._runPass', () => {
 					llmTool('remember_global', { note: 'kalau ditegur minta maaf dulu', kind: 'personality' })
 				);
 			}
-			return Promise.resolve(llmText('oke, aku catat'));
+			return Promise.resolve(llmSay('oke, aku catat'));
 		});
 
 		const trigger = message({
@@ -870,7 +962,7 @@ describe('chat vision', () => {
 				return Promise.resolve(imageResponse(png));
 			}
 			modelBodies.push(JSON.parse(init.body));
-			return Promise.resolve(llmText('poster riset FPGA ya, batasnya 30 juni'));
+			return Promise.resolve(llmSay('poster riset FPGA ya, batasnya 30 juni'));
 		});
 
 		const msg = message({
@@ -906,7 +998,7 @@ describe('chat vision', () => {
 					text: () => Promise.resolve('{"error":{"message":"model does not support image input"}}')
 				});
 			}
-			return Promise.resolve(llmText('poster riset FPGA ya'));
+			return Promise.resolve(llmSay('poster riset FPGA ya'));
 		});
 
 		const msg = message({ content: 'ini poster', hasVisuals: true, attachments: [attachment(png)] });
@@ -926,7 +1018,7 @@ describe('chat vision', () => {
 				return Promise.resolve({ ok: false, status: 404, text: () => Promise.resolve('gone') });
 			}
 			modelBodies.push(JSON.parse(init.body));
-			return Promise.resolve(llmText('posternya nggak kebuka, coba kirim ulang'));
+			return Promise.resolve(llmSay('posternya nggak kebuka, coba kirim ulang'));
 		});
 
 		const msg = message({
@@ -960,7 +1052,7 @@ describe('chat documents', () => {
 				return Promise.resolve(imageResponse(csvBytes));
 			}
 			modelBodies.push(JSON.parse(init.body));
-			return Promise.resolve(llmText('Alice 120, Bob 80'));
+			return Promise.resolve(llmSay('Alice 120, Bob 80'));
 		});
 
 		const msg = message({
@@ -989,7 +1081,7 @@ describe('chat documents', () => {
 				return Promise.resolve(imageResponse(pdf));
 			}
 			modelBodies.push(JSON.parse(init.body));
-			return Promise.resolve(llmText('pesertanya 42 tim'));
+			return Promise.resolve(llmSay('pesertanya 42 tim'));
 		});
 
 		const msg = message({
@@ -1020,7 +1112,7 @@ describe('chat documents', () => {
 		const modelBodies = [];
 		globalThis.fetch = vi.fn((url, init) => {
 			modelBodies.push(JSON.parse(init.body));
-			return Promise.resolve(llmText('coba kirim ulang rekapnya'));
+			return Promise.resolve(llmSay('coba kirim ulang rekapnya'));
 		});
 
 		const msg = message({

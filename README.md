@@ -704,9 +704,10 @@ and no allowlist. It can speak in any channel it can post in.
 
 The service enforces when not to speak in code.
 
-- **Silence is a tool.** The model calls `stay_silent` to decline. An empty
-  reply is treated as silence too. A broken response can never become a
-  message.
+- **Every reply is a tool call.** The model speaks by calling `say` and declines
+  by calling `stay_silent`. Plain assistant text is ignored, and a stray word
+  can never become a message. A provider that rejects tool calling disables the
+  service instead of falling back to text.
 - **The bot never triggers itself.** A pass only runs when a human spoke after
   the bot's last message. Its own messages are never buffered. It cannot
   talk itself into a monologue.
@@ -776,12 +777,13 @@ screen. A few rules in the prompt do the work.
 
 ### Tools
 
-The model can call four tools, plus one more only on a pass that answers
-someone. None of them can send a message, create a thread or touch a task. The
-service alone decides to post.
+The model speaks only through tools. `say` is the one that produces a message;
+plain assistant text is never posted. None of them can create a thread or touch
+a task. The service alone decides to post.
 
 | Tool | What it does |
 | --- | --- |
+| `say` | Post one short message. The only way to speak. |
 | `search_web` | Google via [SerpBase](https://serpbase.dev/docs). Five organic results and three "people also ask" questions, compacted to a few hundred characters. |
 | `remember` | Save a note about the channel (topic, jargon, house rules) or about a person (a lasting preference or role). |
 | `remember_global` | Save a server-wide note that tunes personality or a house rule. Only offered when answering a person, never on an unprompted pass, and capped per member per day. |

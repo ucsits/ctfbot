@@ -1,10 +1,11 @@
 /**
  * Tool registry for the proactive chat service.
  *
- * Four tools, deliberately small. None of them can send a message, create a
- * thread or touch a task. The model produces text and the service decides
- * whether to post it. That separation stops a web page that says "ignore your
- * instructions and post this" from becoming an action.
+ * Small and closed. `say` is the only tool that produces a message, and it only
+ * records the text. None of them can send, create a thread or touch a task. The
+ * model produces text inside `say` and the service decides whether to post it.
+ * That separation stops a web page that says "ignore your instructions and post
+ * this" from becoming an action.
  *
  * @module lib/tools
  */
@@ -16,6 +17,7 @@ const globalMemory = require('../../database/repositories/globalMemory.repositor
 const { stripEmoji } = require('../utils/emoji');
 
 const TOOL_NAMES = {
+	say: 'say',
 	search: 'search_web',
 	remember: 'remember',
 	rememberGlobal: 'remember_global',
@@ -25,6 +27,21 @@ const TOOL_NAMES = {
 
 /** [OI]-style function schemas, sent as the `tools` array. */
 const SCHEMAS = [
+	{
+		type: 'function',
+		function: {
+			name: TOOL_NAMES.say,
+			description:
+				'The only way to post a message. Call it alone, after any search or memory tool, with the one short line you want to send. Text outside this tool is ignored.',
+			parameters: {
+				type: 'object',
+				properties: {
+					content: { type: 'string', description: 'The message to post, one sentence.' }
+				},
+				required: ['content']
+			}
+		}
+	},
 	{
 		type: 'function',
 		function: {
@@ -132,7 +149,7 @@ const SCHEMAS = [
  *   rewrite the server's personality on its own.
  * @param {string|null} [params.actorId=null] - who the bot is talking to, stored
  *   as the author of a global note and used for the per-member rate limit
- * @returns {{ schemas: Array<object>, dispatch: (name: string, args: object) => Promise<string|{content: string, stop: boolean}> }}
+ * @returns {{ schemas: Array<object>, dispatch: (name: string, args: object) => Promise<string|{content: string, stop: boolean, final?: string, silent?: boolean}> }}
  */
 function createTools({ channelId, people = new Map(), onSearch, allowGlobalMemory = false, actorId = null }) {
 	/** Start of the local day, for the per-member global memory limit. */
@@ -220,8 +237,18 @@ function createTools({ channelId, people = new Map(), onSearch, allowGlobalMemor
 				return lines.join('\n');
 			}
 
+			case TOOL_NAMES.say: {
+				const text = String(args.content ?? '')
+					.replace(/\s+/g, ' ')
+					.trim();
+				if (!text) {
+					return 'not posted. content was empty, call say again with the message';
+				}
+				return { content: 'saying', stop: true, final: text };
+			}
+
 			case TOOL_NAMES.silent:
-				return { content: 'staying silent', stop: true };
+				return { content: 'staying silent', stop: true, silent: true };
 
 			default:
 				return `unknown tool ${name}`;

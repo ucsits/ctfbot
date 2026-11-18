@@ -111,6 +111,77 @@ describe('runWithTools', () => {
 		expect(body.tool_choice).toBe('auto');
 		expect(body.response_format).toBeUndefined();
 	});
+
+	it('returns the text a say tool recorded, not as a stopped pass', async () => {
+		globalThis.fetch = vi.fn().mockResolvedValueOnce(toolCall('say', { content: 'halo semua' }));
+		const dispatch = vi.fn().mockResolvedValue({ content: 'saying', stop: true, final: 'halo semua' });
+
+		const result = await llm.runWithTools({ messages: [{ role: 'user', content: 'hi' }], tools, dispatch });
+
+		expect(result.text).toBe('halo semua');
+		expect(result.stopped).toBe(false);
+		expect(result.toolCalls).toEqual([{ name: 'say', args: { content: 'halo semua' } }]);
+	});
+
+	it('treats plain text as silence when a tool call is required', async () => {
+		globalThis.fetch = vi.fn().mockResolvedValueOnce(text('stay_silent'));
+
+		const result = await llm.runWithTools({
+			messages: [{ role: 'user', content: 'hi' }],
+			tools,
+			dispatch: vi.fn(),
+			requireToolCall: true
+		});
+
+		expect(result.text).toBe('');
+		expect(result.stopped).toBe(true);
+		// The stray text is reported for logging, never returned as a reply.
+		expect(result.unclaimedText).toBe('stay_silent');
+	});
+
+	it('does not make a final no-tools request in strict mode', async () => {
+		globalThis.fetch = vi.fn().mockResolvedValue(toolCall('ping', {}));
+
+		const result = await llm.runWithTools({
+			messages: [{ role: 'user', content: 'hi' }],
+			tools,
+			dispatch: vi.fn().mockResolvedValue('pong'),
+			maxIterations: 2,
+			requireToolCall: true
+		});
+
+		expect(result.exhausted).toBe(true);
+		expect(result.stopped).toBe(true);
+		expect(result.text).toBe('');
+		expect(result.unclaimedText).toBe('');
+		// Two tool rounds, nothing after them.
+		expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+	});
+
+	it('lets silence win when a turn asks for both say and stay_silent', async () => {
+		globalThis.fetch = vi.fn().mockResolvedValueOnce(
+			reply({
+				role: 'assistant',
+				content: null,
+				tool_calls: [
+					{ id: 'call-1', type: 'function', function: { name: 'say', arguments: '{"content":"halo"}' } },
+					{ id: 'call-2', type: 'function', function: { name: 'stay_silent', arguments: '{"reason":"x"}' } }
+				]
+			})
+		);
+		const dispatch = vi.fn((name, args) =>
+			Promise.resolve(
+				name === 'say'
+					? { content: 'saying', stop: true, final: args.content }
+					: { content: 'staying silent', stop: true, silent: true }
+			)
+		);
+
+		const result = await llm.runWithTools({ messages: [{ role: 'user', content: 'hi' }], tools, dispatch });
+
+		expect(result.text).toBe('');
+		expect(result.stopped).toBe(true);
+	});
 });
 
 describe('chatCompletion', () => {

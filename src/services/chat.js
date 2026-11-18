@@ -9,9 +9,9 @@
  *
  * The code enforces these rules.
  *
- * - **Silence is a tool.** The model calls `stay_silent` to decline. A model
- *   that returns nothing is treated as silence too. A broken reply can never
- *   turn into a message.
+ * - **Every reply is a tool call.** The model speaks by calling `say` and
+ *   declines by calling `stay_silent`. Plain assistant text is ignored, so a
+ *   stray word can never become a message.
  * - **The bot never triggers itself.** A pass only runs when a human spoke
  *   since the bot's last message. Its own messages are never buffered.
  * - **Cost is gated before the model is called.** A cheap signal check runs
@@ -21,8 +21,8 @@
  *   cooldown, four silence it until the next day.
  * - **Mute is per channel and expires at local midnight.** The channel is
  *   quiet, every other channel is unaffected.
- * - **Tools cannot act.** Search, remember and recall only inform the text.
- *   The service alone decides to post.
+ * - **Tools cannot act.** Search, remember and recall only inform the reply.
+ *   `say` only records text. The service alone decides to post.
  *
  * @module services/chat
  */
@@ -30,7 +30,7 @@
 const { DateTime } = require('luxon');
 const config = require('../config');
 const constants = require('../lib/constants/config');
-const { chatCompletion, parseJsonReply, runWithTools } = require('../lib/llm/openai');
+const { runWithTools } = require('../lib/llm/openai');
 const { createTools, TOOL_NAMES } = require('../lib/tools');
 const { stripEmoji } = require('../lib/utils/emoji');
 const media = require('../lib/media');
@@ -96,15 +96,17 @@ const CLAIM =
 const channels = new Map();
 
 let warnedUnconfigured = false;
-// Set once when the provider rejects tool schemas. The bot then degrades to a
-// plain text reply instead of failing every pass.
-let toolsUnsupported = false;
+// Every pass has to end in `say` or `stay_silent`. Plain assistant text is
+// never posted, so a provider without tool calling cannot run this service.
+let warnedNoTools = false;
 // Set once when the provider rejects image parts. A text-only model still
 // answers, it just stops receiving pictures.
 let visionUnsupported = false;
 
 /**
  * Whether proactive chat is switched on and the model endpoint is configured.
+ * Tool calling is not optional: the reply and the silence decision both travel
+ * as tool calls, so a plain-text provider is refused outright.
  *
  * @returns {boolean}
  */
@@ -116,6 +118,13 @@ function isEnabled() {
 		if (!warnedUnconfigured) {
 			chatLog.warn('CHAT_ENABLED is true but OPENAI_API_KEY / OPENAI_MODEL are not set');
 			warnedUnconfigured = true;
+		}
+		return false;
+	}
+	if (!config.chat.toolsEnabled) {
+		if (!warnedNoTools) {
+			chatLog.warn('CHAT_ENABLED is true but LLM_TOOLS_ENABLED is false. Proactive chat needs tool calling');
+			warnedNoTools = true;
 		}
 		return false;
 	}
@@ -333,6 +342,30 @@ function _isScold(text) {
  */
 function _isHostile(text) {
 	return HOSTILE.some(pattern => pattern.test(text));
+}
+
+/**
+ * Whether a reply is nothing but a tool name or a JSON tool envelope. Strict
+ * tool calling should make this impossible, but an older prompt or a provider
+ * quirk must never turn a control word into a chat message.
+ *
+ * @param {string} text
+ * @returns {boolean}
+ */
+function _isToolNameOnly(text) {
+	const trimmed = String(text ?? '')
+		.trim()
+		.replace(/^["'`]+|["'`]+$/g, '')
+		.trim();
+	if (!trimmed) {
+		return false;
+	}
+	if (Object.values(TOOL_NAMES).includes(trimmed)) {
+		return true;
+	}
+	// {"say": "stay_silent"} or {"tool": "stay_silent"} written as prose.
+	const match = trimmed.match(/^\{\s*"(?:say|tool|name)"\s*:\s*"([^"]*)"\s*\}$/);
+	return Boolean(match && Object.values(TOOL_NAMES).includes(match[1].trim()));
 }
 
 /**
@@ -812,6 +845,12 @@ async function _runPass(state, { trigger = null, reason = '', scold = false } = 
 		chatLog.info(`Empty reply in ${_where(channel)}. Treating it as silence`);
 		return;
 	}
+	// Last line of defence against the old text leak. A model that writes a
+	// tool name instead of calling the tool must never have it posted.
+	if (_isToolNameOnly(content)) {
+		chatLog.warn(`Model wrote a tool name as text in ${_where(channel)}. Treating it as silence`);
+		return;
+	}
 	// Last line of defence. A reply that attacks a person is not posted and not
 	// rewritten, because a rude line should never have been generated at all.
 	if (_isHostile(content)) {
@@ -904,30 +943,35 @@ async function _collectDocuments(messages) {
 	}
 }
 
-/** One model round trip, with tools when the provider supports them. */
+/**
+ * One model round trip. Every reply and every silence decision is a tool call,
+ * so `say`/`stay_silent` are the only accepted outputs.
+ */
 async function _generateOnce(prompt, tools, channel) {
-	if (config.chat.toolsEnabled && !toolsUnsupported) {
-		const result = await runWithTools({
-			messages: prompt,
-			tools: tools.schemas,
-			dispatch: tools.dispatch,
-			maxIterations: MAX_TOOL_ITERATIONS,
-			onToolCall: (name, args) =>
-				chatLog.debug(`Tool ${name} in ${_where(channel)} ${_clip(JSON.stringify(args), 160)}`)
-		});
-		if (result.exhausted) {
-			chatLog.warn(`Tool loop hit its limit in ${_where(channel)}. Used the final reply`);
-		}
-		return { text: result.text, stopped: result.stopped, toolCalls: result.toolCalls ?? [] };
+	const result = await runWithTools({
+		messages: prompt,
+		tools: tools.schemas,
+		dispatch: tools.dispatch,
+		maxIterations: MAX_TOOL_ITERATIONS,
+		requireToolCall: true,
+		toolChoice: 'required',
+		onToolCall: (name, args) =>
+			chatLog.debug(`Tool ${name} in ${_where(channel)} ${_clip(JSON.stringify(args), 160)}`)
+	});
+	if (result.exhausted) {
+		chatLog.warn(`Tool loop hit its limit in ${_where(channel)}. Staying silent`);
 	}
-	const fallback = await _runWithoutTools(prompt);
-	return { text: fallback.text, stopped: fallback.stopped, toolCalls: [] };
+	if (result.unclaimedText) {
+		chatLog.warn(`Model wrote outside a tool in ${_where(channel)}. Ignored ${_clip(result.unclaimedText, 160)}`);
+	}
+	return { text: result.text, stopped: result.stopped, toolCalls: result.toolCalls ?? [] };
 }
 
 /**
  * Run a pass and degrade instead of failing. A provider without vision gets
- * the text-only prompt once and is never asked for images again. A provider
- * without tool schemas gets the JSON fallback. Both are logged once.
+ * the text-only prompt once and is never asked for images again. Tool calling
+ * is not degraded: a provider that rejects the schemas fails the pass, because
+ * losing the tool channel is what lets stray text become a message.
  *
  * @returns {Promise<{ text: string, stopped: boolean, toolCalls: Array<object> }|null>}
  */
@@ -945,24 +989,14 @@ async function _generate(prompt, options, tools) {
 	}
 
 	for (;;) {
-		let degraded = false;
-
-		if (current.imageParts?.length > 0 && !visionUnsupported && _isVisionRejection(lastError)) {
-			visionUnsupported = true;
-			chatLog.warn(
-				`Provider rejected image input in ${_where(channel)}. Falling back to text only (${lastError.message})`
-			);
-			current = { ...current, imageParts: [] };
-			degraded = true;
-		} else if (!toolsUnsupported && /tool/i.test(lastError?.message ?? '')) {
-			toolsUnsupported = true;
-			chatLog.warn(`Provider rejected tool schemas. Falling back to plain replies (${lastError.message})`);
-			degraded = true;
-		}
-
-		if (!degraded) {
+		if (!(current.imageParts?.length > 0 && !visionUnsupported && _isVisionRejection(lastError))) {
 			break;
 		}
+		visionUnsupported = true;
+		chatLog.warn(
+			`Provider rejected image input in ${_where(channel)}. Falling back to text only (${lastError.message})`
+		);
+		current = { ...current, imageParts: [] };
 		try {
 			return await _generateOnce(_buildPrompt(current), tools, channel);
 		} catch (error) {
@@ -970,7 +1004,14 @@ async function _generate(prompt, options, tools) {
 		}
 	}
 
-	chatLog.warn(`Model call failed in ${_where(channel)} ${lastError?.message ?? 'unknown error'}`);
+	const detail = lastError?.message ?? 'unknown error';
+	if (lastError && /tool/i.test(`${lastError.body ?? ''} ${detail}`)) {
+		chatLog.warn(
+			`Model call failed in ${_where(channel)} ${detail}. Proactive chat needs tool calling and tool_choice=required`
+		);
+		return null;
+	}
+	chatLog.warn(`Model call failed in ${_where(channel)} ${detail}`);
 	return null;
 }
 
@@ -1013,20 +1054,6 @@ function _flattenContent(content) {
 			return `[${part?.type ?? 'part'}]`;
 		})
 		.join('\n');
-}
-
-/**
- * Degraded path for providers that reject tool schemas. JSON mode is
- * supported everywhere `chatCompletion` is already used. The model returns
- * `{"say": ""}` to stay silent.
- *
- * @returns {Promise<{ text: string, stopped: boolean }>}
- */
-async function _runWithoutTools(prompt) {
-	const reply = await chatCompletion({ messages: prompt, json: true, temperature: 0.7 });
-	const parsed = parseJsonReply(reply);
-	const say = typeof parsed?.say === 'string' ? parsed.say : '';
-	return { text: say, stopped: !say.trim() };
 }
 
 /**
@@ -1132,7 +1159,9 @@ function _buildPrompt({
 }) {
 	const system = [
 		'Kamu anggota server Discord ini, bukan asisten dan bukan customer service. Kamu ikut ngobrol di channel kayak temen sekelas. Kalau dipanggil, jawab. Kalau tidak dipanggil, ikut hanya kalau kamu benar-benar menambah sesuatu.',
+		'Bicara hanya lewat tool `say`. Itu satu-satunya cara pesanmu terkirim. Teks di luar tool diabaikan, jadi jangan pernah menulis balasan sebagai teks biasa.',
 		'Bicara hanya kalau kamu menambah sesuatu. Itu bisa pertanyaan yang bikin orang mikir, fakta yang sudah kamu cek, sudut pandang yang belum muncul, atau tawaran yang konkret. Kalau yang mau kamu bilang cuma "wkwk", "setuju", atau mengulang yang sudah ada, panggil stay_silent.',
+		'Kalau perlu mencari atau mengingat sesuatu, panggil tool itu dulu, lalu panggil `say` sekali di giliran berikutnya. Jangan gabung `say` dengan tool lain di satu giliran.',
 		'Cara buka yang wajar itu seperti "gimana kalau...", "menurutku...", "eh kalau gitu...", "coba pikir deh...". Jangan buka dengan pengumuman tentang dirimu.',
 		'Jangan pernah mengumumkan bahwa kamu sedang memantau atau menyimpulkan sesuatu, dan jangan pernah menyebut dirimu bot atau AI. Kamu cuma ikut ngobrol.',
 		'Kalau kamu bertanya, jangan jawab sendiri di pesan yang sama, dan jangan bertanya dua hal sekaligus. Setelah bertanya, berhenti dan biarkan orang lain yang mengisi.',
@@ -1318,7 +1347,7 @@ function _reset() {
 	media._reset();
 	documents._reset();
 	warnedUnconfigured = false;
-	toolsUnsupported = false;
+	warnedNoTools = false;
 	visionUnsupported = false;
 }
 
@@ -1335,6 +1364,7 @@ module.exports = {
 	_keepSentences,
 	_isScold,
 	_isHostile,
+	_isToolNameOnly,
 	_signal,
 	_consider,
 	_backoffUntil,
